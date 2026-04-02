@@ -1,0 +1,21 @@
+# Environment
+.env
+
+# Inputs/outputs (may contain company images)
+input/
+output/
+
+# Virtual environment
+venv311/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Large binaries - users download these themselves
+realesrgan-ncnn-vulkan/
+weights/
+
+# OS
+Thumbs.db
+desktop.ini
