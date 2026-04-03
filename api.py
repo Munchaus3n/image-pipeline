@@ -11,6 +11,7 @@
 # Run:      python api.py
 
 import asyncio
+import codecs
 import json
 import platform
 import re
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import configparser
 from pathlib import Path
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,6 +87,12 @@ _CTRL_RE = re.compile(r'[\r\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 def _clean(raw: bytes) -> list[str]:
     """Decode, strip ALL terminal control codes, return non-empty lines."""
     text = raw.decode("utf-8", errors="replace")
+    text = _ANSI_RE.sub("", text)
+    text = _CTRL_RE.sub("", text)
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+def _clean_text(text: str) -> list[str]:
+    """Same as _clean but accepts already-decoded text (for incremental decoder)."""
     text = _ANSI_RE.sub("", text)
     text = _CTRL_RE.sub("", text)
     return [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -421,6 +429,11 @@ async def run_pipeline(cfg: PipelineConfig):
     async def event_stream():
         global _pipeline_running, _pipeline_proc
         _pipeline_running = True
+        # Incremental UTF-8 decoder prevents chunk boundaries from corrupting
+        # multi-byte characters like → (U+2192, 3 bytes) and ✓ (U+2713, 3 bytes).
+        # Without this, a 4096-byte boundary inside a 3-byte sequence causes
+        # errors="replace" to emit ? which breaks all frontend regex matching.
+        utf8_dec = codecs.getincrementaldecoder("utf-8")("replace")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -430,12 +443,17 @@ async def run_pipeline(cfg: PipelineConfig):
             )
             _pipeline_proc = proc
 
-            # Read in chunks — readline() misses \r-delimited progress bar lines
             while True:
                 chunk = await proc.stdout.read(4096)
                 if not chunk:
+                    # Flush remaining bytes
+                    tail = utf8_dec.decode(b"", final=True)
+                    if tail:
+                        for line in _clean_text(tail):
+                            yield {"data": line}
                     break
-                for line in _clean(chunk):
+                text = utf8_dec.decode(chunk)
+                for line in _clean_text(text):
                     yield {"data": line}
 
             await proc.wait()
@@ -495,6 +513,78 @@ async def stop_pipeline():
     _pipeline_proc    = None
     _pipeline_running = False
     return {"ok": True}
+
+
+# ── History ──────────────────────────────────────────────────────────────────
+
+HISTORY_DIR = BASE_DIR / "history"
+
+@app.get("/history/list")
+def list_history():
+    """
+    Return all pipeline runs from the history/ folder, newest first.
+    Each run folder is named YYYY-MM-DD_HHMMSS and may contain run_info.json.
+    """
+    if not HISTORY_DIR.exists():
+        return {"runs": []}
+
+    runs = []
+    for folder in sorted(HISTORY_DIR.iterdir(), reverse=True):
+        if not folder.is_dir():
+            continue
+        # Parse timestamp from folder name
+        try:
+            dt = datetime.strptime(folder.name, "%Y-%m-%d_%H%M%S")
+            date_str = dt.strftime("%d %b %Y")
+            time_str = dt.strftime("%H:%M:%S")
+        except ValueError:
+            date_str = folder.name
+            time_str = ""
+
+        # Count files
+        files = [p for p in folder.rglob("*") if p.is_file() and p.name != "run_info.json"]
+        file_count = len(files)
+
+        # Load metadata if present
+        info_path = folder / "run_info.json"
+        info = {}
+        if info_path.exists():
+            try:
+                info = json.loads(info_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        runs.append({
+            "id":         folder.name,
+            "path":       str(folder),
+            "date":       date_str,
+            "time":       time_str,
+            "files":      file_count,
+            "duration":   info.get("duration", ""),
+            "stages":     info.get("stages", []),
+            "image_count":info.get("image_count", file_count),
+        })
+
+    return {"runs": runs}
+
+
+@app.post("/history/open")
+def open_history_folder(body: dict):
+    """Open a history folder in Windows Explorer (or the OS file manager)."""
+    import subprocess as sp
+    path = body.get("path", "")
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=404, detail="Folder not found")
+    try:
+        if platform.system() == "Windows":
+            sp.Popen(["explorer", str(path)])
+        elif platform.system() == "Darwin":
+            sp.Popen(["open", str(path)])
+        else:
+            sp.Popen(["xdg-open", str(path)])
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Entry ─────────────────────────────────────────────────────────────────────

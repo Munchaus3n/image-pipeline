@@ -234,7 +234,7 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function Templates({ onBack }) {
+export default function Templates({ onBack, hideHeader }) {
   const [templates, setTemplates] = useState({});
   const [editing, setEditing] = useState(null);   // null | "new" | templateName
   const [loading, setLoading] = useState(true);
@@ -293,7 +293,8 @@ export default function Templates({ onBack }) {
         ::placeholder{color:#2e3850}
       `}</style>
 
-      {/* Header */}
+      {/* Header — hidden when nav strip is provided by Root */}
+      {!hideHeader && (
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 20px", height: 42, borderBottom: `1px solid ${C.border}`, background: C.panel
@@ -312,6 +313,14 @@ export default function Templates({ onBack }) {
           <div style={{ fontSize: 11, color: C.green, fontFamily: "JetBrains Mono" }}>{status}</div>
         )}
       </div>
+      )}
+      {/* Status feedback when header hidden */}
+      {hideHeader && status && (
+        <div style={{ padding: "4px 20px", fontSize: 11, color: C.green,
+          fontFamily: "JetBrains Mono", background: C.panel, borderBottom: `1px solid ${C.border}` }}>
+          {status}
+        </div>
+      )}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
 

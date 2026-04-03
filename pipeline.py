@@ -363,6 +363,8 @@ def main():
     if not args.non_interactive:
         Prompt.ask("  [dim]Press ENTER to start[/dim]")
 
+    run_start = datetime.now()  # track run duration
+
     # Clear previous output for this output_base only
     if output_base.exists():
         shutil.rmtree(output_base)
@@ -382,7 +384,8 @@ def main():
     else:
         skip("background removal")
 
-    stamp    = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    run_end  = datetime.now()
+    stamp    = run_end.strftime("%Y-%m-%d_%H%M%S")
     hist_dir = BASE_DIR / "history" / stamp
     hist_dir.mkdir(parents=True, exist_ok=True)
 
@@ -395,6 +398,23 @@ def main():
         if p.is_dir():
             try: p.rmdir()
             except OSError: pass
+
+    # Write run metadata so the UI history panel can display it
+    stages_run = []
+    if do_upscale: stages_run.append(f"Upscale x{ncnn_scale}")
+    if do_rembg:   stages_run.append("Remove BG")
+    run_info = {
+        "image_count": len(images),
+        "stages":      stages_run,
+        "duration":    str(run_end - run_start).split(".")[0],  # HH:MM:SS
+    }
+    try:
+        import json as _json
+        (hist_dir / "run_info.json").write_text(
+            _json.dumps(run_info, indent=2), encoding="utf-8"
+        )
+    except Exception:
+        pass
 
     ok(f"Input archived → history/{stamp}/")
 

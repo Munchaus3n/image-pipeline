@@ -54,7 +54,7 @@ function Btn({ children, onClick, style = {} }) {
   );
 }
 
-export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true }) {
+export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true, hideHeader }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const dragRef = useRef(null);
@@ -177,9 +177,9 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
 
     for (const g of Object.values(guides)) {
       const t = g.top * S, b = g.bottom * S, l = g.left * S, r = g.right * S;
-      ctx.strokeStyle = g.color + "55";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = g.color + "99";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
       ctx.beginPath();
       ctx.moveTo(0, t); ctx.lineTo(DS, t);
       ctx.moveTo(0, b); ctx.lineTo(DS, b);
@@ -193,10 +193,10 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       const g = guides[tmpl.zone];
       const t = g.top * S, b = g.bottom * S, l = g.left * S, r = g.right * S;
       ctx.setLineDash([]);
-      ctx.strokeStyle = g.color + "cc";
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = g.color;
+      ctx.lineWidth = 2.5;
       ctx.strokeRect(l, t, r - l, b - t);
-      ctx.fillStyle = g.color + "14";
+      ctx.fillStyle = g.color + "22";
       ctx.fillRect(l, t, r - l, b - t);
     }
 
@@ -427,6 +427,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         flex: 1, padding: "10px 8px 10px 12px", display: "flex",
         flexDirection: "column", gap: 8, minWidth: 0
       }}>
+        {!hideHeader && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 24 }}>
           <span style={{ fontSize: 10, letterSpacing: "0.1em", color: C.dim, textTransform: "uppercase", fontWeight: 700 }}>
             Placement Editor
@@ -439,6 +440,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
             }}>← Pipeline</button>
           </div>
         </div>
+        )}
 
         {/* Canvas + status bar centered */}
         <div style={{

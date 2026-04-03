@@ -1,0 +1,8 @@
+{
+  "image_count": 9,
+  "stages": [
+    "Upscale x4",
+    "Remove BG"
+  ],
+  "duration": "0:08:14"
+}
