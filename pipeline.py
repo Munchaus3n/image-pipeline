@@ -271,6 +271,20 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Image Pipeline")
+    parser.add_argument("--non-interactive", action="store_true",
+                        help="Skip prompts; use CLI flags (called by the API server)")
+    parser.add_argument("--input-dir",   default="",
+                        help="Input folder  (default: <script dir>/input)")
+    parser.add_argument("--output-dir",  default="",
+                        help="Output folder (default: <script dir>/output)")
+    parser.add_argument("--folder-mode", default="bulk", choices=["bulk", "clean"])
+    parser.add_argument("--no-upscale",  action="store_true")
+    parser.add_argument("--scale",       default="4", choices=["2", "4"])
+    parser.add_argument("--no-rembg",    action="store_true")
+    args = parser.parse_args()
+
     header()
 
     if not NCNN_EXE.exists():
@@ -280,39 +294,46 @@ def main():
 
     section("Configuration")
 
-    folder_mode = ask("Folder mode", [
-        ("Bulk  — all images in flat input/ folder",          "bulk"),
-        ("Clean — input/ has subfolders (category/color/…)",  "clean"),
-    ])
-
-    do_upscale = ask("Upscaling", [
-        ("Yes — NCNN Vulkan (GPU)", True),
-        ("No  — skip",             False),
-    ])
-
-    ncnn_model = NCNN_MODELS["4"]["model"]
-    ncnn_scale = NCNN_MODELS["4"]["scale"]
-
-    if do_upscale:
-        choice     = ask("Upscale factor", [
-            ("2x — faster,  realesr-animevideov3-x2", "2"),
-            ("4x — quality, realesrgan-x4plus",        "4"),
+    if args.non_interactive:
+        # ── Driven by API / CLI flags ────────────────────────────────────────
+        folder_mode = args.folder_mode
+        do_upscale  = not args.no_upscale
+        do_rembg    = not args.no_rembg
+        ncnn_model  = NCNN_MODELS[args.scale]["model"]
+        ncnn_scale  = NCNN_MODELS[args.scale]["scale"]
+    else:
+        # ── Interactive terminal mode (unchanged) ────────────────────────────
+        folder_mode = ask("Folder mode", [
+            ("Bulk  — all images in flat input/ folder",          "bulk"),
+            ("Clean — input/ has subfolders (category/color/…)",  "clean"),
         ])
-        ncnn_model = NCNN_MODELS[choice]["model"]
-        ncnn_scale = NCNN_MODELS[choice]["scale"]
-
-    do_rembg = ask("Background removal", [
-        ("Yes — BiRefNet", True),
-        ("No  — skip",     False),
-    ])
+        do_upscale = ask("Upscaling", [
+            ("Yes — NCNN Vulkan (GPU)", True),
+            ("No  — skip",             False),
+        ])
+        ncnn_model = NCNN_MODELS["4"]["model"]
+        ncnn_scale = NCNN_MODELS["4"]["scale"]
+        if do_upscale:
+            choice     = ask("Upscale factor", [
+                ("2x — faster,  realesr-animevideov3-x2", "2"),
+                ("4x — quality, realesrgan-x4plus",        "4"),
+            ])
+            ncnn_model = NCNN_MODELS[choice]["model"]
+            ncnn_scale = NCNN_MODELS[choice]["scale"]
+        do_rembg = ask("Background removal", [
+            ("Yes — BiRefNet", True),
+            ("No  — skip",     False),
+        ])
 
     if not do_upscale and not do_rembg:
         warn("Both stages skipped — nothing to do.")
         sys.exit(0)
 
-    input_dir   = BASE_DIR / "input"
-    upscale_dir = BASE_DIR / "output" / "upscaled"
-    rembg_dir   = BASE_DIR / "output" / "bg_removed"
+    # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
+    input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
+    output_base = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
+    upscale_dir = output_base / "upscaled"
+    rembg_dir   = output_base / "bg_removed"
 
     if not input_dir.exists():
         err(f"Input folder not found: {input_dir}")
@@ -339,12 +360,13 @@ def main():
     console.print(table)
     console.print()
 
-    Prompt.ask("  [dim]Press ENTER to start[/dim]")
+    if not args.non_interactive:
+        Prompt.ask("  [dim]Press ENTER to start[/dim]")
 
-    output_root = BASE_DIR / "output"
-    if output_root.exists():
-        shutil.rmtree(output_root)
-    output_root.mkdir()
+    # Clear previous output for this output_base only
+    if output_base.exists():
+        shutil.rmtree(output_base)
+    output_base.mkdir(parents=True)
     ok("Previous output cleared.")
 
     current = images
@@ -378,7 +400,7 @@ def main():
 
     console.print()
     console.print(Panel(
-        "[green]Done.[/green]  Cutouts ready in [cyan]output/bg_removed/[/cyan]\n"
+        f"[green]Done.[/green]  Cutouts ready in [cyan]{rembg_dir}[/cyan]\n"
         "[dim]Open placement editor to compose and export.[/dim]",
         border_style="cyan", title="[bold]Pipeline complete[/bold]"
     ))

@@ -1,0 +1,38 @@
+{
+  "— none —": {
+    "zone": null,
+    "hint": ""
+  },
+  "Machine": {
+    "zone": "green",
+    "hint": "Top + bottom touch green lines"
+  },
+  "Bottle 1–1.5L": {
+    "zone": "green",
+    "hint": "Top + bottom touch green lines"
+  },
+  "Bottle 0.5L": {
+    "zone": "blue",
+    "hint": "Top + bottom touch blue lines"
+  },
+  "Coffee bag large": {
+    "zone": "blue",
+    "hint": "Fill blue zone"
+  },
+  "Box large": {
+    "zone": "green",
+    "hint": "Fill green zone"
+  },
+  "Box small": {
+    "zone": "magenta",
+    "hint": "Fill magenta zone"
+  },
+  "Capsules / small": {
+    "zone": "magenta",
+    "hint": "Fill magenta zone"
+  },
+  "Combo / multipack": {
+    "zone": "green",
+    "hint": "Group fills green zone"
+  }
+}

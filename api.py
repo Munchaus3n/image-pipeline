@@ -50,7 +50,7 @@ GUIDES = {
                 "left": _g("magenta_left",434),"right": _g("magenta_right",1006),"color": "#e879f9"},
 }
 
-TEMPLATES = {
+BUILTIN_TEMPLATES = {
     "— none —":           {"zone": None,      "hint": ""},
     "Machine":            {"zone": "green",   "hint": "Top + bottom touch green lines"},
     "Bottle 1–1.5L":      {"zone": "green",   "hint": "Top + bottom touch green lines"},
@@ -71,11 +71,12 @@ def images_in_folder(folder: Path) -> list[Path]:
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
     )
 
-def detect_source_folder() -> tuple[Path, str]:
-    """Auto-detect the best available source folder."""
+def detect_source_folder(output_root: Path | None = None) -> tuple[Path, str]:
+    """Auto-detect the best available source folder under output_root."""
+    root = output_root or OUTPUT_ROOT
     for folder, label in [
-        (OUTPUT_ROOT / "bg_removed", "output/bg_removed"),
-        (OUTPUT_ROOT / "upscaled",   "output/upscaled"),
+        (root        / "bg_removed", f"{root.name}/bg_removed"),
+        (root        / "upscaled",   f"{root.name}/upscaled"),
         (BASE_DIR    / "input",      "input"),
     ]:
         if folder.exists() and any(
@@ -105,7 +106,9 @@ class SaveRequest(BaseModel):
     items:       list[PlacedItem]
     src_root:    str
     queue_index: int
-    is_combo:    bool = False
+    is_combo:    bool  = False
+    thumbnail:   bool  = True         # generate 400px white-bg thumb alongside full PNG
+    canvas_size: int | None = None    # overrides config.ini value; None = use server default
 
 class SkipRequest(BaseModel):
     image_path: str
@@ -140,17 +143,108 @@ def get_config():
     return {
         "canvas_size": CANVAS_SIZE,
         "guides":      GUIDES,
-        "templates":   TEMPLATES,
+        "templates":   _load_custom_templates(),
     }
 
 
+@app.get("/browse")
+def browse_folder(initial: str = ""):
+    """Open a native OS folder-picker dialog."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.attributes("-topmost", True)
+        root.focus_force()
+        root.withdraw()
+        folder = filedialog.askdirectory(
+            title="Select folder",
+            initialdir=initial.strip() or str(BASE_DIR),
+            parent=root,
+        )
+        root.destroy()
+        return {"path": folder or ""}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Folder dialog unavailable: {e}")
+
+
+@app.get("/browse-file")
+def browse_file(initial: str = "", filter: str = ""):
+    """Open a native OS file-picker dialog (used for template reference images)."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.attributes("-topmost", True)
+        root.focus_force()
+        root.withdraw()
+        filetypes = [("Images", "*.png *.jpg *.jpeg *.webp *.tiff"), ("All files", "*.*")] \
+            if filter == "image" else [("All files", "*.*")]
+        path = filedialog.askopenfilename(
+            title="Select reference image",
+            initialdir=Path(initial).parent if initial and Path(initial).exists() else str(BASE_DIR),
+            filetypes=filetypes,
+            parent=root,
+        )
+        root.destroy()
+        return {"path": path or ""}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File dialog unavailable: {e}")
+
+
+# ── Template CRUD ──────────────────────────────────────────────────────────────
+
+CUSTOM_TEMPLATES_FILE = BASE_DIR / "templates_custom.json"
+
+def _load_custom_templates() -> dict:
+    """Load templates from JSON. Returns empty dict on failure."""
+    if CUSTOM_TEMPLATES_FILE.exists():
+        try:
+            return json.loads(CUSTOM_TEMPLATES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+def _seed_templates():
+    """Write built-in templates to JSON on first run so the Templates tab can edit them."""
+    if not CUSTOM_TEMPLATES_FILE.exists():
+        CUSTOM_TEMPLATES_FILE.write_text(
+            json.dumps(BUILTIN_TEMPLATES, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+_seed_templates()  # runs once at server startup
+
+
+@app.get("/templates/list")
+def list_templates():
+    """Return merged built-in + custom templates."""
+    return {"templates": _load_custom_templates()}
+
+
+class TemplatesPayload(BaseModel):
+    templates: dict
+
+
+@app.post("/templates/save")
+def save_templates(payload: TemplatesPayload):
+    """Persist custom templates to templates_custom.json."""
+    CUSTOM_TEMPLATES_FILE.write_text(
+        json.dumps(payload.templates, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return {"ok": True, "count": len(payload.templates)}
+
+
 @app.get("/source")
-def get_source():
+def get_source(output_dir: str = ""):
     """
-    Auto-detect and return the best source folder.
-    React calls this once on startup.
+    Auto-detect the best source folder.
+    If output_dir is supplied (from a previous pipeline run), look there first.
+    React calls this on startup and after a pipeline run completes.
     """
-    folder, label = detect_source_folder()
+    base = Path(output_dir.strip()) if output_dir.strip() else OUTPUT_ROOT
+    folder, label = detect_source_folder(base)
     images = images_in_folder(folder)
     return {
         "folder": str(folder),
@@ -193,16 +287,16 @@ def serve_image(path: str = Query(...)):
 @app.post("/save")
 def save_composition(req: SaveRequest):
     """
-    Compose all placed items onto a 1440×1440 transparent canvas,
-    write the PNG, and also write a 400×400 white-background thumbnail.
-
-    This replicates _compose() + _write() from placement_editor.py,
-    but driven by data from the React frontend instead of tkinter state.
+    Compose all placed items onto a transparent canvas, write the PNG,
+    and optionally write a 400×400 white-background thumbnail.
+    canvas_size and thumbnail behaviour are driven by the React request.
     """
     if not req.items:
         raise HTTPException(status_code=400, detail="No items to save")
 
-    canvas = Image.new("RGBA", (CANVAS_SIZE, CANVAS_SIZE), (0, 0, 0, 0))
+    # Per-request canvas size overrides the server default
+    cs = req.canvas_size if req.canvas_size and req.canvas_size > 0 else CANVAS_SIZE
+    canvas = Image.new("RGBA", (cs, cs), (0, 0, 0, 0))
 
     for item in req.items:
         p = Path(item.image_path)
@@ -230,18 +324,19 @@ def save_composition(req: SaveRequest):
     save_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(save_path)
 
-    # 400px white-bg thumbnail
-    thumb_dir = save_path.parent / "400"
-    thumb_dir.mkdir(parents=True, exist_ok=True)
-    white = Image.new("RGBA", (CANVAS_SIZE, CANVAS_SIZE), (255, 255, 255, 255))
-    white.paste(canvas, mask=canvas.split()[3])
-    white.convert("RGB").resize((400, 400), Image.LANCZOS).save(
-        thumb_dir / save_path.name, quality=95
-    )
+    thumb_path = None
+    if req.thumbnail:
+        thumb_dir = save_path.parent / "400"
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+        white = Image.new("RGBA", (cs, cs), (255, 255, 255, 255))
+        white.paste(canvas, mask=canvas.split()[3])
+        thumb_file = thumb_dir / save_path.name
+        white.convert("RGB").resize((400, 400), Image.LANCZOS).save(thumb_file, quality=95)
+        thumb_path = str(thumb_file)
 
     return {
         "saved": str(save_path),
-        "thumb": str(thumb_dir / save_path.name),
+        "thumb": thumb_path,
     }
 
 
@@ -310,10 +405,12 @@ _pipeline_proc: asyncio.subprocess.Process | None = None  # reference so /stop c
 
 
 class PipelineConfig(BaseModel):
-    folder_mode: str   # "bulk" | "clean"
+    folder_mode: str        # "bulk" | "clean"
     do_upscale:  bool
-    scale:       str   # "2" | "4"
+    scale:       str        # "2" | "4"
     do_rembg:    bool
+    input_dir:   str = ""   # empty → pipeline.py uses its default BASE_DIR/input
+    output_dir:  str = ""   # empty → pipeline.py uses its default BASE_DIR/output
 
 
 @app.get("/pipeline/status")
@@ -336,39 +433,34 @@ async def run_pipeline(cfg: PipelineConfig):
     if _pipeline_running:
         raise HTTPException(status_code=409, detail="Pipeline already running")
 
-    # Build the argument list pipeline.py expects via stdin prompts.
-    # We patch stdin by pre-answering the Prompt.ask() calls in order:
-    #   1. folder_mode  (1=bulk, 2=clean)
-    #   2. do_upscale   (1=yes, 2=no)
-    #   3. scale        (1=2x, 2=4x)   — only if do_upscale=True
-    #   4. do_rembg     (1=yes, 2=no)
-    #   5. Enter to confirm
-    answers = []
-    answers.append("1" if cfg.folder_mode == "bulk" else "2")
-    answers.append("1" if cfg.do_upscale  else "2")
-    if cfg.do_upscale:
-        answers.append("1" if cfg.scale == "2" else "2")
-    answers.append("1" if cfg.do_rembg else "2")
-    answers.append("")   # the "Press ENTER to start" prompt
-
-    stdin_data = "\n".join(answers) + "\n"
+    # Build CLI args for pipeline.py --non-interactive mode.
+    # This replaces the old stdin-injection approach and supports custom paths.
+    cmd = [
+        sys.executable, str(BASE_DIR / "pipeline.py"),
+        "--non-interactive",
+        "--folder-mode", cfg.folder_mode,
+        "--scale",       cfg.scale,
+    ]
+    if not cfg.do_upscale:
+        cmd.append("--no-upscale")
+    if not cfg.do_rembg:
+        cmd.append("--no-rembg")
+    if cfg.input_dir.strip():
+        cmd += ["--input-dir",  cfg.input_dir.strip()]
+    if cfg.output_dir.strip():
+        cmd += ["--output-dir", cfg.output_dir.strip()]
 
     async def event_stream():
         global _pipeline_running, _pipeline_proc
         _pipeline_running = True
         try:
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, str(BASE_DIR / "pipeline.py"),
-                stdin=asyncio.subprocess.PIPE,
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,  # merge stderr into stdout
+                stderr=asyncio.subprocess.STDOUT,
                 cwd=str(BASE_DIR),
             )
-            _pipeline_proc = proc  # expose to /pipeline/stop
-
-            proc.stdin.write(stdin_data.encode())
-            await proc.stdin.drain()
-            proc.stdin.close()
+            _pipeline_proc = proc
 
             # Stream output line by line
             while True:
