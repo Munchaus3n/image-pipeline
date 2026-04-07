@@ -34,6 +34,17 @@ from rich.rule import Rule
 BASE_DIR  = Path(__file__).parent
 NCNN_EXE  = BASE_DIR / "realesrgan-ncnn-vulkan" / "realesrgan-ncnn-vulkan.exe"
 
+def _load_pipeline_settings() -> dict:
+    """Load settings.json at runtime. Returns empty dict on any error."""
+    p = BASE_DIR / "settings.json"
+    try:
+        if p.exists():
+            import json as _j
+            return _j.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
 NCNN_MODELS = {
     "2": {"model": "realesr-animevideov3-x2", "scale": "2"},
     "4": {"model": "realesrgan-x4plus",        "scale": "4"},
@@ -165,14 +176,37 @@ def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
     return Image.merge("RGBA", (r, g, b, ImageChops.lighter(blurred, inner)))
 
 
-def remove_bg(src: Path, dst: Path, session) -> bool:
+def remove_bg(src: Path, dst: Path, session, settings: dict | None = None) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
+    proc    = (settings or {}).get("processing", {})
+    padding = float(proc.get("crop_padding", 0.04))
+    blur_r  = float(proc.get("edge_blur",    1.2))
+    rembg_api = (settings or {}).get("rembg_api", {})
+
     try:
         img = Image.open(src).convert("RGBA")
+
+        # ── External BG removal API ──────────────────────────────────────────
+        if rembg_api.get("provider", "local") != "local" and rembg_api.get("url"):
+            import requests as _req, io as _io
+            headers = {}
+            if rembg_api.get("key"):
+                headers["Authorization"] = f"Bearer {rembg_api['key']}"
+            with open(src, "rb") as f:
+                resp = _req.post(rembg_api["url"].rstrip("/"),
+                                 files={"file": f}, headers=headers, timeout=60)
+            resp.raise_for_status()
+            result = Image.open(_io.BytesIO(resp.content)).convert("RGBA")
+            result = tight_crop(refine_edges(result, blur_radius=blur_r), padding=padding)
+            result.save(dst, format="PNG")
+            return True
+
+        # ── Local BiRefNet ───────────────────────────────────────────────────
         if has_transparency(src):
-            result = tight_crop(refine_edges(img))
+            result = tight_crop(refine_edges(img, blur_radius=blur_r), padding=padding)
         else:
-            result = tight_crop(refine_edges(rembg_remove(img, session=session)))
+            result = tight_crop(refine_edges(rembg_remove(img, session=session),
+                                             blur_radius=blur_r), padding=padding)
         result.save(dst, format="PNG")
         return True
     except Exception as e:
@@ -217,7 +251,8 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
 
 def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
                     dst_root: Path, src_root: Path,
-                    no_rembg_originals: set | None = None) -> list[Path]:
+                    no_rembg_originals: set | None = None,
+                    settings: dict | None = None) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
 
     no_rembg_names = {p.name for p in (no_rembg_originals or set())}
@@ -226,7 +261,11 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
     info("Loading BiRefNet — first run downloads ~170MB...")
     console.print()
 
-    session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
+    proc_s      = (settings or {}).get("processing", {})
+    rembg_model = proc_s.get("rembg_model", REMBG_MODEL)
+    rembg_api   = (settings or {}).get("rembg_api", {})
+    use_local   = rembg_api.get("provider", "local") == "local"
+    session     = new_session(rembg_model, providers=["CPUExecutionProvider"]) if use_local else None
     ok("Model loaded.")
 
     outputs, to_run = [], []
@@ -261,7 +300,7 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         task = progress.add_task("Removing BG...", total=len(to_run))
         for src, dst in to_run:
             progress.update(task, description=src.name)
-            if remove_bg(src, dst, session):
+            if remove_bg(src, dst, session, settings=settings):
                 ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}")
             progress.advance(task)
 
@@ -286,6 +325,8 @@ def main():
     args = parser.parse_args()
 
     header()
+
+    _settings = _load_pipeline_settings()  # load once per run
 
     if not NCNN_EXE.exists():
         err(f"NCNN binary not found: {NCNN_EXE}")
@@ -363,8 +404,6 @@ def main():
     if not args.non_interactive:
         Prompt.ask("  [dim]Press ENTER to start[/dim]")
 
-    run_start = datetime.now()  # track run duration
-
     # Clear previous output for this output_base only
     if output_base.exists():
         shutil.rmtree(output_base)
@@ -380,12 +419,11 @@ def main():
 
     if do_rembg:
         src_root = upscale_dir if do_upscale else input_dir
-        batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set)
+        batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set, settings=_settings)
     else:
         skip("background removal")
 
-    run_end  = datetime.now()
-    stamp    = run_end.strftime("%Y-%m-%d_%H%M%S")
+    stamp    = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     hist_dir = BASE_DIR / "history" / stamp
     hist_dir.mkdir(parents=True, exist_ok=True)
 
@@ -398,23 +436,6 @@ def main():
         if p.is_dir():
             try: p.rmdir()
             except OSError: pass
-
-    # Write run metadata so the UI history panel can display it
-    stages_run = []
-    if do_upscale: stages_run.append(f"Upscale x{ncnn_scale}")
-    if do_rembg:   stages_run.append("Remove BG")
-    run_info = {
-        "image_count": len(images),
-        "stages":      stages_run,
-        "duration":    str(run_end - run_start).split(".")[0],  # HH:MM:SS
-    }
-    try:
-        import json as _json
-        (hist_dir / "run_info.json").write_text(
-            _json.dumps(run_info, indent=2), encoding="utf-8"
-        )
-    except Exception:
-        pass
 
     ok(f"Input archived → history/{stamp}/")
 

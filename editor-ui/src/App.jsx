@@ -54,7 +54,7 @@ function Btn({ children, onClick, style = {} }) {
   );
 }
 
-export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true, hideHeader }) {
+export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const dragRef = useRef(null);
@@ -74,9 +74,24 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const [comboMode, setComboMode] = useState(false);
   const [status, setStatus] = useState("loading…");
   const [saved, setSaved] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading,        setLoading]        = useState(true);
+  const [guideOpacity,   setGuideOpacity]   = useState(0.33);   // read from settings
+  const [refImgOpacity,  setRefImgOpacity]  = useState(0.20);   // read from settings
+  const [refImgRef,      setRefImgRef]      = useState(null);    // loaded HTMLImageElement for template ref
+  const [refImgVersion,  setRefImgVersion]  = useState(0);       // bumps to trigger redraw
 
   const sel = items.find(it => it.id === selId) ?? null;
+
+  // Load template reference image as HTMLImageElement whenever template changes
+  useEffect(() => {
+    const tmpl = templates[template];
+    const src = tmpl?.ref_image;
+    if (!src) { setRefImgRef(null); return; }
+    const img = new window.Image();
+    img.onload  = () => { setRefImgRef(img); setRefImgVersion(v => v + 1); };
+    img.onerror = () => { setRefImgRef(null); };
+    img.src = src.startsWith("data:") ? src : `/api/image?path=${encodeURIComponent(src)}`;
+  }, [template, templates]);
 
   useEffect(() => {
     (async () => {
@@ -85,6 +100,12 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         // canvasSizeProp from Pipeline settings overrides the server config
         CANVAS_SIZE = canvasSizeProp ?? cfg.canvas_size;
         setGuides(cfg.guides);
+        // Read appearance settings — /config now returns cfg.settings from settings.json
+        if (cfg.settings?.appearance) {
+          const a = cfg.settings.appearance;
+          if (a.guide_opacity   != null) setGuideOpacity(a.guide_opacity);
+          if (a.ref_img_opacity != null) setRefImgOpacity(a.ref_img_opacity);
+        }
         // Load from /templates/list so edits made in Templates tab are reflected
         try {
           const tplData = await fetch("/api/templates/list").then(r => r.json());
@@ -177,9 +198,10 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
 
     for (const g of Object.values(guides)) {
       const t = g.top * S, b = g.bottom * S, l = g.left * S, r = g.right * S;
-      ctx.strokeStyle = g.color + "99";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
+      const opHex = Math.round(guideOpacity * 255).toString(16).padStart(2,"0");
+      ctx.strokeStyle = g.color + opHex;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
       ctx.beginPath();
       ctx.moveTo(0, t); ctx.lineTo(DS, t);
       ctx.moveTo(0, b); ctx.lineTo(DS, b);
@@ -193,14 +215,26 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       const g = guides[tmpl.zone];
       const t = g.top * S, b = g.bottom * S, l = g.left * S, r = g.right * S;
       ctx.setLineDash([]);
-      ctx.strokeStyle = g.color;
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = g.color + "cc";
+      ctx.lineWidth = 2;
       ctx.strokeRect(l, t, r - l, b - t);
-      ctx.fillStyle = g.color + "22";
+      ctx.fillStyle = g.color + "14";
       ctx.fillRect(l, t, r - l, b - t);
     }
 
     ctx.setLineDash([]);
+
+    // Draw template reference image at user-configured opacity
+    if (refImgRef?.complete && refImgRef.naturalWidth > 0) {
+      ctx.save();
+      ctx.globalAlpha = refImgOpacity;
+      const ri = refImgRef;
+      const rScale = Math.min(DS / ri.naturalWidth, DS / ri.naturalHeight);
+      const rw = ri.naturalWidth  * rScale;
+      const rh = ri.naturalHeight * rScale;
+      ctx.drawImage(ri, (DS - rw) / 2, (DS - rh) / 2, rw, rh);
+      ctx.restore();
+    }
 
     for (const item of items) {
       const { x, y, w, h } = itemBounds(item);
@@ -232,7 +266,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       ctx.textAlign = "left";
       ctx.fillText(info, 8, DS - 8);
     }
-  }, [items, selId, template, scaleLocked, guides, templates]);
+  }, [items, selId, template, scaleLocked, guides, templates, guideOpacity, refImgOpacity, refImgRef, refImgVersion]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -427,7 +461,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         flex: 1, padding: "10px 8px 10px 12px", display: "flex",
         flexDirection: "column", gap: 8, minWidth: 0
       }}>
-        {!hideHeader && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 24 }}>
           <span style={{ fontSize: 10, letterSpacing: "0.1em", color: C.dim, textTransform: "uppercase", fontWeight: 700 }}>
             Placement Editor
@@ -440,7 +473,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
             }}>← Pipeline</button>
           </div>
         </div>
-        )}
 
         {/* Canvas + status bar centered */}
         <div style={{

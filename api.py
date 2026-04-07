@@ -11,7 +11,6 @@
 # Run:      python api.py
 
 import asyncio
-import codecs
 import json
 import platform
 import re
@@ -20,7 +19,6 @@ import subprocess
 import sys
 import configparser
 from pathlib import Path
-from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,23 +37,97 @@ _cfg.read(BASE_DIR / "config.ini")
 CANVAS_SIZE   = _cfg.getint("canvas", "canvas_size",  fallback=1440)
 OUTPUT_ROOT   = BASE_DIR / _cfg.get("paths", "output_root",   fallback="output")
 TEMPLATES_DIR = BASE_DIR / _cfg.get("paths", "templates_dir", fallback="templates")
-SESSION_FILE  = BASE_DIR / "session.json"
+SESSION_FILE   = BASE_DIR / "session.json"
+SETTINGS_FILE  = BASE_DIR / "settings.json"
+
+# ── Default settings (written on first run) ───────────────────────────────────
+DEFAULT_SETTINGS = {
+    "processing": {
+        "crop_padding":  0.04,
+        "edge_blur":     1.2,
+        "rembg_model":   "birefnet-general",
+        "history_keep":  30,
+    },
+    "upscaler_api": {
+        "provider": "local",
+        "url":      "",
+        "key":      "",
+        "model":    "",
+    },
+    "rembg_api": {
+        "provider": "local",
+        "url":      "",
+        "key":      "",
+    },
+    "output": {
+        "canvas_size":    1440,
+        "thumbnail":      True,
+        "thumbnail_size": 400,
+        "folder_mode":    "bulk",
+        "output_dir":     "",
+    },
+    "appearance": {
+        "guide_opacity":    0.55,
+        "ref_img_opacity":  0.20,
+    },
+}
+
+def _load_settings() -> dict:
+    if SETTINGS_FILE.exists():
+        try:
+            saved = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            # Deep-merge saved over defaults so new keys always exist
+            import copy
+            merged = copy.deepcopy(DEFAULT_SETTINGS)
+            for section, vals in saved.items():
+                if section in merged and isinstance(vals, dict):
+                    merged[section].update(vals)
+                else:
+                    merged[section] = vals
+            return merged
+        except Exception:
+            pass
+    return dict(DEFAULT_SETTINGS)
+
+def _save_settings(data: dict):
+    SETTINGS_FILE.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+def _seed_settings():
+    if not SETTINGS_FILE.exists():
+        _save_settings(DEFAULT_SETTINGS)
+
+_seed_settings()
 
 SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tiff"}
 
 def _g(key, fallback):
     return _cfg.getint("guides", key, fallback=fallback)
 
-GUIDES = {
+# Base guide positions from config.ini — colors now come from settings.json
+_BASE_GUIDES = {
     "red":     {"top": _g("red_top",140),     "bottom": _g("red_bottom",1300),
-                "left": _g("red_left",140),   "right": _g("red_right",1300),   "color": "#f87171"},
+                "left": _g("red_left",140),   "right": _g("red_right",1300),   "color": "#FF0000"},
     "green":   {"top": _g("green_top",224),   "bottom": _g("green_bottom",1216),
-                "left": _g("green_left",224), "right": _g("green_right",1216), "color": "#4ade80"},
+                "left": _g("green_left",224), "right": _g("green_right",1216), "color": "#00A300"},
     "blue":    {"top": _g("blue_top",284),    "bottom": _g("blue_bottom",1156),
-                "left": _g("blue_left",284),  "right": _g("blue_right",1156),  "color": "#60a5fa"},
+                "left": _g("blue_left",284),  "right": _g("blue_right",1156),  "color": "#2E2EFF"},
     "magenta": {"top": _g("magenta_top",434), "bottom": _g("magenta_bottom",1006),
-                "left": _g("magenta_left",434),"right": _g("magenta_right",1006),"color": "#e879f9"},
+                "left": _g("magenta_left",434),"right": _g("magenta_right",1006),"color": "#FF2EFF"},
 }
+
+def _get_guides() -> dict:
+    """Return guides merged with any overrides from settings.json."""
+    import copy
+    guides = copy.deepcopy(_BASE_GUIDES)
+    s = _load_settings()
+    for zone, overrides in s.get("guides", {}).items():
+        if zone in guides and isinstance(overrides, dict):
+            guides[zone].update(overrides)
+    return guides
+
+GUIDES = _get_guides()
 
 BUILTIN_TEMPLATES = {
     "— none —":           {"zone": None,      "hint": "",                                   "ref_image": ""},
@@ -87,12 +159,6 @@ _CTRL_RE = re.compile(r'[\r\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 def _clean(raw: bytes) -> list[str]:
     """Decode, strip ALL terminal control codes, return non-empty lines."""
     text = raw.decode("utf-8", errors="replace")
-    text = _ANSI_RE.sub("", text)
-    text = _CTRL_RE.sub("", text)
-    return [ln.strip() for ln in text.splitlines() if ln.strip()]
-
-def _clean_text(text: str) -> list[str]:
-    """Same as _clean but accepts already-decoded text (for incremental decoder)."""
     text = _ANSI_RE.sub("", text)
     text = _CTRL_RE.sub("", text)
     return [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -206,10 +272,12 @@ _pipeline_proc: asyncio.subprocess.Process | None = None
 
 @app.get("/config")
 def get_config():
+    s = _load_settings()
     return {
-        "canvas_size": CANVAS_SIZE,
-        "guides":      GUIDES,
+        "canvas_size": s["output"].get("canvas_size", CANVAS_SIZE),
+        "guides":      _get_guides(),
         "templates":   _load_custom_templates(),
+        "settings":    s,
     }
 
 
@@ -258,6 +326,62 @@ def browse_file(initial: str = "", filter: str = ""):
         return {"path": path or ""}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File dialog unavailable: {e}")
+
+
+# ── Settings ─────────────────────────────────────────────────────────────────
+
+class SettingsPayload(BaseModel):
+    settings: dict
+
+@app.get("/settings")
+def get_settings():
+    return {"settings": _load_settings()}
+
+@app.post("/settings")
+def save_settings_endpoint(payload: SettingsPayload):
+    _save_settings(payload.settings)
+    # Refresh in-memory guides so /config returns updated colors immediately
+    global GUIDES
+    GUIDES = _get_guides()
+    return {"ok": True}
+
+@app.post("/settings/test-rembg")
+async def test_rembg_api(body: dict):
+    """Ping a custom BG removal API with a tiny blank PNG to verify connectivity."""
+    url = body.get("url", "").strip()
+    key = body.get("key", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="No URL provided")
+    try:
+        import httpx, base64
+        # 1x1 transparent PNG
+        tiny = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )
+        headers = {}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, files={"file": ("test.png", tiny, "image/png")}, headers=headers)
+        return {"ok": r.status_code < 500, "status": r.status_code}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/settings/test-upscaler")
+async def test_upscaler_api(body: dict):
+    """Ping a custom upscaler API."""
+    url = body.get("url", "").strip()
+    key = body.get("key", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="No URL provided")
+    try:
+        import httpx
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url, headers=headers)
+        return {"ok": r.status_code < 500, "status": r.status_code}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Templates ─────────────────────────────────────────────────────────────────
@@ -429,11 +553,6 @@ async def run_pipeline(cfg: PipelineConfig):
     async def event_stream():
         global _pipeline_running, _pipeline_proc
         _pipeline_running = True
-        # Incremental UTF-8 decoder prevents chunk boundaries from corrupting
-        # multi-byte characters like → (U+2192, 3 bytes) and ✓ (U+2713, 3 bytes).
-        # Without this, a 4096-byte boundary inside a 3-byte sequence causes
-        # errors="replace" to emit ? which breaks all frontend regex matching.
-        utf8_dec = codecs.getincrementaldecoder("utf-8")("replace")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -443,17 +562,12 @@ async def run_pipeline(cfg: PipelineConfig):
             )
             _pipeline_proc = proc
 
+            # Read in chunks — readline() misses \r-delimited progress bar lines
             while True:
                 chunk = await proc.stdout.read(4096)
                 if not chunk:
-                    # Flush remaining bytes
-                    tail = utf8_dec.decode(b"", final=True)
-                    if tail:
-                        for line in _clean_text(tail):
-                            yield {"data": line}
                     break
-                text = utf8_dec.decode(chunk)
-                for line in _clean_text(text):
+                for line in _clean(chunk):
                     yield {"data": line}
 
             await proc.wait()
@@ -513,78 +627,6 @@ async def stop_pipeline():
     _pipeline_proc    = None
     _pipeline_running = False
     return {"ok": True}
-
-
-# ── History ──────────────────────────────────────────────────────────────────
-
-HISTORY_DIR = BASE_DIR / "history"
-
-@app.get("/history/list")
-def list_history():
-    """
-    Return all pipeline runs from the history/ folder, newest first.
-    Each run folder is named YYYY-MM-DD_HHMMSS and may contain run_info.json.
-    """
-    if not HISTORY_DIR.exists():
-        return {"runs": []}
-
-    runs = []
-    for folder in sorted(HISTORY_DIR.iterdir(), reverse=True):
-        if not folder.is_dir():
-            continue
-        # Parse timestamp from folder name
-        try:
-            dt = datetime.strptime(folder.name, "%Y-%m-%d_%H%M%S")
-            date_str = dt.strftime("%d %b %Y")
-            time_str = dt.strftime("%H:%M:%S")
-        except ValueError:
-            date_str = folder.name
-            time_str = ""
-
-        # Count files
-        files = [p for p in folder.rglob("*") if p.is_file() and p.name != "run_info.json"]
-        file_count = len(files)
-
-        # Load metadata if present
-        info_path = folder / "run_info.json"
-        info = {}
-        if info_path.exists():
-            try:
-                info = json.loads(info_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-
-        runs.append({
-            "id":         folder.name,
-            "path":       str(folder),
-            "date":       date_str,
-            "time":       time_str,
-            "files":      file_count,
-            "duration":   info.get("duration", ""),
-            "stages":     info.get("stages", []),
-            "image_count":info.get("image_count", file_count),
-        })
-
-    return {"runs": runs}
-
-
-@app.post("/history/open")
-def open_history_folder(body: dict):
-    """Open a history folder in Windows Explorer (or the OS file manager)."""
-    import subprocess as sp
-    path = body.get("path", "")
-    if not path or not Path(path).exists():
-        raise HTTPException(status_code=404, detail="Folder not found")
-    try:
-        if platform.system() == "Windows":
-            sp.Popen(["explorer", str(path)])
-        elif platform.system() == "Darwin":
-            sp.Popen(["open", str(path)])
-        else:
-            sp.Popen(["xdg-open", str(path)])
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Entry ─────────────────────────────────────────────────────────────────────

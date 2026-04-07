@@ -115,15 +115,14 @@ function usePipeline() {
   // which stages are complete
   const [stagesDone, setStagesDone] = useState({ upscale: false, rembg: false });
 
-  const abortRef   = useRef(null);
-  const logRef     = useRef(null);
-  const errorRef   = useRef(null);
-  const timerRef   = useRef(null);
-  const startRef   = useRef(null);
-  const doneSet    = useRef(new Set());
-  const skipSet    = useRef(new Set());
-  const errSet     = useRef(new Set());
-  const prevLineRef = useRef("");  // track previous line for multi-line table parsing
+  const abortRef = useRef(null);
+  const logRef = useRef(null);
+  const errorRef = useRef(null);
+  const timerRef = useRef(null);
+  const startRef = useRef(null);
+  const doneSet = useRef(new Set());
+  const skipSet = useRef(new Set());
+  const errSet = useRef(new Set());
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -166,25 +165,17 @@ function usePipeline() {
       setStage("rembg");
     }
 
-    // ── Total image count ──────────────────────────────────────────────────
-    // Rich Table.grid in non-TTY pipe mode prints each column on its own line:
-    //   line N:   "Images"
-    //   line N+1: "9"
-    // So we track the previous line to catch this two-line pattern.
-    // We also try the inline pattern ("Images    9") as a fallback.
-    const totalInline = raw.match(/\bImages\s+(\d+)/i);
-    if (totalInline) {
-      setTotalImages(parseInt(totalInline[1], 10));
-    } else if (/^\d+$/.test(raw.trim()) && /\bImages\b/i.test(prevLineRef.current)) {
-      setTotalImages(parseInt(raw.trim(), 10));
-    }
-    prevLineRef.current = raw;
+    // ── Total image count from summary table ───────────────────────────────
+    // pipeline.py: table.add_row("Images", str(len(images)))
+    // After Rich grid render → "Images    9"  or "Images  9"
+    const totalM = raw.match(/\bImages\s+(\d+)/i);
+    if (totalM) setTotalImages(parseInt(totalM[1], 10));
 
     // ── Per-image completion counting (by filename, deduplicated) ─────────
-    // Match bg_removed/filename.ext or upscaled/filename.ext anywhere in line.
-    // We do NOT rely on the → arrow character because it can be corrupted at
-    // 4096-byte chunk boundaries before the incremental decoder fix takes effect.
-    const bgM = raw.match(/\bbg_removed[/\\](.+\.(?:png|jpg|jpeg|webp|tiff))/i);
+    // ok() format: "  ✓ {src.name} → bg_removed/{rel_path}"
+    // After ANSI+ctrl strip:  "✓ filename.ext → bg_removed/filename.ext"
+
+    const bgM = raw.match(/→ bg_removed[/\\](.+)$/);
     if (bgM) {
       const fname = bgM[1].split(/[/\\]/).pop();
       if (!doneSet.current.has(fname)) {
@@ -196,9 +187,10 @@ function usePipeline() {
       return;
     }
 
-    const upM = raw.match(/\bupscaled[/\\](.+\.(?:png|jpg|jpeg|webp|tiff))/i);
+    const upM = raw.match(/→ upscaled[/\\](.+)$/);
     if (upM) {
       const fname = upM[1].split(/[/\\]/).pop();
+      // Count upscaled if this is an upscale-only run (no rembg stage yet seen)
       if (!doneSet.current.has(fname)) {
         doneSet.current.add(fname);
         setImageDone(doneSet.current.size);
@@ -249,7 +241,6 @@ function usePipeline() {
     setElapsed(0); setDone(false); setRunning(true);
     setStage(null); setStagesDone({ upscale: false, rembg: false });
     doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set();
-    prevLineRef.current = "";
 
     try {
       const r = await fetch(`${BASE}/pipeline/run`, {
@@ -627,6 +618,185 @@ function Chip({ label, value, color }) {
   );
 }
 
+// ── LogPanel — tabbed log / errors / history ──────────────────────────────────
+
+function LogPanel({ logRef, errorRef, log, errors, imageError, running, done }) {
+  const [tab, setTab] = useState("log");
+  const [history, setHistory] = useState([]);
+  const [histLoading, setHistLoading] = useState(false);
+
+  const loadHistory = async () => {
+    setHistLoading(true);
+    try {
+      const r = await fetch(`${BASE}/history/list`);
+      const d = await r.json();
+      setHistory(d.runs || []);
+    } catch {}
+    setHistLoading(false);
+  };
+
+  const openFolder = async (path) => {
+    try {
+      await fetch(`${BASE}/history/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (tab === "history") loadHistory();
+  }, [tab]);
+
+  // Reload history automatically when a run finishes
+  useEffect(() => {
+    if (done) { loadHistory(); if (tab !== "history") setTab("history"); }
+  }, [done]);
+
+  const tabs = [
+    { id: "log",     label: "Output log" },
+    { id: "errors",  label: imageError > 0 ? `Errors (${imageError})` : "Errors" },
+    { id: "history", label: "History" },
+  ];
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, marginTop: 10 }}>
+      {/* Tab bar */}
+      <div style={{
+        display: "flex", borderBottom: `1px solid ${C.border}`,
+        marginBottom: 0, flexShrink: 0,
+      }}>
+        {tabs.map(t => {
+          const isErr = t.id === "errors" && imageError > 0;
+          const active = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              padding: "6px 16px", fontSize: 11, fontFamily: "inherit",
+              background:   active ? C.panel2 : "transparent",
+              color:        active ? (isErr ? C.red : C.text) : (isErr ? C.red + "99" : C.dim),
+              border:       "none",
+              borderBottom: active ? `2px solid ${isErr ? C.red : C.blue}` : "2px solid transparent",
+              borderRadius: "4px 4px 0 0",
+              cursor: "pointer", fontWeight: active ? 600 : 400,
+              marginBottom: -1,
+            }}>{t.label}</button>
+          );
+        })}
+      </div>
+
+      {/* Tab content */}
+      <div style={{
+        flex: 1, minHeight: 0, background: C.panel,
+        border: `1px solid ${C.border}`, borderTop: "none",
+        borderRadius: "0 4px 4px 4px", overflow: "hidden",
+        display: "flex", flexDirection: "column",
+      }}>
+
+        {/* Log */}
+        {tab === "log" && (
+          <div ref={logRef} style={{
+            flex: 1, overflowY: "auto",
+            padding: "10px 14px", fontFamily: "JetBrains Mono",
+            fontSize: 11, lineHeight: 1.75,
+          }}>
+            {log.length === 0 && !running ? (
+              <div style={{ color: C.dim, fontSize: 11, marginTop: 8 }}>Configure and press Run Pipeline.</div>
+            ) : log.map((e, i) => (
+              <div key={i} style={{
+                whiteSpace: "pre-wrap", wordBreak: "break-all",
+                color: KIND_COLOR[e.kind] ?? C.dim,
+                opacity: e.kind === "info" ? 0.6 : 1,
+                paddingLeft: e.kind === "section" ? 0 : 4,
+                borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
+                marginBottom: e.kind === "section" ? 2 : 0,
+              }}>
+                {e.raw}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Errors */}
+        {tab === "errors" && (
+          <div ref={errorRef} style={{
+            flex: 1, overflowY: "auto",
+            padding: "10px 14px", fontFamily: "JetBrains Mono",
+            fontSize: 11, lineHeight: 1.75,
+          }}>
+            {errors.length === 0 ? (
+              <div style={{ color: C.dim, fontSize: 11, marginTop: 8 }}>No errors</div>
+            ) : errors.map((e, i) => (
+              <div key={i} style={{
+                color: C.red, whiteSpace: "pre-wrap", wordBreak: "break-all",
+                paddingBottom: 8, marginBottom: 8,
+                borderBottom: i < errors.length - 1 ? `1px solid #2a1212` : "none",
+              }}>
+                {e.raw}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* History */}
+        {tab === "history" && (
+          <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
+            {histLoading ? (
+              <div style={{ color: C.dim, fontSize: 11, marginTop: 8 }}>Loading…</div>
+            ) : history.length === 0 ? (
+              <div style={{ color: C.dim, fontSize: 11, marginTop: 8 }}>No runs yet.</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+                {history.map(run => (
+                  <div key={run.id} style={{
+                    background: C.panel2, border: `1px solid ${C.border}`,
+                    borderRadius: 6, padding: "10px 12px",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{run.date}</span>
+                      <span style={{ fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono" }}>{run.time}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 12, marginBottom: 6, alignItems: "baseline" }}>
+                      <span style={{ fontSize: 18, fontWeight: 700, color: C.green, fontFamily: "JetBrains Mono", lineHeight: 1 }}>
+                        {run.image_count}
+                      </span>
+                      <span style={{ fontSize: 10, color: C.dim }}>images</span>
+                      {run.duration && (
+                        <span style={{ fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono", marginLeft: "auto" }}>
+                          {run.duration}
+                        </span>
+                      )}
+                    </div>
+                    {run.stages.length > 0 && (
+                      <div style={{
+                        fontSize: 10, color: C.dim, marginBottom: 8,
+                        display: "flex", gap: 4, flexWrap: "wrap",
+                      }}>
+                        {run.stages.map(s => (
+                          <span key={s} style={{
+                            background: C.panel, border: `1px solid ${C.border}`,
+                            borderRadius: 3, padding: "1px 6px", fontSize: 9,
+                          }}>{s}</span>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={() => openFolder(run.path)} style={{
+                      width: "100%", background: "transparent",
+                      color: C.blue, border: `1px solid ${C.dim2}`,
+                      borderRadius: 4, padding: "5px 0", fontSize: 10,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}>Open folder</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
@@ -638,10 +808,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
   const [outputDir, setOutputDir] = useState("");
   const [canvasSize, setCanvasSize] = useState("1440");
   const [thumbnail, setThumbnail] = useState(true);
-  const [showErrors, setShowErrors] = useState(true);
-  const [showHistory, setShowHistory] = useState(false);
-  const [history, setHistory] = useState([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  // showErrors removed — handled inside LogPanel tab state
 
   const {
     running, done, log, errors, imageDone, imageSkipped, imageError,
@@ -656,35 +823,6 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
   const handleGoToEditor = useCallback(() => {
     onGoToEditor({ outputDir: outputDir.trim(), canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
   }, [onGoToEditor, outputDir, canvasSize, thumbnail]);
-
-  const loadHistory = useCallback(async () => {
-    setHistoryLoading(true);
-    try {
-      const r = await fetch(`${BASE}/history/list`);
-      const data = await r.json();
-      setHistory(data.runs || []);
-    } catch { }
-    setHistoryLoading(false);
-  }, []);
-
-  const openHistoryFolder = useCallback(async (path) => {
-    try {
-      await fetch(`${BASE}/history/open`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path }),
-      });
-    } catch { }
-  }, []);
-
-  // Load history when panel opens, and also after pipeline finishes
-  useEffect(() => {
-    if (showHistory) loadHistory();
-  }, [showHistory, loadHistory]);
-
-  useEffect(() => {
-    if (done) loadHistory();
-  }, [done, loadHistory]);
 
   const nothingSelected = !doUpscale && !doRembg;
 
@@ -702,31 +840,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
         ::placeholder{color:#2e3850} input[type=number]{color-scheme:dark}
       `}</style>
 
-      {/* Header */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 18px", height: 44, borderBottom: `1px solid ${C.border}`,
-        background: C.panel, flexShrink: 0
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Image Pipeline</span>
-          <span style={{ fontSize: 9, color: C.dim2, fontFamily: "JetBrains Mono" }}>v3.2</span>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {onGoToTemplates && (
-            <button onClick={onGoToTemplates} style={{
-              background: "transparent", color: C.dim,
-              border: `1px solid ${C.border}`, borderRadius: 4, padding: "4px 14px",
-              fontSize: 12, cursor: "pointer", fontFamily: "inherit"
-            }}>Templates</button>
-          )}
-          <button onClick={handleGoToEditor} style={{
-            background: "transparent", color: C.dim,
-            border: `1px solid ${C.border}`, borderRadius: 4, padding: "4px 14px",
-            fontSize: 12, cursor: "pointer", fontFamily: "inherit"
-          }}>Editor →</button>
-        </div>
-      </div>
+      {/* Header removed — shared nav strip in main.jsx handles navigation */}
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
 
@@ -866,150 +980,12 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
             elapsed={elapsed} running={running} done={done}
           />
 
-          {/* Zones 3 + 4 + 5 */}
-          <div style={{ flex: 1, display: "flex", gap: 10, minHeight: 0, marginTop: 10 }}>
-
-            {/* Zone 3: output log */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-              <div style={{
-                fontSize: 10, letterSpacing: "0.12em", color: C.dim,
-                textTransform: "uppercase", fontWeight: 700, marginBottom: 6
-              }}>Output log</div>
-              <div ref={logRef} style={{
-                flex: 1, overflowY: "auto", background: C.panel,
-                border: `1px solid ${C.border}`, borderRadius: 4,
-                padding: "8px 12px", fontFamily: "JetBrains Mono",
-                fontSize: 10.5, lineHeight: 1.7
-              }}>
-                {log.length === 0 && !running ? (
-                  <div style={{ color: C.dim, fontSize: 11 }}>Configure and press Run Pipeline.</div>
-                ) : log.map((e, i) => (
-                  <div key={i} style={{
-                    whiteSpace: "pre-wrap", wordBreak: "break-all",
-                    color: KIND_COLOR[e.kind] ?? C.dim,
-                    opacity: e.kind === "info" ? 0.6 : 1,
-                    paddingLeft: e.kind === "section" ? 0 : 4,
-                    borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
-                    marginBottom: e.kind === "section" ? 2 : 0,
-                  }}>
-                    {e.raw}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Zone 4: errors (narrower) */}
-            <div style={{ width: 200, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-              <div style={{
-                display: "flex", alignItems: "center",
-                justifyContent: "space-between", marginBottom: 6
-              }}>
-                <div style={{
-                  fontSize: 10, letterSpacing: "0.12em", fontWeight: 700,
-                  textTransform: "uppercase",
-                  color: imageError > 0 ? C.red : C.dim
-                }}>
-                  Errors {imageError > 0 ? `(${imageError})` : ""}
-                </div>
-                <button onClick={() => setShowErrors(v => !v)} style={{
-                  background: "transparent", color: C.dim, border: "none",
-                  fontSize: 10, cursor: "pointer", fontFamily: "inherit", padding: 0
-                }}>
-                  {showErrors ? "▾" : "▸"}
-                </button>
-              </div>
-              {showErrors && (
-                <div ref={errorRef} style={{
-                  flex: 1, overflowY: "auto",
-                  background: imageError > 0 ? "#110808" : C.panel,
-                  border: `1px solid ${imageError > 0 ? "#3a1515" : C.border}`,
-                  borderRadius: 4, padding: "6px 10px",
-                  fontFamily: "JetBrains Mono", fontSize: 10, lineHeight: 1.6
-                }}>
-                  {errors.length === 0 ? (
-                    <div style={{ color: C.dim, fontSize: 11 }}>No errors</div>
-                  ) : errors.map((e, i) => (
-                    <div key={i} style={{
-                      color: C.red, whiteSpace: "pre-wrap",
-                      wordBreak: "break-all", paddingBottom: 6, marginBottom: 6,
-                      borderBottom: i < errors.length - 1 ? `1px solid #2a1212` : "none"
-                    }}>
-                      {e.raw}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Zone 5: history panel */}
-            <div style={{ width: 220, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-              <div style={{
-                display: "flex", alignItems: "center",
-                justifyContent: "space-between", marginBottom: 6
-              }}>
-                <div style={{
-                  fontSize: 10, letterSpacing: "0.12em", fontWeight: 700,
-                  textTransform: "uppercase", color: C.dim
-                }}>History</div>
-                <button onClick={() => setShowHistory(v => !v)} style={{
-                  background: "transparent", color: C.dim, border: "none",
-                  fontSize: 10, cursor: "pointer", fontFamily: "inherit", padding: 0
-                }}>
-                  {showHistory ? "▾" : "▸"}
-                </button>
-              </div>
-              {showHistory && (
-                <div style={{
-                  flex: 1, overflowY: "auto", background: C.panel,
-                  border: `1px solid ${C.border}`, borderRadius: 4,
-                  padding: "6px 8px",
-                }}>
-                  {historyLoading ? (
-                    <div style={{ color: C.dim, fontSize: 10, padding: 4 }}>Loading…</div>
-                  ) : history.length === 0 ? (
-                    <div style={{ color: C.dim, fontSize: 10, padding: 4 }}>No runs yet.</div>
-                  ) : history.map(run => (
-                    <div key={run.id} style={{
-                      marginBottom: 8, paddingBottom: 8,
-                      borderBottom: `1px solid ${C.border}`,
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
-                        <span style={{ fontSize: 10, color: C.text, fontWeight: 600 }}>{run.date}</span>
-                        <span style={{ fontSize: 9, color: C.dim, fontFamily: "JetBrains Mono" }}>{run.time}</span>
-                      </div>
-                      <div style={{ display: "flex", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 9, color: C.green, fontFamily: "JetBrains Mono" }}>
-                          {run.image_count} img
-                        </span>
-                        {run.duration && (
-                          <span style={{ fontSize: 9, color: C.dim, fontFamily: "JetBrains Mono" }}>
-                            {run.duration}
-                          </span>
-                        )}
-                      </div>
-                      {run.stages.length > 0 && (
-                        <div style={{ fontSize: 9, color: C.dim, marginBottom: 4, lineHeight: 1.5 }}>
-                          {run.stages.join(" + ")}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => openHistoryFolder(run.path)}
-                        style={{
-                          background: "transparent", color: C.blue,
-                          border: `1px solid ${C.dim2}`, borderRadius: 3,
-                          padding: "2px 8px", fontSize: 9, cursor: "pointer",
-                          fontFamily: "inherit", width: "100%", textAlign: "left",
-                        }}
-                      >
-                        Open folder
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-          </div>
+          {/* Log / Errors / History — tabbed */}
+          <LogPanel
+            logRef={logRef} errorRef={errorRef}
+            log={log} errors={errors}
+            imageError={imageError} running={running} done={done}
+          />
         </div>
       </div>
     </div>

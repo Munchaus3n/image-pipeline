@@ -1,0 +1,30 @@
+{
+  "processing": {
+    "crop_padding": 0.04,
+    "edge_blur": 1.2,
+    "rembg_model": "birefnet-general",
+    "history_keep": 30
+  },
+  "upscaler_api": {
+    "provider": "local",
+    "url": "",
+    "key": "",
+    "model": ""
+  },
+  "rembg_api": {
+    "provider": "custom",
+    "url": "",
+    "key": ""
+  },
+  "output": {
+    "canvas_size": 1440,
+    "thumbnail": true,
+    "thumbnail_size": 400,
+    "folder_mode": "bulk",
+    "output_dir": ""
+  },
+  "appearance": {
+    "guide_opacity": 1,
+    "ref_img_opacity": 0.05
+  }
+}
