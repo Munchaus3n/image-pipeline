@@ -46,3 +46,7 @@ export const skipImage  = (imagePath)  => post("/skip",    { image_path: imagePa
 export const getSession = ()           => get("/session");
 export const saveSession = (data)      => post("/session", data);
 export const clearSession = ()         => fetch(BASE + "/session", { method: "DELETE" });
+
+// Opens a folder in the native OS file explorer
+export const openFolder = (absPath) =>
+  fetch(`${BASE}/open-folder?path=${encodeURIComponent(absPath)}`);

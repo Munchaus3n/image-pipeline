@@ -17,10 +17,12 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from PIL import Image, ImageFilter, ImageChops
+import numpy as np
+from scipy.ndimage import binary_fill_holes
+import onnxruntime as ort
 
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 
-import onnxruntime as ort
 from rembg import remove as rembg_remove, new_session
 from rich.console import Console
 from rich.panel import Panel
@@ -33,17 +35,6 @@ from rich.rule import Rule
 
 BASE_DIR  = Path(__file__).parent
 NCNN_EXE  = BASE_DIR / "realesrgan-ncnn-vulkan" / "realesrgan-ncnn-vulkan.exe"
-
-def _load_pipeline_settings() -> dict:
-    """Load settings.json at runtime. Returns empty dict on any error."""
-    p = BASE_DIR / "settings.json"
-    try:
-        if p.exists():
-            import json as _j
-            return _j.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return {}
 
 NCNN_MODELS = {
     "2": {"model": "realesr-animevideov3-x2", "scale": "2"},
@@ -116,6 +107,24 @@ def mirror_path(src: Path, src_root: Path, dst_root: Path, suffix: str = ".png")
     return dst_root / src.relative_to(src_root).with_suffix(suffix)
 
 
+def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
+    """Copy a failed image to output/corrupted/, mirroring the source folder structure.
+
+    Keeps the original file extension so the file is always openable.
+    If two stages both fail on the same file, the second copy silently overwrites.
+    """
+    try:
+        try:
+            rel = src.relative_to(src_root)
+        except ValueError:
+            rel = Path(src.name)
+        dst = corrupted_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    except Exception as e:
+        warn(f"Could not copy {src.name} to corrupted/: {e}")
+
+
 # ── Image processing ───────────────────────────────────────────────────────────
 
 def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
@@ -176,37 +185,89 @@ def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
     return Image.merge("RGBA", (r, g, b, ImageChops.lighter(blurred, inner)))
 
 
-def remove_bg(src: Path, dst: Path, session, settings: dict | None = None) -> bool:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    proc    = (settings or {}).get("processing", {})
-    padding = float(proc.get("crop_padding", 0.04))
-    blur_r  = float(proc.get("edge_blur",    1.2))
-    rembg_api = (settings or {}).get("rembg_api", {})
+def _select_onnx_providers() -> tuple[list[str], str]:
+    """Auto-select the best available ONNX Runtime provider.
 
+    Windows:  DmlExecutionProvider covers NVIDIA/AMD/Intel without needing CUDA.
+              Install onnxruntime-directml (not onnxruntime) in your venv to enable.
+    Linux:    CUDAExecutionProvider if present.
+    Fallback: CPUExecutionProvider always available.
+    """
+    try:
+        available = ort.get_available_providers()
+        if "DmlExecutionProvider" in available:
+            return ["DmlExecutionProvider", "CPUExecutionProvider"], "DirectML (GPU)"
+        if "CUDAExecutionProvider" in available:
+            return ["CUDAExecutionProvider", "CPUExecutionProvider"], "CUDA (GPU)"
+    except Exception:
+        pass
+    return ["CPUExecutionProvider"], "CPU"
+
+
+def _fill_mask_holes(mask: Image.Image, threshold: int = 30) -> Image.Image:
+    """Fill interior transparent holes in a BiRefNet alpha mask.
+
+    BiRefNet correctly assigns partial transparency to glass, chrome, and
+    reflective surfaces. For e-commerce product photography (products always
+    opaque against a white background) those interior semi-transparent regions
+    look like damage.  This fixes that by:
+      1. Thresholding the mask to get a rough foreground binary
+      2. Filling any region that is fully enclosed by foreground (scipy)
+      3. Clamping those newly-filled pixels to 255 (fully opaque)
+      4. Leaving all existing soft edge values untouched
+
+    Result: interior glass/reflection holes → opaque; real product edges stay soft.
+    """
+    mask_np = np.array(mask)               # L-mode 0-255
+    binary  = mask_np > threshold          # rough foreground
+    filled  = binary_fill_holes(binary)    # fill enclosed holes
+    # Only override pixels that fill added (were bg, now enclosed) → clamp to 255
+    result  = np.where(filled & ~binary, 255, mask_np).astype(np.uint8)
+    return Image.fromarray(result, mode="L")
+
+
+BIREFNET_MAX = 1024   # BiRefNet's internal inference resolution; no benefit going larger
+
+def remove_bg(src: Path, dst: Path, session) -> bool:
+    dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         img = Image.open(src).convert("RGBA")
 
-        # ── External BG removal API ──────────────────────────────────────────
-        if rembg_api.get("provider", "local") != "local" and rembg_api.get("url"):
-            import requests as _req, io as _io
-            headers = {}
-            if rembg_api.get("key"):
-                headers["Authorization"] = f"Bearer {rembg_api['key']}"
-            with open(src, "rb") as f:
-                resp = _req.post(rembg_api["url"].rstrip("/"),
-                                 files={"file": f}, headers=headers, timeout=60)
-            resp.raise_for_status()
-            result = Image.open(_io.BytesIO(resp.content)).convert("RGBA")
-            result = tight_crop(refine_edges(result, blur_radius=blur_r), padding=padding)
+        # Already transparent — just clean up edges and crop, skip inference
+        if has_transparency(src):
+            result = tight_crop(refine_edges(img))
             result.save(dst, format="PNG")
             return True
 
-        # ── Local BiRefNet ───────────────────────────────────────────────────
-        if has_transparency(src):
-            result = tight_crop(refine_edges(img, blur_radius=blur_r), padding=padding)
+        # Downscale to BIREFNET_MAX for inference only — the model caps at 1024px
+        # internally anyway, so feeding a 4k image wastes RAM and time with zero
+        # quality benefit. The full-res image is kept for compositing.
+        w, h = img.size
+        if max(w, h) > BIREFNET_MAX:
+            scale = BIREFNET_MAX / max(w, h)
+            infer_img = img.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))),
+                Image.LANCZOS
+            )
         else:
-            result = tight_crop(refine_edges(rembg_remove(img, session=session),
-                                             blur_radius=blur_r), padding=padding)
+            infer_img = img
+
+        # Run inference on the (possibly downscaled) image
+        infer_rgb = infer_img.convert("RGB")  # rembg expects RGB internally
+        mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
+
+        # Scale mask back to full-res and apply to the original full-res image
+        if mask_small.size != img.size:
+            mask = mask_small.resize(img.size, Image.LANCZOS)
+        else:
+            mask = mask_small
+
+        # Fill enclosed transparent holes (glass, chrome reflections) → fully opaque.
+        # Keeps real edge gradients intact; only fills interior enclosed regions.
+        mask = _fill_mask_holes(mask)
+
+        img.putalpha(mask)
+        result = tight_crop(refine_edges(img))
         result.save(dst, format="PNG")
         return True
     except Exception as e:
@@ -217,7 +278,7 @@ def remove_bg(src: Path, dst: Path, session, settings: dict | None = None) -> bo
 # ── Batch stages ───────────────────────────────────────────────────────────────
 
 def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
-                  model: str, scale: str) -> list[Path]:
+                  model: str, scale: str, corrupted_dir: Path | None = None) -> list[Path]:
     section("Stage 1 / 2 — Upscaling")
     outputs, to_run = [], []
 
@@ -244,6 +305,10 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
             else:
                 warn(f"{src.name} failed — using original for next stage.")
                 outputs[outputs.index(dst)] = src
+                # Copy original to corrupted/ so the user can inspect failures
+                if corrupted_dir:
+                    _copy_corrupted(src, src_root, corrupted_dir)
+                    warn(f"  → copied to corrupted/{src.relative_to(src_root)}")
             progress.advance(task)
 
     return outputs
@@ -252,20 +317,17 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
 def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
                     dst_root: Path, src_root: Path,
                     no_rembg_originals: set | None = None,
-                    settings: dict | None = None) -> list[Path]:
+                    corrupted_dir: Path | None = None) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
 
     no_rembg_names = {p.name for p in (no_rembg_originals or set())}
 
-    info("Using CPU for background removal (BiRefNet).")
-    info("Loading BiRefNet — first run downloads ~170MB...")
+    providers, device_label = _select_onnx_providers()
+    info(f"Using {device_label} for background removal (BiRefNet).")
+    info("Loading BiRefNet — first run downloads ~973MB...")
     console.print()
 
-    proc_s      = (settings or {}).get("processing", {})
-    rembg_model = proc_s.get("rembg_model", REMBG_MODEL)
-    rembg_api   = (settings or {}).get("rembg_api", {})
-    use_local   = rembg_api.get("provider", "local") == "local"
-    session     = new_session(rembg_model, providers=["CPUExecutionProvider"]) if use_local else None
+    session = new_session(REMBG_MODEL, providers=providers)
     ok("Model loaded.")
 
     outputs, to_run = [], []
@@ -300,8 +362,13 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         task = progress.add_task("Removing BG...", total=len(to_run))
         for src, dst in to_run:
             progress.update(task, description=src.name)
-            if remove_bg(src, dst, session, settings=settings):
+            if remove_bg(src, dst, session):
                 ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}")
+            else:
+                # Copy the best available version (upscaled or original) to corrupted/
+                if corrupted_dir:
+                    _copy_corrupted(src, upscale_root, corrupted_dir)
+                    warn(f"  → copied to corrupted/{src.name}")
             progress.advance(task)
 
     return outputs
@@ -325,8 +392,6 @@ def main():
     args = parser.parse_args()
 
     header()
-
-    _settings = _load_pipeline_settings()  # load once per run
 
     if not NCNN_EXE.exists():
         err(f"NCNN binary not found: {NCNN_EXE}")
@@ -373,8 +438,23 @@ def main():
     # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
     input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
     output_base = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
-    upscale_dir = output_base / "upscaled"
-    rembg_dir   = output_base / "bg_removed"
+    upscale_dir   = output_base / "upscaled"
+    rembg_dir     = output_base / "bg_removed"
+    corrupted_dir = output_base / "corrupted"
+
+    # rembg-only auto-fallback: if input is empty but upscale_dir has content,
+    # use upscale_dir as the source so a two-step workflow (upscale today,
+    # rembg tomorrow) works without manually changing the input path.
+    if not do_upscale and do_rembg:
+        input_images = [p for p in input_dir.rglob("*")
+                        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS] \
+                       if input_dir.exists() else []
+        if not input_images and upscale_dir.exists():
+            upscale_images = [p for p in upscale_dir.rglob("*")
+                              if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS]
+            if upscale_images:
+                info(f"Input is empty — using existing upscaled output as source.")
+                input_dir = upscale_dir
 
     if not input_dir.exists():
         err(f"Input folder not found: {input_dir}")
@@ -413,13 +493,15 @@ def main():
     current = images
 
     if do_upscale:
-        current = batch_upscale(current, input_dir, upscale_dir, ncnn_model, ncnn_scale)
+        current = batch_upscale(current, input_dir, upscale_dir, ncnn_model, ncnn_scale,
+                                corrupted_dir=corrupted_dir)
     else:
         skip("upscaling")
 
     if do_rembg:
         src_root = upscale_dir if do_upscale else input_dir
-        batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set, settings=_settings)
+        batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set,
+                        corrupted_dir=corrupted_dir)
     else:
         skip("background removal")
 
@@ -439,10 +521,15 @@ def main():
 
     ok(f"Input archived → history/{stamp}/")
 
+    corrupted_files = list(corrupted_dir.rglob("*")) if corrupted_dir.exists() else []
+    corrupted_count = sum(1 for p in corrupted_files if p.is_file())
+
     console.print()
     console.print(Panel(
         f"[green]Done.[/green]  Cutouts ready in [cyan]{rembg_dir}[/cyan]\n"
-        "[dim]Open placement editor to compose and export.[/dim]",
+        + (f"[yellow]⚠  {corrupted_count} image(s) failed → [dim]{corrupted_dir}[/dim][/yellow]\n"
+           if corrupted_count else "")
+        + "[dim]Open placement editor to compose and export.[/dim]",
         border_style="cyan", title="[bold]Pipeline complete[/bold]"
     ))
 

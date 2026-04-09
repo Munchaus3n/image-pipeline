@@ -1,7 +1,7 @@
 {
   "processing": {
     "crop_padding": 0.04,
-    "edge_blur": 1.2,
+    "edge_blur": 1,
     "rembg_model": "birefnet-general",
     "history_keep": 30
   },
@@ -24,7 +24,21 @@
     "output_dir": ""
   },
   "appearance": {
-    "guide_opacity": 1,
-    "ref_img_opacity": 0.05
+    "guide_opacity": 0.1,
+    "ref_img_opacity": 0.35
+  },
+  "guides": {
+    "blue": {
+      "color": "#0000ff"
+    },
+    "magenta": {
+      "color": "#ff00ff"
+    },
+    "green": {
+      "color": "#00ff00"
+    },
+    "red": {
+      "color": "#ff0000"
+    }
   }
 }

@@ -488,6 +488,21 @@ def skip_image(req: SkipRequest):
     shutil.copy2(src, dst)
     return {"skipped": str(dst)}
 
+# ── Open folder in OS explorer ─────────────────────────────────────────────────
+
+@app.get("/open-folder")
+def open_folder(path: str = ""):
+    """Open a folder in the native OS file explorer. Defaults to OUTPUT_ROOT."""
+    p = Path(path.strip()) if path.strip() else OUTPUT_ROOT
+    if not p.exists():
+        p.mkdir(parents=True, exist_ok=True)  # create output if missing
+    if platform.system() == "Windows":
+        subprocess.Popen(["explorer", str(p)])
+    elif platform.system() == "Darwin":
+        subprocess.Popen(["open", str(p)])
+    else:
+        subprocess.Popen(["xdg-open", str(p)])
+    return {"ok": True}
 
 # ── Session ───────────────────────────────────────────────────────────────────
 
