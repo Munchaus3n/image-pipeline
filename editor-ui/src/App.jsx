@@ -86,6 +86,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const [status,     setStatus]     = useState("loading…");
   const [saved,      setSaved]      = useState(false);
   const [loading,    setLoading]    = useState(true);
+  const [guideOpacity, setGuideOpacity] = useState(1.0);  // loaded from settings
 
   // Phase 4: canvas view zoom (CSS scale, does not affect composition output)
   // 0.75 = 75% of DS (540px rendered), 1.0 = 720px, 1.25 = 900px, 1.5 = 1080px
@@ -100,6 +101,16 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         CANVAS_SIZE = canvasSizeProp ?? cfg.canvas_size;
         setGuides(cfg.guides);
         setTemplates(cfg.templates);
+
+        // Load appearance settings (guide opacity etc.)
+        try {
+          const sRes = await fetch(`${BASE}/settings`);
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            const opacity = sData?.settings?.appearance?.guide_opacity;
+            if (typeof opacity === "number") setGuideOpacity(Math.max(0, Math.min(1, opacity)));
+          }
+        } catch { }
 
         const session = await getSession();
         if (session.exists) {
@@ -220,10 +231,11 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     }
 
     // ── 3. Guides — always drawn last so nothing can cover them ────────────
-    // Grid lines at 88% opacity ("e0"), active zone border fully solid ("ff")
+    // Opacity is user-configurable via Settings tab (appearance.guide_opacity).
+    const opHex = Math.round(guideOpacity * 255).toString(16).padStart(2, "0");
     for (const g of Object.values(guides)) {
       const t=g.top*S, b=g.bottom*S, l=g.left*S, r=g.right*S;
-      ctx.strokeStyle = g.color + "cc";   // was "55" (33%) → now "cc" (80%)
+      ctx.strokeStyle = g.color + opHex;
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
@@ -240,17 +252,15 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       const g = guides[tmpl.zone];
       const t=g.top*S, b=g.bottom*S, l=g.left*S, r=g.right*S;
       ctx.setLineDash([]);
-      // Subtle fill so the zone doesn't obscure the product completely
       ctx.fillStyle = g.color + "18";
       ctx.fillRect(l, t, r-l, b-t);
-      // Solid border — 2px, fully opaque
-      ctx.strokeStyle = g.color + "ff";  // was "cc" (80%) → now "ff" (100%)
+      ctx.strokeStyle = g.color + "ff";  // active zone always fully opaque
       ctx.lineWidth = 2;
       ctx.strokeRect(l, t, r-l, b-t);
     }
 
     ctx.setLineDash([]);
-  }, [items, selId, template, scaleLocked, guides, templates]);
+  }, [items, selId, template, scaleLocked, guides, templates, guideOpacity]);
 
   // ── Wheel zoom (product scale) ────────────────────────────────────────────
   useEffect(() => {
@@ -605,7 +615,15 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
           <div style={{ marginTop:6, marginBottom:2, borderRadius:3, overflow:"hidden",
             border:`1px solid ${C.border}`, background:"#ffffff10" }}>
             <img
-              src={`/api/image?path=${encodeURIComponent(templates[template].ref_image)}`}
+              src={
+                !templates[template].ref_image
+                  ? null
+                  : templates[template].ref_image.startsWith("data:")
+                    ? templates[template].ref_image                          // base64 from Templates.jsx upload
+                    : templates[template].ref_image.includes("/") || templates[template].ref_image.includes("\\")
+                      ? `/api/image?path=${encodeURIComponent(templates[template].ref_image)}`  // absolute path
+                      : `/api/templates/image?name=${encodeURIComponent(templates[template].ref_image)}` // bare filename → templates/
+              }
               alt="reference"
               style={{ width:"100%", display:"block", objectFit:"contain", maxHeight:140 }}
               onError={e => { e.target.style.display="none"; }}

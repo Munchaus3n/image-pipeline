@@ -20,11 +20,11 @@
     "canvas_size": 1440,
     "thumbnail": true,
     "thumbnail_size": 400,
-    "folder_mode": "bulk",
+    "folder_mode": "clean",
     "output_dir": ""
   },
   "appearance": {
-    "guide_opacity": 0.1,
+    "guide_opacity": 1,
     "ref_img_opacity": 0.35
   },
   "guides": {

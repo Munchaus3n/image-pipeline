@@ -127,6 +127,10 @@ def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
 
 # ── Image processing ───────────────────────────────────────────────────────────
 
+# Images wider/taller than this get tiled to avoid VRAM OOM on Vulkan
+_NCNN_TILE_THRESHOLD = 2000  # px on longest side
+_NCNN_TILE_SIZE      = "256"  # tile size passed to -t flag
+
 def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -136,13 +140,41 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     )
     alpha_mask = src_img.convert("RGBA").split()[3] if has_alpha else None
 
-    result = subprocess.run(
-        [str(NCNN_EXE), "-i", str(src), "-o", str(dst), "-n", model, "-s", scale, "-f", "png"],
-        capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        err(f"NCNN failed on {src.name}: {result.stderr.strip()}")
-        return False
+    # Always feed PNG to NCNN — WEBP and unusual JPEGs can trigger "queueC=" /
+    # invalid-format Vulkan errors inside NCNN even when the file is valid.
+    # We write a temp PNG next to the destination and clean it up afterwards.
+    tmp_png: Path | None = None
+    if src.suffix.lower() != ".png":
+        tmp_png = dst.parent / f"_ncnntmp_{src.stem}.png"
+        src_img.convert("RGB").save(tmp_png, format="PNG")
+        ncnn_src = tmp_png
+    else:
+        ncnn_src = src
+
+    w, h = src_img.size
+    use_tile = max(w, h) > _NCNN_TILE_THRESHOLD
+
+    def _run(tile: bool) -> subprocess.CompletedProcess:
+        cmd = [str(NCNN_EXE), "-i", str(ncnn_src), "-o", str(dst),
+               "-n", model, "-s", scale, "-f", "png"]
+        if tile:
+            cmd += ["-t", _NCNN_TILE_SIZE]
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    try:
+        result = _run(use_tile)
+
+        if result.returncode != 0 and not use_tile:
+            # First attempt failed without tiling — retry with tiles (VRAM OOM recovery)
+            warn(f"{src.name} failed, retrying with tiling…")
+            result = _run(tile=True)
+
+        if result.returncode != 0:
+            err(f"NCNN failed on {src.name}: {result.stderr.strip()[:120]}")
+            return False
+    finally:
+        if tmp_png and tmp_png.exists():
+            tmp_png.unlink(missing_ok=True)
 
     if alpha_mask is not None:
         upscaled = Image.open(dst).convert("RGBA")
@@ -239,9 +271,9 @@ def remove_bg(src: Path, dst: Path, session) -> bool:
             result.save(dst, format="PNG")
             return True
 
-        # Downscale to BIREFNET_MAX for inference only — the model caps at 1024px
-        # internally anyway, so feeding a 4k image wastes RAM and time with zero
-        # quality benefit. The full-res image is kept for compositing.
+        # Downscale to BIREFNET_MAX for inference only.
+        # BiRefNet resizes internally to 1024px anyway; feeding a 4k image wastes
+        # RAM with no quality gain. Keep the full-res image separate for compositing.
         w, h = img.size
         if max(w, h) > BIREFNET_MAX:
             scale = BIREFNET_MAX / max(w, h)
@@ -252,18 +284,29 @@ def remove_bg(src: Path, dst: Path, session) -> bool:
         else:
             infer_img = img
 
-        # Run inference on the (possibly downscaled) image
-        infer_rgb = infer_img.convert("RGB")  # rembg expects RGB internally
+        # Run inference with only_mask=True to get BiRefNet's raw sigmoid output.
+        # DO NOT use post_process_mask=True — it applies a hard binary threshold
+        # (np.where(mask < 127, 0, 255)) that destroys BiRefNet's smooth gradient
+        # edges and causes pixelated/staircase cutouts.
+        #
+        # Contrast enhancement: apply 1.4× contrast to the inference image ONLY.
+        # This improves segmentation of low-contrast products (white object on white bg,
+        # overexposed images, glass) without affecting the output — the mask is always
+        # applied back to the original full-res unmodified image.
+        from PIL import ImageEnhance
+        infer_rgb  = infer_img.convert("RGB")
+        infer_rgb  = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
         mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
 
-        # Scale mask back to full-res and apply to the original full-res image
+        # Scale mask back to full-res.
+        # Use BICUBIC — better gradient preservation than LANCZOS for alpha masks.
         if mask_small.size != img.size:
-            mask = mask_small.resize(img.size, Image.LANCZOS)
+            mask = mask_small.resize(img.size, Image.BICUBIC)
         else:
             mask = mask_small
 
-        # Fill enclosed transparent holes (glass, chrome reflections) → fully opaque.
-        # Keeps real edge gradients intact; only fills interior enclosed regions.
+        # Fill enclosed transparent holes (glass, chrome, blender bowls) → opaque.
+        # Only affects fully-enclosed interior regions; real edge gradients untouched.
         mask = _fill_mask_holes(mask)
 
         img.putalpha(mask)
@@ -280,6 +323,8 @@ def remove_bg(src: Path, dst: Path, session) -> bool:
 def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                   model: str, scale: str, corrupted_dir: Path | None = None) -> list[Path]:
     section("Stage 1 / 2 — Upscaling")
+    # Machine-readable total for the UI (Rich table wraps, so regex is unreliable)
+    print(f"__total__:{len(images)}", flush=True)
     outputs, to_run = [], []
 
     for src in images:
@@ -287,6 +332,7 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
         outputs.append(dst)
         if dst.exists():
             skip(f"{src.name} (already upscaled)")
+            print(f"__skip_upscale__:{src.name}", flush=True)
         else:
             to_run.append((src, dst))
 
@@ -300,10 +346,13 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
         task = progress.add_task("Upscaling...", total=len(to_run))
         for src, dst in to_run:
             progress.update(task, description=src.name)
+            print(f"__processing__:{src}", flush=True)
             if upscale_ncnn(src, dst, model, scale):
                 ok(f"{src.name} → upscaled/{dst.relative_to(dst_root)}")
+                print(f"__ok_upscale__:{src.name}", flush=True)
             else:
                 warn(f"{src.name} failed — using original for next stage.")
+                print(f"__err_upscale__:{src.name}", flush=True)
                 outputs[outputs.index(dst)] = src
                 # Copy original to corrupted/ so the user can inspect failures
                 if corrupted_dir:
@@ -321,9 +370,12 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
 
     no_rembg_names = {p.name for p in (no_rembg_originals or set())}
+    print(f"__total__:{len(upscaled)}", flush=True)
 
     providers, device_label = _select_onnx_providers()
     info(f"Using {device_label} for background removal (BiRefNet).")
+    if device_label == "CPU":
+        info("  → To enable GPU: pip uninstall onnxruntime && pip install onnxruntime-directml")
     info("Loading BiRefNet — first run downloads ~973MB...")
     console.print()
 
@@ -342,13 +394,16 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
 
         if dst.exists():
             skip(f"{src.name} (already processed)")
+            print(f"__skip_rembg__:{src.name}", flush=True)
         elif src.name in no_rembg_names:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tight_crop(Image.open(src).convert("RGBA")).save(dst, format="PNG")
                 ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
+                print(f"__skip_rembg__:{src.name}", flush=True)
             except Exception as e:
                 err(f"Crop failed on {src.name}: {e}")
+                print(f"__err_rembg__:{src.name}", flush=True)
         else:
             to_run.append((src, dst))
 
@@ -362,9 +417,12 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         task = progress.add_task("Removing BG...", total=len(to_run))
         for src, dst in to_run:
             progress.update(task, description=src.name)
+            print(f"__processing__:{src}", flush=True)
             if remove_bg(src, dst, session):
                 ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}")
+                print(f"__ok_rembg__:{src.name}", flush=True)
             else:
+                print(f"__err_rembg__:{src.name}", flush=True)
                 # Copy the best available version (upscaled or original) to corrupted/
                 if corrupted_dir:
                     _copy_corrupted(src, upscale_root, corrupted_dir)
@@ -389,6 +447,7 @@ def main():
     parser.add_argument("--no-upscale",  action="store_true")
     parser.add_argument("--scale",       default="4", choices=["2", "4"])
     parser.add_argument("--no-rembg",    action="store_true")
+    parser.add_argument("--rembg-model", default="", help="Override BiRefNet model name")
     args = parser.parse_args()
 
     header()
@@ -407,8 +466,7 @@ def main():
         do_rembg    = not args.no_rembg
         ncnn_model  = NCNN_MODELS[args.scale]["model"]
         ncnn_scale  = NCNN_MODELS[args.scale]["scale"]
-    else:
-        # ── Interactive terminal mode (unchanged) ────────────────────────────
+    else:        # ── Interactive terminal mode (unchanged) ────────────────────────────
         folder_mode = ask("Folder mode", [
             ("Bulk  — all images in flat input/ folder",          "bulk"),
             ("Clean — input/ has subfolders (category/color/…)",  "clean"),
@@ -434,6 +492,12 @@ def main():
     if not do_upscale and not do_rembg:
         warn("Both stages skipped — nothing to do.")
         sys.exit(0)
+
+    # Override BiRefNet model if passed via CLI (set from settings.json by api.py)
+    global REMBG_MODEL
+    if args.rembg_model.strip():
+        REMBG_MODEL = args.rembg_model.strip()
+    info(f"BiRefNet model: {REMBG_MODEL}")
 
     # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
     input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"

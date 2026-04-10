@@ -106,12 +106,13 @@ function usePipeline() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
   const [log, setLog] = useState([]);
-  const [errors, setErrors] = useState([]);
+  const [errors, setErrors] = useState([]);   // each: { raw, kind, context: string[] }
   const [imageDone, setImageDone] = useState(0);
   const [imageSkipped, setImageSkipped] = useState(0);
   const [imageError, setImageError] = useState(0);
   const [totalImages, setTotalImages] = useState(0);
   const [currentFile, setCurrentFile] = useState("");
+  const [previewPath, setPreviewPath] = useState("");  // absolute path for live preview
   const [recentDone, setRecentDone] = useState([]);
   const [elapsed, setElapsed] = useState(0);
   const [stage, setStage] = useState(null);
@@ -119,15 +120,16 @@ function usePipeline() {
   const [upStats, setUpStats] = useState({ done: 0, skip: 0, err: 0 });
   const [bgStats, setBgStats] = useState({ done: 0, skip: 0, err: 0 });
 
-  const abortRef = useRef(null);
-  const logRef = useRef(null);
-  const errorRef = useRef(null);
-  const timerRef = useRef(null);
-  const startRef = useRef(null);
-  const doneSet = useRef(new Set());
-  const skipSet = useRef(new Set());
-  const errSet = useRef(new Set());
-  const stageRef = useRef("upscale"); // sync ref — readable inside appendLine without stale closure
+  const abortRef   = useRef(null);
+  const logRef     = useRef(null);
+  const errorRef   = useRef(null);
+  const timerRef   = useRef(null);
+  const startRef   = useRef(null);
+  const doneSet    = useRef(new Set());
+  const skipSet    = useRef(new Set());
+  const errSet     = useRef(new Set());
+  const stageRef   = useRef("upscale");
+  const recentLog  = useRef([]);   // last 5 human-readable lines for error context
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -157,9 +159,75 @@ function usePipeline() {
   }, []);
 
   const appendLine = useCallback((raw) => {
+    // ── Structured machine-readable tokens (emitted by pipeline.py print()) ──
+    // These are NOT displayed in the log — they only drive stats.
+    // Using tokens avoids the "Rich console wraps long folder paths → regex breaks" bug.
+    if (raw.startsWith("__total__:")) {
+      const n = parseInt(raw.slice(10), 10);
+      if (!isNaN(n)) setTotalImages(n);
+      return;
+    }
+    if (raw.startsWith("__ok_upscale__:")) {
+      const fname = raw.slice(15);
+      if (!doneSet.current.has(fname)) {
+        doneSet.current.add(fname);
+        setImageDone(doneSet.current.size);
+        setRecentDone(prev => [fname, ...prev].slice(0, 8));
+      }
+      setUpStats(s => ({ ...s, done: s.done + 1 }));
+      setCurrentFile("");
+      return;
+    }
+    if (raw.startsWith("__ok_rembg__:")) {
+      const fname = raw.slice(13);
+      if (!doneSet.current.has(fname)) {
+        doneSet.current.add(fname);
+        setImageDone(doneSet.current.size);
+        setRecentDone(prev => [fname, ...prev].slice(0, 8));
+      }
+      setBgStats(s => ({ ...s, done: s.done + 1 }));
+      setCurrentFile("");
+      return;
+    }
+    if (raw.startsWith("__skip_upscale__:")) {
+      const fname = raw.slice(17);
+      if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
+      setUpStats(s => ({ ...s, skip: s.skip + 1 }));
+      return;
+    }
+    if (raw.startsWith("__skip_rembg__:")) {
+      const fname = raw.slice(15);
+      if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
+      setBgStats(s => ({ ...s, skip: s.skip + 1 }));
+      return;
+    }
+    if (raw.startsWith("__err_upscale__:")) {
+      const fname = raw.slice(16);
+      if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
+      setUpStats(s => ({ ...s, err: s.err + 1 }));
+      return;
+    }
+    if (raw.startsWith("__err_rembg__:")) {
+      const fname = raw.slice(14);
+      if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
+      setBgStats(s => ({ ...s, err: s.err + 1 }));
+      return;
+    }
+
+    if (raw.startsWith("__processing__:")) {
+      const fullPath = raw.slice(15);
+      setPreviewPath(fullPath);
+      setCurrentFile(fullPath.replace(/.*[/\\]/, ""));
+      return;
+    }
+
+    // ── Human-readable log lines ─────────────────────────────────────────────
     const kind = classify(raw);
     const entry = { raw, kind };
     setLog(prev => [...prev.slice(-800), entry]);
+
+    // Keep a rolling window of the last 5 human lines for error context
+    recentLog.current = [...recentLog.current.slice(-4), raw];
 
     if (/Stage 1|Upscaling/.test(raw)) {
       stageRef.current = "upscale";
@@ -170,76 +238,14 @@ function usePipeline() {
       setStage("rembg");
     }
 
-    const totalM = raw.match(/\bImages\s+(\d+)/i);
-    if (totalM) setTotalImages(parseInt(totalM[1], 10));
-
-    const bgM = raw.match(/→ bg_removed[/\\](.+)$/);
-    if (bgM) {
-      const isCropOnly = /crop only/i.test(raw);
-      const rawFname = bgM[1].replace(/\s*\(.*?\)\s*$/, "").trim();
-      const fname = rawFname.split(/[/\\]/).pop();
-      if (isCropOnly) {
-        // no_rembg folder — BG removal was intentionally skipped
-        setBgStats(s => ({ ...s, skip: s.skip + 1 }));
-      } else {
-        if (!doneSet.current.has(fname)) {
-          doneSet.current.add(fname);
-          setImageDone(doneSet.current.size);
-          setRecentDone(prev => [fname, ...prev].slice(0, 8));
-        }
-        setBgStats(s => ({ ...s, done: s.done + 1 }));
-      }
-      setCurrentFile("");
-      return;
-    }
-
-    const upM = raw.match(/→ upscaled[/\\](.+)$/);
-    if (upM) {
-      const fname = upM[1].split(/[/\\]/).pop();
-      if (!doneSet.current.has(fname)) {
-        doneSet.current.add(fname);
-        setImageDone(doneSet.current.size);
-        setRecentDone(prev => [fname, ...prev].slice(0, 8));
-      }
-      setUpStats(s => ({ ...s, done: s.done + 1 }));
-      setCurrentFile("");
-      return;
-    }
-
-    const skipM = raw.match(/↷ skip: (.+?)(?:\s*\((.+?)\)|$)/);
-    if (skipM) {
-      const fname = skipM[1].trim().split(/[/\\]/).pop();
-      const reason = (skipM[2] || "").toLowerCase();
-      if (!skipSet.current.has(fname)) {
-        skipSet.current.add(fname);
-        setImageSkipped(skipSet.current.size);
-      }
-      if (/already upscaled/.test(reason))      setUpStats(s => ({ ...s, skip: s.skip + 1 }));
-      else if (/already processed/.test(reason)) setBgStats(s => ({ ...s, skip: s.skip + 1 }));
-      else if (stageRef.current === "rembg")     setBgStats(s => ({ ...s, skip: s.skip + 1 }));
-      else                                        setUpStats(s => ({ ...s, skip: s.skip + 1 }));
-      return;
-    }
-
     const extM = raw.match(/^([^\s✓✗↷─═]+\.(png|jpg|jpeg|webp|tiff))$/i);
     if (extM) setCurrentFile(extM[1].trim());
 
     if (kind === "error") {
       setErrors(prev => {
         if (prev[prev.length - 1]?.raw === raw) return prev;
-        return [...prev.slice(-200), entry];
+        return [...prev.slice(-200), { raw, kind, context: [...recentLog.current.slice(0, -1)] }];
       });
-      const errFileM = raw.match(/(?:failed on |on )([^\s:,]+\.(png|jpg|jpeg|webp|tiff))/i);
-      const key = errFileM ? errFileM[1] : raw.slice(0, 60);
-      if (!errSet.current.has(key)) {
-        errSet.current.add(key);
-        setImageError(errSet.current.size);
-      }
-      // Attribute to stage by log message pattern (more reliable than stageRef)
-      if (/NCNN failed/i.test(raw))          setUpStats(s => ({ ...s, err: s.err + 1 }));
-      else if (/BG removal failed/i.test(raw)) setBgStats(s => ({ ...s, err: s.err + 1 }));
-      else if (stageRef.current === "rembg") setBgStats(s => ({ ...s, err: s.err + 1 }));
-      else                                    setUpStats(s => ({ ...s, err: s.err + 1 }));
     }
   }, [classify]);
 
@@ -249,12 +255,13 @@ function usePipeline() {
     abortRef.current = ctrl;
     setLog([]); setErrors([]);
     setImageDone(0); setImageSkipped(0); setImageError(0);
-    setTotalImages(0); setCurrentFile(""); setRecentDone([]);
+    setTotalImages(0); setCurrentFile(""); setPreviewPath(""); setRecentDone([]);
     setElapsed(0); setDone(false); setRunning(true);
     setStage(null); setStagesDone({ upscale: false, rembg: false });
     setUpStats({ done: 0, skip: 0, err: 0 });
     setBgStats({ done: 0, skip: 0, err: 0 });
     stageRef.current = "upscale";
+    recentLog.current = [];
     doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set();
 
     try {
@@ -310,7 +317,7 @@ function usePipeline() {
 
   return {
     running, done, log, errors, imageDone, imageSkipped, imageError,
-    totalImages, currentFile, recentDone, elapsed, stage, stagesDone,
+    totalImages, currentFile, previewPath, recentDone, elapsed, stage, stagesDone,
     upStats, bgStats,
     logRef, errorRef, start, stop
   };
@@ -318,7 +325,7 @@ function usePipeline() {
 
 // ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
 
-function Zone1({ running, done, stage, stagesDone, currentFile, recentDone,
+function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, recentDone,
   imageDone, totalImages, doUpscale, doRembg, inputDir, setInputDir }) {
   const [dragOver, setDragOver] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState([]);
@@ -438,120 +445,129 @@ function Zone1({ running, done, stage, stagesDone, currentFile, recentDone,
   );
 
   const stages = [
-    {
-      id: "input", label: "Input", sub: currentFile
-        ? currentFile.split(/[/\\]/).pop()
-        : "reading files", active: stage === "upscale" && !currentFile, done: false
-    },
-    { id: "upscale", label: "Upscaling", sub: "NCNN Vulkan", active: stage === "upscale", done: stagesDone.upscale, skip: !doUpscale },
-    { id: "rembg", label: "Remove BG", sub: "BiRefNet", active: stage === "rembg", done: stagesDone.rembg, skip: !doRembg },
-    { id: "output", label: "Output", sub: `${imageDone} done`, active: false, done: stagesDone.rembg || stagesDone.upscale },
+    { id: "upscale", label: "Upscaling",  sub: "NCNN Vulkan", active: stage === "upscale", done: stagesDone.upscale, skip: !doUpscale },
+    { id: "rembg",   label: "Remove BG",  sub: "BiRefNet",    active: stage === "rembg",   done: stagesDone.rembg,   skip: !doRembg  },
   ];
 
   return (
     <div style={{
-      flex: 1, display: "flex", flexDirection: "column",
+      flex: 1, display: "flex", flexDirection: "row",
       margin: "12px 12px 0 0", borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel, overflow: "hidden"
     }}>
       <style>{`
-        @keyframes pulseFade { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        @keyframes flowDot   { 0%{transform:translateX(0);opacity:0.15} 50%{transform:translateX(16px);opacity:1} 100%{transform:translateX(32px);opacity:0.15} }
-        @keyframes slideIn   { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes pulseFade  { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes flowDot    { 0%{transform:translateX(0);opacity:0.15} 50%{transform:translateX(16px);opacity:1} 100%{transform:translateX(32px);opacity:0.15} }
+        @keyframes slideIn    { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes previewIn  { from{opacity:0} to{opacity:1} }
+        @keyframes blurPulse  { 0%,100%{filter:blur(8px) brightness(0.7)} 50%{filter:blur(5px) brightness(0.8)} }
       `}</style>
 
-      <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-        {stages.map(s => (
-          <div key={s.id} style={{
-            flex: 1, textAlign: "center", padding: "5px 0",
-            fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700,
-            color: s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim
-          }}>
-            {s.label}
-          </div>
-        ))}
-      </div>
+      {/* ── Left: stage cards ─────────────────────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", width: 220, flexShrink: 0, borderRight: `1px solid ${C.border}` }}>
+        <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+          {stages.map(s => (
+            <div key={s.id} style={{
+              flex: 1, textAlign: "center", padding: "5px 0",
+              fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700,
+              color: s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim
+            }}>{s.label}</div>
+          ))}
+        </div>
 
-      <div style={{
-        flex: 1, display: "flex", alignItems: "center",
-        padding: "0 12px", gap: 0, minHeight: 0
-      }}>
-        {stages.map((s, i) => {
-          const cardBg = s.done ? "#0d2010" : s.active ? "#140c28" : C.panel2;
-          const cardBdr = s.done ? "#1e4020" : s.active ? "#3a2070" : C.border;
-          const cardGlow = s.active ? "0 0 18px #3a207066" : s.done ? "0 0 12px #1a402044" : "none";
-          const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
-
-          return (
-            <div key={s.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
-              <div style={{
-                flex: 1, background: cardBg, border: `1px solid ${cardBdr}`,
-                borderRadius: 5, padding: "10px 8px", textAlign: "center",
-                boxShadow: cardGlow, transition: "all 0.4s ease"
-              }}>
-                {s.done && (
-                  <div style={{ fontSize: 16, color: C.green, lineHeight: 1, marginBottom: 2 }}>✓</div>
-                )}
-                {s.active && (
-                  <div style={{
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    gap: 6, animation: "pulseFade 1.4s ease-in-out infinite"
-                  }}>
-                    <Spinner color={C.yellow} size={13} />
-                    <span style={{ fontSize: 10, color: C.yellow, fontWeight: 600 }}>{s.sub}</span>
-                  </div>
-                )}
-                {!s.active && !s.done && (
-                  <div style={{
-                    fontSize: 10, color: textColor,
-                    fontFamily: s.id === "input" || s.id === "output" ? "JetBrains Mono" : "inherit",
-                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-                  }}>
-                    {s.skip ? "skipped" : s.id === "output" ? (imageDone > 0 ? `${imageDone} done` : "—") : s.sub}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 8px", gap: 0, minHeight: 0 }}>
+          {stages.map((s, i) => {
+            const cardBg  = s.done ? "#0d2010" : s.active ? "#140c28" : C.panel2;
+            const cardBdr = s.done ? "#1e4020" : s.active ? "#3a2070" : C.border;
+            const cardGlow = s.active ? "0 0 14px #3a207066" : s.done ? "0 0 8px #1a402044" : "none";
+            const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
+            return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
+                <div style={{
+                  flex: 1, background: cardBg, border: `1px solid ${cardBdr}`,
+                  borderRadius: 5, padding: "10px 6px", textAlign: "center",
+                  boxShadow: cardGlow, transition: "all 0.4s ease"
+                }}>
+                  {s.done && <div style={{ fontSize: 16, color: C.green, lineHeight: 1, marginBottom: 2 }}>✓</div>}
+                  {s.active && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, animation: "pulseFade 1.4s ease-in-out infinite" }}>
+                      <Spinner color={C.yellow} size={12} />
+                      <span style={{ fontSize: 9, color: C.yellow, fontWeight: 600 }}>{s.sub}</span>
+                    </div>
+                  )}
+                  {!s.active && !s.done && (
+                    <div style={{ fontSize: 9, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {s.skip ? "skipped" : s.sub}
+                    </div>
+                  )}
+                </div>
+                {i < stages.length - 1 && (
+                  <div style={{ width: 20, height: 2, background: C.dim2, flexShrink: 0, position: "relative", margin: "0 2px" }}>
+                    <div style={{
+                      position: "absolute", top: -4, left: 0, width: 8, height: 8,
+                      borderRadius: "50%", background: s.done ? C.green : C.yellow,
+                      opacity: s.done ? 0.5 : 0.7,
+                      animation: s.active || s.done ? `flowDot 1.4s ease-in-out infinite` : "none",
+                      animationDelay: `${i * 0.46}s`
+                    }} />
                   </div>
                 )}
               </div>
+            );
+          })}
+        </div>
 
-              {i < stages.length - 1 && (
-                <div style={{
-                  width: 28, height: 2, background: C.dim2,
-                  flexShrink: 0, position: "relative", margin: "0 2px"
-                }}>
-                  <div style={{
-                    position: "absolute", top: -4, left: 0, width: 10, height: 10,
-                    borderRadius: "50%", background: s.done ? C.green : C.yellow,
-                    opacity: s.done ? 0.5 : 0.7,
-                    animation: s.active || s.done ? `flowDot 1.4s ease-in-out infinite` : "none",
-                    animationDelay: `${i * 0.46}s`
-                  }} />
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {recentDone.length > 0 && (
+          <div style={{
+            borderTop: `1px solid ${C.border}`, padding: "4px 8px",
+            display: "flex", gap: 4, overflowX: "hidden", flexShrink: 0, alignItems: "center"
+          }}>
+            <span style={{ fontSize: 8, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>Done:</span>
+            {recentDone.slice(0, 3).map((f, i) => (
+              <div key={i} style={{
+                background: "#0d2010", border: `1px solid #1a3a20`,
+                borderRadius: 3, padding: "2px 5px", fontSize: 8,
+                fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
+                animation: "slideIn 0.2s ease",
+                maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+              }}>✓ {f}</div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {recentDone.length > 0 && (
-        <div style={{
-          borderTop: `1px solid ${C.border}`, padding: "5px 12px",
-          display: "flex", gap: 5, overflowX: "hidden", flexShrink: 0, alignItems: "center"
-        }}>
-          <span style={{
-            fontSize: 9, color: C.dim, textTransform: "uppercase",
-            letterSpacing: "0.08em", flexShrink: 0
-          }}>Done:</span>
-          {recentDone.slice(0, 6).map((f, i) => (
-            <div key={i} style={{
-              background: "#0d2010", border: `1px solid #1a3a20`,
-              borderRadius: 3, padding: "2px 7px", fontSize: 9,
-              fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
-              animation: "slideIn 0.2s ease"
-            }}>
-              ✓ {f}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* ── Right: live image preview ─────────────────────────────────── */}
+      <div style={{ flex: 1, position: "relative", overflow: "hidden", background: "#08090f", minWidth: 0 }}>
+        {previewPath ? (
+          <>
+            <img
+              key={previewPath}
+              src={`${BASE}/image?path=${encodeURIComponent(previewPath)}`}
+              alt=""
+              style={{
+                width: "100%", height: "100%", objectFit: "contain",
+                display: "block",
+                animation: "blurPulse 2s ease-in-out infinite",
+              }}
+              onLoad={e => { e.target.style.animation = "previewIn 0.3s ease"; }}
+            />
+            <div style={{
+              position: "absolute", bottom: 6, left: 0, right: 0,
+              textAlign: "center", fontSize: 9, color: "rgba(255,255,255,0.45)",
+              fontFamily: "JetBrains Mono", pointerEvents: "none",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              padding: "0 8px"
+            }}>{currentFile}</div>
+          </>
+        ) : (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            height: "100%", color: C.dim2, fontSize: 11
+          }}>
+            {stage ? <Spinner color={C.dim} size={14} /> : "—"}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -561,6 +577,108 @@ function SmStat({ label, value, color }) {
     <div style={{ textAlign: "center" }}>
       <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: "JetBrains Mono", lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 10, color: C.dim, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+    </div>
+  );
+}
+
+// ── LivePreview — full-area image preview during run ─────────────────────────
+
+function LivePreview({ running, done, previewPath, currentFile, imageDone, totalImages }) {
+  const [loaded, setLoaded] = useState(false);
+  const [prevSrc, setPrevSrc] = useState("");
+
+  // Track source changes to show loading state
+  const src = previewPath
+    ? `${BASE}/image?path=${encodeURIComponent(previewPath)}`
+    : "";
+
+  useEffect(() => {
+    if (src !== prevSrc) { setLoaded(false); setPrevSrc(src); }
+  }, [src]);
+
+  if (done && !running) return (
+    <div style={{
+      flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", gap: 14, borderRadius: 6,
+      border: `1px solid ${C.border}`, background: C.panel, minHeight: 0,
+    }}>
+      <div style={{ fontSize: 36, color: C.green }}>✓</div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: C.green }}>Pipeline complete</div>
+      <div style={{ display: "flex", gap: 24 }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: C.green, fontFamily: "JetBrains Mono" }}>{imageDone}</div>
+          <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase" }}>Done</div>
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: C.dim, fontFamily: "JetBrains Mono" }}>{totalImages || "—"}</div>
+          <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase" }}>Total</div>
+        </div>
+      </div>
+      {previewPath && (
+        <img src={src} alt="" style={{
+          maxHeight: 180, maxWidth: "80%", objectFit: "contain",
+          borderRadius: 4, opacity: 0.5,
+        }} />
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{
+      flex: 1, position: "relative", borderRadius: 6, overflow: "hidden",
+      background: "#07080e", border: `1px solid ${C.border}`, minHeight: 0,
+    }}>
+      <style>{`
+        @keyframes previewFadeIn { from{opacity:0} to{opacity:1} }
+        @keyframes loadingPulse  { 0%,100%{opacity:0.4} 50%{opacity:0.8} }
+      `}</style>
+
+      {src ? (
+        <>
+          {/* Loading shimmer shown while new image loads */}
+          {!loaded && (
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              animation: "loadingPulse 1.2s ease-in-out infinite",
+            }}>
+              <Spinner color={C.dim} size={18} />
+            </div>
+          )}
+          <img
+            key={src}
+            src={src}
+            alt=""
+            onLoad={() => setLoaded(true)}
+            onError={() => setLoaded(true)}
+            style={{
+              width: "100%", height: "100%", objectFit: "contain", display: "block",
+              opacity: loaded ? 1 : 0,
+              transition: "opacity 0.3s ease",
+            }}
+          />
+          {/* Filename label */}
+          <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0,
+            padding: "16px 10px 6px",
+            background: "linear-gradient(transparent, rgba(0,0,0,0.6))",
+            fontSize: 9, color: "rgba(255,255,255,0.55)",
+            fontFamily: "JetBrains Mono", pointerEvents: "none",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            textAlign: "center",
+          }}>
+            {currentFile || previewPath.replace(/.*[/\\]/, "")}
+          </div>
+        </>
+      ) : (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          height: "100%", gap: 8, color: C.dim2, fontSize: 11,
+        }}>
+          <Spinner color={C.dim2} size={13} />
+          <span style={{ fontFamily: "JetBrains Mono" }}>waiting…</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -599,22 +717,22 @@ function StageRow({ label, stats, total, active, stageDone, color }) {
   );
 }
 
-function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, doUpscale, doRembg }) {
+function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, doUpscale, doRembg, stagesDone = {} }) {
   const fmt  = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   const n    = totalImages || 0;
   const errs = upStats.err + bgStats.err;
 
   return (
-    <div style={{ margin: "10px 12px 0 0", flexShrink: 0 }}>
+    <div style={{ marginTop: 8, flexShrink: 0 }}>
       <div style={{
         background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4,
-        padding: "8px 14px", display: "flex", flexDirection: "column", gap: 6,
+        padding: "7px 14px", display: "flex", flexDirection: "column", gap: 5,
       }}>
         {doUpscale && (
           <StageRow
             label="Upscale" stats={upStats} total={n}
             active={stage === "upscale"}
-            stageDone={stage === "rembg" || stage === "done" || (done && !doRembg)}
+            stageDone={stagesDone.upscale || stage === "rembg" || stage === "done" || (done && !doRembg)}
             color={C.blue}
           />
         )}
@@ -622,13 +740,13 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
           <StageRow
             label="Remove BG" stats={bgStats} total={n}
             active={stage === "rembg"}
-            stageDone={stage === "done" || (done && !doUpscale)}
+            stageDone={stagesDone.rembg || stage === "done" || (done && !doUpscale)}
             color={C.magenta}
           />
         )}
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12,
-          paddingTop: 5, borderTop: `1px solid ${C.border}`, marginTop: 2,
+          paddingTop: 4, borderTop: `1px solid ${C.border}`, marginTop: 1,
         }}>
           {(running || done) && (
             <span style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono" }}>⏱ {fmt(elapsed)}</span>
@@ -645,6 +763,181 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
   );
 }
 
+// ── Tag chip input for exclude list ──────────────────────────────────────────
+
+function TagInput({ tags, onChange }) {
+  const [input, setInput] = useState("");
+  const add = (raw) => {
+    const val = raw.trim().replace(/,$/, "").trim();
+    if (!val || tags.includes(val)) return;
+    onChange([...tags, val]);
+  };
+  const onKey = (e) => {
+    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(input); setInput(""); }
+    if (e.key === "Backspace" && !input && tags.length) onChange(tags.slice(0, -1));
+  };
+  return (
+    <div style={{
+      display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center",
+      background: C.panel2, border: `1px solid ${C.border}`,
+      borderRadius: 4, padding: "4px 6px", minHeight: 32, cursor: "text",
+    }} onClick={e => e.currentTarget.querySelector("input")?.focus()}>
+      {tags.map(t => (
+        <span key={t} style={{
+          display: "inline-flex", alignItems: "center", gap: 4,
+          background: C.dim2, color: C.text, borderRadius: 3,
+          padding: "2px 6px", fontSize: 10, fontFamily: "JetBrains Mono",
+        }}>
+          {t}
+          <button onClick={() => onChange(tags.filter(x => x !== t))} style={{
+            background: "none", border: "none", color: C.dim,
+            cursor: "pointer", padding: 0, lineHeight: 1, fontSize: 11,
+          }}>×</button>
+        </span>
+      ))}
+      <input
+        value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKey}
+        onBlur={() => { if (input) { add(input); setInput(""); } }}
+        placeholder={tags.length ? "" : "filename.webp  →  Enter"}
+        style={{
+          flex: 1, minWidth: 80, background: "transparent", border: "none",
+          outline: "none", color: C.text, fontSize: 10,
+          fontFamily: "JetBrains Mono", padding: "2px 2px",
+        }}
+      />
+    </div>
+  );
+}
+
+// ── LogPanel — collapsible output log ────────────────────────────────────────
+
+function LogPanel({ logRef, log, running }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div style={{
+      flex: open ? 1 : "0 0 auto", minWidth: 0,
+      display: "flex", flexDirection: "column",
+      marginRight: 6, transition: "flex 0.2s ease"
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div style={{ fontSize: 10, letterSpacing: "0.12em", color: C.dim, textTransform: "uppercase", fontWeight: 700 }}>
+          Output log
+        </div>
+        <button onClick={() => setOpen(v => !v)} style={{
+          background: "transparent", color: C.dim, border: "none",
+          fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
+        }}>{open ? "▾ hide" : "▸ show"}</button>
+      </div>
+      {open && (
+        <div ref={logRef} style={{
+          flex: 1, overflowY: "auto", background: C.panel,
+          border: `1px solid ${C.border}`, borderRadius: 4,
+          padding: "8px 12px", fontFamily: "JetBrains Mono",
+          fontSize: 11, lineHeight: 1.7,
+        }}>
+          {log.length === 0 && !running ? (
+            <div style={{ color: C.dim, fontSize: 12 }}>Configure and press Run Pipeline.</div>
+          ) : log.map((e, i) => (
+            <div key={i} style={{
+              overflowWrap: "break-word", wordBreak: "break-word",
+              color: KIND_COLOR[e.kind] ?? C.dim,
+              opacity: e.kind === "info" ? 0.55 : 1,
+              paddingLeft: e.kind === "section" ? 0 : 4,
+              borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
+              marginBottom: e.kind === "section" ? 3 : 0,
+            }}>
+              {e.raw}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ErrorPanel — collapsible with context lines ───────────────────────────────
+
+function ErrorPanel({ errorRef, errors, imageError }) {
+  const [open, setOpen] = useState(true);
+  const [expanded, setExpanded] = useState({});
+  const hasErrors = imageError > 0;
+
+  return (
+    <div style={{
+      width: open ? 290 : "auto", flexShrink: 0,
+      display: "flex", flexDirection: "column",
+      transition: "width 0.2s ease"
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div style={{
+          fontSize: 10, letterSpacing: "0.12em", fontWeight: 700,
+          textTransform: "uppercase",
+          color: hasErrors ? C.red : C.dim
+        }}>
+          Errors {hasErrors ? `(${imageError})` : ""}
+        </div>
+        <button onClick={() => setOpen(v => !v)} style={{
+          background: "transparent", color: C.dim, border: "none",
+          fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
+        }}>{open ? "▾ hide" : "▸ show"}</button>
+      </div>
+      {open && (
+        <div ref={errorRef} style={{
+          flex: 1, overflowY: "auto",
+          background: hasErrors ? "#110808" : C.panel,
+          border: `1px solid ${hasErrors ? "#3a1515" : C.border}`,
+          borderRadius: 4, padding: "8px 10px",
+          fontFamily: "JetBrains Mono", fontSize: 10, lineHeight: 1.7,
+        }}>
+          {errors.length === 0 ? (
+            <div style={{ color: C.dim, fontSize: 11 }}>No errors</div>
+          ) : errors.map((e, i) => (
+            <div key={i} style={{
+              paddingBottom: 8, marginBottom: 8,
+              borderBottom: i < errors.length - 1 ? `1px solid #2a1212` : "none"
+            }}>
+              {/* Main error line */}
+              <div style={{
+                color: C.red, whiteSpace: "pre-wrap", wordBreak: "break-word", fontWeight: 600,
+              }}>{e.raw}</div>
+
+              {/* Context toggle */}
+              {e.context?.length > 0 && (
+                <>
+                  <button
+                    onClick={() => setExpanded(p => ({ ...p, [i]: !p[i] }))}
+                    style={{
+                      marginTop: 3, background: "transparent", border: "none",
+                      color: C.dim, fontSize: 9, cursor: "pointer",
+                      fontFamily: "JetBrains Mono", padding: 0, letterSpacing: "0.05em"
+                    }}
+                  >
+                    {expanded[i] ? "▾ hide context" : "▸ show context"}
+                  </button>
+                  {expanded[i] && (
+                    <div style={{
+                      marginTop: 4, padding: "4px 6px",
+                      background: "#0a0505", borderRadius: 3,
+                      border: `1px solid #2a1212`,
+                    }}>
+                      {e.context.map((line, j) => (
+                        <div key={j} style={{
+                          color: "#7a5050", whiteSpace: "pre-wrap", wordBreak: "break-word",
+                          fontSize: 9,
+                        }}>{line}</div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
@@ -656,23 +949,35 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
   const [outputDir, setOutputDir] = useState("");
   const [canvasSize, setCanvasSize] = useState("1440");
   const [thumbnail, setThumbnail] = useState(true);
-  const [showErrors, setShowErrors] = useState(true);
-  const [excludeFiles, setExcludeFiles] = useState("");  // newline-separated filenames
+  const [excludeTags, setExcludeTags] = useState([]);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  // Load persisted settings from the API on first mount
+  useEffect(() => {
+    fetch(`${BASE}/settings`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.settings) return;
+        const s = data.settings;
+        if (s.output?.folder_mode) setFolderMode(s.output.folder_mode);
+        if (s.output?.output_dir)  setOutputDir(s.output.output_dir);
+        if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
+        if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
+      })
+      .catch(() => {})
+      .finally(() => setSettingsLoaded(true));
+  }, []);
 
   const {
     running, done, log, errors, imageDone, imageSkipped, imageError,
-    totalImages, currentFile, recentDone, elapsed, stage, stagesDone,
+    totalImages, currentFile, previewPath, recentDone, elapsed, stage, stagesDone,
     upStats, bgStats,
     logRef, errorRef, start, stop,
   } = usePipeline();
 
   const handleStart = useCallback(() => {
-    const excludeList = excludeFiles
-      .split(/[\n,]+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-    start({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList });
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeFiles]);
+    start({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList: excludeTags });
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags]);
 
   const handleGoToEditor = useCallback(() => {
     onGoToEditor({ outputDir: outputDir.trim(), canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
@@ -768,21 +1073,9 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
               <div style={{ marginTop: 14, marginBottom: 6, borderTop: `1px solid ${C.border}`, paddingTop: 12 }} />
               <SectionLabel>Exclude from BG removal</SectionLabel>
               <div style={{ fontSize: 10, color: C.dim, marginBottom: 5, lineHeight: 1.5 }}>
-                Filenames to skip rembg (crop only). One per line or comma-separated.
+                Type filename → Enter to add. Click × to remove.
               </div>
-              <textarea
-                value={excludeFiles}
-                onChange={e => setExcludeFiles(e.target.value)}
-                placeholder={"image1.webp\nimage2.jpg"}
-                rows={3}
-                style={{
-                  width: "100%", background: C.panel2, color: C.text,
-                  border: `1px solid ${C.border}`, borderRadius: 4,
-                  padding: "5px 8px", fontSize: 10, fontFamily: "JetBrains Mono",
-                  outline: "none", resize: "vertical", boxSizing: "border-box",
-                  colorScheme: "dark",
-                }}
-              />
+              <TagInput tags={excludeTags} onChange={setExcludeTags} />
             </>
           )}
 
@@ -842,104 +1135,51 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
           </div>
         </div>
 
-        {/* Right: 4-zone layout */}
+        {/* Right: new layout
+            Idle/done:  drop-zone fills top | log+error share bottom
+            Running:    preview fills top  | compact stage bar | log+error share bottom
+        */}
         <div style={{
           flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0,
           padding: "0 0 12px 12px"
         }}>
 
-          <div style={{ flex: "0 0 42%", display: "flex", minHeight: 0 }}>
-            <Zone1
-              running={running} done={done}
-              stage={stage} stagesDone={stagesDone}
-              currentFile={currentFile} recentDone={recentDone}
-              imageDone={imageDone} totalImages={totalImages}
-              doUpscale={doUpscale} doRembg={doRembg}
-              inputDir={inputDir} setInputDir={setInputDir}
-            />
-          </div>
-
-          <Zone2
-            upStats={upStats} bgStats={bgStats}
-            totalImages={totalImages} elapsed={elapsed}
-            running={running} done={done} stage={stage}
-            doUpscale={doUpscale} doRembg={doRembg}
-          />
-
-          <div style={{ flex: 1, display: "flex", gap: 10, minHeight: 0, marginTop: 10 }}>
-
-            {/* Zone 3: output log */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-              <div style={{
-                fontSize: 10, letterSpacing: "0.12em", color: C.dim,
-                textTransform: "uppercase", fontWeight: 700, marginBottom: 6
-              }}>Output log</div>
-              <div ref={logRef} style={{
-                flex: 1, overflowY: "auto", background: C.panel,
-                border: `1px solid ${C.border}`, borderRadius: 4,
-                padding: "8px 12px", fontFamily: "JetBrains Mono",
-                fontSize: 11, lineHeight: 1.75
-              }}>
-                {log.length === 0 && !running ? (
-                  <div style={{ color: C.dim, fontSize: 12 }}>Configure and press Run Pipeline.</div>
-                ) : log.map((e, i) => (
-                  <div key={i} style={{
-                    whiteSpace: "pre-wrap", wordBreak: "break-all",
-                    color: KIND_COLOR[e.kind] ?? C.dim,
-                    opacity: e.kind === "info" ? 0.6 : 1,
-                    paddingLeft: e.kind === "section" ? 0 : 4,
-                    borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
-                    marginBottom: e.kind === "section" ? 2 : 0,
-                  }}>
-                    {e.raw}
-                  </div>
-                ))}
-              </div>
+          {/* Top area — changes by state */}
+          {(running || done) ? (
+            /* Running / done: big preview on top */
+            <div style={{ flex: "0 0 52%", display: "flex", flexDirection: "column", minHeight: 0, marginTop: 12 }}>
+              <LivePreview
+                running={running} done={done}
+                previewPath={previewPath} currentFile={currentFile}
+                imageDone={imageDone} totalImages={totalImages}
+              />
+              {/* Compact stage bar below preview */}
+              <Zone2
+                upStats={upStats} bgStats={bgStats}
+                totalImages={totalImages} elapsed={elapsed}
+                running={running} done={done} stage={stage}
+                doUpscale={doUpscale} doRembg={doRembg}
+                stagesDone={stagesDone}
+              />
             </div>
-
-            {/* Zone 4: error log */}
-            <div style={{ width: 264, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-              <div style={{
-                display: "flex", alignItems: "center",
-                justifyContent: "space-between", marginBottom: 6
-              }}>
-                <div style={{
-                  fontSize: 10, letterSpacing: "0.12em", fontWeight: 700,
-                  textTransform: "uppercase",
-                  color: imageError > 0 ? C.red : C.dim
-                }}>
-                  Errors {imageError > 0 ? `(${imageError})` : ""}
-                </div>
-                <button onClick={() => setShowErrors(v => !v)} style={{
-                  background: "transparent", color: C.dim, border: "none",
-                  fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
-                }}>
-                  {showErrors ? "▾ hide" : "▸ show"}
-                </button>
-              </div>
-              {showErrors && (
-                <div ref={errorRef} style={{
-                  flex: 1, overflowY: "auto",
-                  background: imageError > 0 ? "#110808" : C.panel,
-                  border: `1px solid ${imageError > 0 ? "#3a1515" : C.border}`,
-                  borderRadius: 4, padding: "8px 12px",
-                  fontFamily: "JetBrains Mono", fontSize: 11, lineHeight: 1.75
-                }}>
-                  {errors.length === 0 ? (
-                    <div style={{ color: C.dim, fontSize: 12 }}>No errors</div>
-                  ) : errors.map((e, i) => (
-                    <div key={i} style={{
-                      color: C.red, whiteSpace: "pre-wrap",
-                      wordBreak: "break-all", paddingBottom: 7, marginBottom: 7,
-                      borderBottom: i < errors.length - 1 ? `1px solid #2a1212` : "none"
-                    }}>
-                      {e.raw}
-                    </div>
-                  ))}
-                </div>
-              )}
+          ) : (
+            /* Idle: drop-zone */
+            <div style={{ flex: "0 0 42%", display: "flex", minHeight: 0 }}>
+              <Zone1
+                running={running} done={done}
+                stage={stage} stagesDone={stagesDone}
+                currentFile={currentFile} previewPath={previewPath} recentDone={recentDone}
+                imageDone={imageDone} totalImages={totalImages}
+                doUpscale={doUpscale} doRembg={doRembg}
+                inputDir={inputDir} setInputDir={setInputDir}
+              />
             </div>
+          )}
 
+          {/* Bottom: log + error panels always visible */}
+          <div style={{ flex: 1, display: "flex", gap: 0, minHeight: 0, marginTop: 10 }}>
+            <LogPanel logRef={logRef} log={log} running={running} />
+            <ErrorPanel errorRef={errorRef} errors={errors} imageError={imageError} />
           </div>
         </div>
       </div>

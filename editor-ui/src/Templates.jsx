@@ -373,7 +373,13 @@ export default function Templates({ onBack, hideHeader }) {
                       border: `1px solid ${C.border}`, flexShrink: 0
                     }}>
                       <img
-                        src={tpl.ref_image && tpl.ref_image.startsWith("data:") ? tpl.ref_image : `${BASE}/image?path=${encodeURIComponent(tpl.ref_image || "")}`}
+                        src={
+                          !tpl.ref_image ? null
+                          : tpl.ref_image.startsWith("data:") ? tpl.ref_image
+                          : tpl.ref_image.includes("/") || tpl.ref_image.includes("\\")
+                            ? `${BASE}/image?path=${encodeURIComponent(tpl.ref_image)}`
+                            : `${BASE}/templates/image?name=${encodeURIComponent(tpl.ref_image)}`
+                        }
                         alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }}
                         onError={e => { e.target.style.display = "none"; }} />
                     </div>
