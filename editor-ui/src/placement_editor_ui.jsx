@@ -187,7 +187,7 @@ export default function PlacementEditor() {
         undoRef.current = { id:it.id, canvasX:it.canvasX, canvasY:it.canvasY, scale:it.scale };
         setSelId(it.id);
         dragRef.current = { itemId:it.id, ox:mx-it.canvasX*S, oy:my-it.canvasY*S };
-        containerRef.current?.focus();
+        containerRef.current?.focus({ preventScroll: true });
         return;
       }
     }
@@ -318,7 +318,8 @@ export default function PlacementEditor() {
       tabIndex={0}
       onKeyDown={onKeyDown}
       style={{
-        display:"flex", background:C.bg, minHeight:"100vh",
+        display:"flex", background:C.bg, height:"100%",
+        overflow:"hidden",
         fontFamily:"'Outfit', 'DM Sans', system-ui, sans-serif",
         color:C.text, outline:"none", userSelect:"none",
         fontSize:13,

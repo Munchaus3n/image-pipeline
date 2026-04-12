@@ -80,7 +80,8 @@ def ask(title: str, options: list):
 # ── File helpers ───────────────────────────────────────────────────────────────
 
 def collect_images(root: Path, recursive: bool) -> tuple[list[Path], set[Path]]:
-    no_rembg_dir = root / "no_rembg"
+    """Collect images. Any file inside a folder named 'no_rembg' at any depth
+    (root/no_rembg/ OR root/product_A/no_rembg/) is added to no_rembg_set."""
     no_rembg_set: set[Path] = set()
 
     if recursive:
@@ -88,17 +89,15 @@ def collect_images(root: Path, recursive: bool) -> tuple[list[Path], set[Path]]:
     else:
         all_images = sorted(p for p in root.iterdir()
                             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS)
-        if no_rembg_dir.exists():
-            extras = sorted(p for p in no_rembg_dir.iterdir()
+        no_rembg_root = root / "no_rembg"
+        if no_rembg_root.exists():
+            extras = sorted(p for p in no_rembg_root.iterdir()
                             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS)
             all_images = sorted(all_images + extras)
 
     for p in all_images:
-        try:
-            p.relative_to(no_rembg_dir)
+        if "no_rembg" in (part.lower() for part in p.parts):
             no_rembg_set.add(p)
-        except ValueError:
-            pass
 
     return all_images, no_rembg_set
 
@@ -217,14 +216,14 @@ def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
     return Image.merge("RGBA", (r, g, b, ImageChops.lighter(blurred, inner)))
 
 
-def _select_onnx_providers() -> tuple[list[str], str]:
-    """Auto-select the best available ONNX Runtime provider.
+def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
+    """GPU-first provider selection with CPU fallback.
 
-    Windows:  DmlExecutionProvider covers NVIDIA/AMD/Intel without needing CUDA.
-              Install onnxruntime-directml (not onnxruntime) in your venv to enable.
-    Linux:    CUDAExecutionProvider if present.
-    Fallback: CPUExecutionProvider always available.
+    Priority: DirectML (any GPU on Windows) → CUDA → CPU.
+    force_cpu=True skips GPU entirely — use to avoid DML OOM errors.
     """
+    if force_cpu:
+        return ["CPUExecutionProvider"], "CPU (forced)"
     try:
         available = ort.get_available_providers()
         if "DmlExecutionProvider" in available:
@@ -260,7 +259,7 @@ def _fill_mask_holes(mask: Image.Image, threshold: int = 30) -> Image.Image:
 
 BIREFNET_MAX = 1024   # BiRefNet's internal inference resolution; no benefit going larger
 
-def remove_bg(src: Path, dst: Path, session) -> bool:
+def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         img = Image.open(src).convert("RGBA")
@@ -271,10 +270,11 @@ def remove_bg(src: Path, dst: Path, session) -> bool:
             result.save(dst, format="PNG")
             return True
 
-        # Downscale to BIREFNET_MAX for inference only.
-        # BiRefNet resizes internally to 1024px anyway; feeding a 4k image wastes
-        # RAM with no quality gain. Keep the full-res image separate for compositing.
         w, h = img.size
+
+        # BRIA RMBG-2.0 resizes internally to 1024×1024 (square) via normalize().
+        # BiRefNet also resizes to 1024. Pre-downscaling is only useful to save RAM
+        # on very large images before the session.run() call.
         if max(w, h) > BIREFNET_MAX:
             scale = BIREFNET_MAX / max(w, h)
             infer_img = img.resize(
@@ -284,30 +284,28 @@ def remove_bg(src: Path, dst: Path, session) -> bool:
         else:
             infer_img = img
 
-        # Run inference with only_mask=True to get BiRefNet's raw sigmoid output.
-        # DO NOT use post_process_mask=True — it applies a hard binary threshold
-        # (np.where(mask < 127, 0, 255)) that destroys BiRefNet's smooth gradient
-        # edges and causes pixelated/staircase cutouts.
-        #
-        # Contrast enhancement: apply 1.4× contrast to the inference image ONLY.
-        # This improves segmentation of low-contrast products (white object on white bg,
-        # overexposed images, glass) without affecting the output — the mask is always
-        # applied back to the original full-res unmodified image.
-        from PIL import ImageEnhance
-        infer_rgb  = infer_img.convert("RGB")
-        infer_rgb  = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
+        infer_rgb = infer_img.convert("RGB")
+
+        # Contrast enhancement ONLY for BiRefNet models.
+        # BRIA was not trained with contrast-boosted inputs — applying it degrades
+        # its segmentation quality. BiRefNet benefits from it on low-contrast products.
+        is_bria = model_name == "bria-rmbg"
+        if not is_bria:
+            from PIL import ImageEnhance
+            infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
+
         mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
 
-        # Scale mask back to full-res.
-        # Use BICUBIC — better gradient preservation than LANCZOS for alpha masks.
+        # Scale mask back to full-res
         if mask_small.size != img.size:
             mask = mask_small.resize(img.size, Image.BICUBIC)
         else:
             mask = mask_small
 
-        # Fill enclosed transparent holes (glass, chrome, blender bowls) → opaque.
-        # Only affects fully-enclosed interior regions; real edge gradients untouched.
-        mask = _fill_mask_holes(mask)
+        # Fill enclosed transparent holes (glass, chrome).
+        # Skip for BRIA — its masks are already clean and hole-filling can corrupt them.
+        if not is_bria:
+            mask = _fill_mask_holes(mask)
 
         img.putalpha(mask)
         result = tight_crop(refine_edges(img))
@@ -366,20 +364,28 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
 def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
                     dst_root: Path, src_root: Path,
                     no_rembg_originals: set | None = None,
-                    corrupted_dir: Path | None = None) -> list[Path]:
+                    corrupted_dir: Path | None = None,
+                    force_cpu: bool = False) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
 
     no_rembg_names = {p.name for p in (no_rembg_originals or set())}
     print(f"__total__:{len(upscaled)}", flush=True)
 
-    providers, device_label = _select_onnx_providers()
-    info(f"Using {device_label} for background removal (BiRefNet).")
-    if device_label == "CPU":
-        info("  → To enable GPU: pip uninstall onnxruntime && pip install onnxruntime-directml")
-    info("Loading BiRefNet — first run downloads ~973MB...")
+    providers, device_label = _select_onnx_providers(force_cpu=force_cpu)
+    info(f"Using {device_label} for background removal ({REMBG_MODEL}).")
+    if "CPU" in device_label and not force_cpu:
+        info("  → GPU not available. To enable: pip uninstall onnxruntime && pip install onnxruntime-directml")
+    info(f"Loading {REMBG_MODEL} — first run downloads model weights...")
     console.print()
 
-    session = new_session(REMBG_MODEL, providers=providers)
+    try:
+        session = new_session(REMBG_MODEL, providers=providers)
+    except Exception as e:
+        if not force_cpu and ("8007000E" in str(e) or "not enough memory" in str(e).lower()):
+            warn("DirectML OOM — retrying on CPU automatically...")
+            session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
+        else:
+            raise
     ok("Model loaded.")
 
     outputs, to_run = [], []
@@ -418,7 +424,7 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         for src, dst in to_run:
             progress.update(task, description=src.name)
             print(f"__processing__:{src}", flush=True)
-            if remove_bg(src, dst, session):
+            if remove_bg(src, dst, session, model_name=REMBG_MODEL):
                 ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}")
                 print(f"__ok_rembg__:{src.name}", flush=True)
             else:
@@ -447,7 +453,8 @@ def main():
     parser.add_argument("--no-upscale",  action="store_true")
     parser.add_argument("--scale",       default="4", choices=["2", "4"])
     parser.add_argument("--no-rembg",    action="store_true")
-    parser.add_argument("--rembg-model", default="", help="Override BiRefNet model name")
+    parser.add_argument("--rembg-model", default="", help="Override rembg model name")
+    parser.add_argument("--force-cpu",   action="store_true", help="Force CPU; skips DirectML/CUDA")
     args = parser.parse_args()
 
     header()
@@ -565,7 +572,8 @@ def main():
     if do_rembg:
         src_root = upscale_dir if do_upscale else input_dir
         batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set,
-                        corrupted_dir=corrupted_dir)
+                        corrupted_dir=corrupted_dir,
+                        force_cpu=args.force_cpu)
     else:
         skip("background removal")
 

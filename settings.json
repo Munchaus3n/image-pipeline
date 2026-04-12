@@ -1,9 +1,10 @@
 {
   "processing": {
     "crop_padding": 0.04,
-    "edge_blur": 1,
-    "rembg_model": "birefnet-general",
-    "history_keep": 30
+    "edge_blur": 0.5,
+    "rembg_model": "bria-rmbg",
+    "history_keep": 30,
+    "force_cpu": false
   },
   "upscaler_api": {
     "provider": "local",

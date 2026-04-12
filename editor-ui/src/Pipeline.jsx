@@ -326,7 +326,7 @@ function usePipeline() {
 // ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
 
 function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, recentDone,
-  imageDone, totalImages, doUpscale, doRembg, inputDir, setInputDir }) {
+  imageDone, totalImages, doUpscale, doRembg, inputDir, setInputDir, rembgModel }) {
   const [dragOver, setDragOver] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -446,7 +446,7 @@ function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, rec
 
   const stages = [
     { id: "upscale", label: "Upscaling",  sub: "NCNN Vulkan", active: stage === "upscale", done: stagesDone.upscale, skip: !doUpscale },
-    { id: "rembg",   label: "Remove BG",  sub: "BiRefNet",    active: stage === "rembg",   done: stagesDone.rembg,   skip: !doRembg  },
+    { id: "rembg",   label: "Remove BG",  sub: rembgModel || "birefnet-general", active: stage === "rembg", done: stagesDone.rembg, skip: !doRembg },
   ];
 
   return (
@@ -951,6 +951,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
   const [thumbnail, setThumbnail] = useState(true);
   const [excludeTags, setExcludeTags] = useState([]);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [rembgModel, setRembgModel] = useState("birefnet-general");
 
   // Load persisted settings from the API on first mount
   useEffect(() => {
@@ -963,6 +964,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
         if (s.output?.output_dir)  setOutputDir(s.output.output_dir);
         if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
         if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
+        if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
       })
       .catch(() => {})
       .finally(() => setSettingsLoaded(true));
@@ -1092,7 +1094,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
               ? <div style={{ fontSize: 12, color: C.red }}>✕ Enable at least one stage</div>
               : <>
                 {doUpscale && <div style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
-                {doRembg && <div style={{ fontSize: 12, color: C.green }}>✓ Remove BG (BiRefNet)</div>}
+                {doRembg && <div style={{ fontSize: 12, color: C.green }}>✓ Remove BG ({rembgModel || "birefnet-general"})</div>}
               </>
             }
           </div>
@@ -1172,6 +1174,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
                 imageDone={imageDone} totalImages={totalImages}
                 doUpscale={doUpscale} doRembg={doRembg}
                 inputDir={inputDir} setInputDir={setInputDir}
+                rembgModel={rembgModel}
               />
             </div>
           )}

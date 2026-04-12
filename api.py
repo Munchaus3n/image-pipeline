@@ -429,7 +429,7 @@ def clear_session():
 
 _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
-                     "rembg_model": "birefnet-general", "history_keep": 30},
+                     "rembg_model": "birefnet-general", "history_keep": 30, "force_cpu": False},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
@@ -489,12 +489,14 @@ async def run_pipeline(cfg: PipelineConfig):
     if cfg.exclude_rembg:
         cmd += ["--exclude-rembg", ",".join(f.strip() for f in cfg.exclude_rembg if f.strip())]
 
-    # Read rembg_model from settings.json if present
+    # Read processing settings from settings.json
     try:
         _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")) if SETTINGS_FILE.exists() else {}
         rembg_model = _s.get("processing", {}).get("rembg_model", "birefnet-general")
         if rembg_model:
             cmd += ["--rembg-model", rembg_model]
+        if _s.get("processing", {}).get("force_cpu", False):
+            cmd.append("--force-cpu")
     except Exception:
         pass
 
