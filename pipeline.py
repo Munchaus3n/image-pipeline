@@ -217,10 +217,11 @@ def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
 
 
 def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
-    """GPU-first provider selection with CPU fallback.
+    """GPU-first provider selection. Falls back to CPU if no GPU provider available.
 
-    Priority: DirectML (any GPU on Windows) → CUDA → CPU.
-    force_cpu=True skips GPU entirely — use to avoid DML OOM errors.
+    Requires onnxruntime-directml (Windows) or onnxruntime-gpu (Linux/CUDA) for GPU.
+    Plain onnxruntime only has CPUExecutionProvider.
+    force_cpu=True: skip GPU — fixes DML OOM errors.
     """
     if force_cpu:
         return ["CPUExecutionProvider"], "CPU (forced)"
@@ -271,10 +272,6 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
             return True
 
         w, h = img.size
-
-        # BRIA RMBG-2.0 resizes internally to 1024×1024 (square) via normalize().
-        # BiRefNet also resizes to 1024. Pre-downscaling is only useful to save RAM
-        # on very large images before the session.run() call.
         if max(w, h) > BIREFNET_MAX:
             scale = BIREFNET_MAX / max(w, h)
             infer_img = img.resize(
@@ -286,24 +283,23 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
 
         infer_rgb = infer_img.convert("RGB")
 
-        # Contrast enhancement ONLY for BiRefNet models.
-        # BRIA was not trained with contrast-boosted inputs — applying it degrades
-        # its segmentation quality. BiRefNet benefits from it on low-contrast products.
-        is_bria = model_name == "bria-rmbg"
+        # Contrast boost ONLY for BiRefNet — it was trained on unmodified inputs.
+        # BRIA RMBG-2.0 was trained without any contrast adjustment; boosting it
+        # degrades segmentation quality and explains the gap vs HuggingFace demo.
+        is_bria = (model_name == "bria-rmbg")
         if not is_bria:
             from PIL import ImageEnhance
             infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
 
         mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
 
-        # Scale mask back to full-res
         if mask_small.size != img.size:
             mask = mask_small.resize(img.size, Image.BICUBIC)
         else:
             mask = mask_small
 
-        # Fill enclosed transparent holes (glass, chrome).
-        # Skip for BRIA — its masks are already clean and hole-filling can corrupt them.
+        # Hole-fill ONLY for BiRefNet — BRIA masks are already clean; applying it
+        # would corrupt transparent product areas that BRIA correctly preserves.
         if not is_bria:
             mask = _fill_mask_holes(mask)
 
@@ -373,16 +369,18 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
 
     providers, device_label = _select_onnx_providers(force_cpu=force_cpu)
     info(f"Using {device_label} for background removal ({REMBG_MODEL}).")
-    if "CPU" in device_label and not force_cpu:
-        info("  → GPU not available. To enable: pip uninstall onnxruntime && pip install onnxruntime-directml")
+    if device_label == "CPU" and not force_cpu:
+        info("  → GPU not available: install onnxruntime-directml to enable DirectML.")
+        info("  → pip uninstall onnxruntime && pip install onnxruntime-directml")
     info(f"Loading {REMBG_MODEL} — first run downloads model weights...")
     console.print()
 
     try:
         session = new_session(REMBG_MODEL, providers=providers)
     except Exception as e:
+        # Auto-fallback: DML can OOM during model load on some GPUs
         if not force_cpu and ("8007000E" in str(e) or "not enough memory" in str(e).lower()):
-            warn("DirectML OOM — retrying on CPU automatically...")
+            warn("DirectML OOM during load — retrying on CPU...")
             session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
         else:
             raise

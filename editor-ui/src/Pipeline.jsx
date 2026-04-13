@@ -445,129 +445,94 @@ function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, rec
   );
 
   const stages = [
-    { id: "upscale", label: "Upscaling",  sub: "NCNN Vulkan", active: stage === "upscale", done: stagesDone.upscale, skip: !doUpscale },
-    { id: "rembg",   label: "Remove BG",  sub: rembgModel || "birefnet-general", active: stage === "rembg", done: stagesDone.rembg, skip: !doRembg },
+    { id: "upscale", label: "Upscaling",  sub: "NCNN Vulkan",              active: stage === "upscale", done: stagesDone.upscale, skip: !doUpscale },
+    { id: "rembg",   label: "Remove BG",  sub: rembgModel || "birefnet-general", active: stage === "rembg",   done: stagesDone.rembg,   skip: !doRembg  },
   ];
 
   return (
     <div style={{
-      flex: 1, display: "flex", flexDirection: "row",
+      flex: 1, display: "flex", flexDirection: "column",
       margin: "12px 12px 0 0", borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel, overflow: "hidden"
     }}>
       <style>{`
-        @keyframes pulseFade  { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        @keyframes flowDot    { 0%{transform:translateX(0);opacity:0.15} 50%{transform:translateX(16px);opacity:1} 100%{transform:translateX(32px);opacity:0.15} }
-        @keyframes slideIn    { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
-        @keyframes previewIn  { from{opacity:0} to{opacity:1} }
-        @keyframes blurPulse  { 0%,100%{filter:blur(8px) brightness(0.7)} 50%{filter:blur(5px) brightness(0.8)} }
+        @keyframes pulseFade { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes flowDot   { 0%{transform:translateX(0);opacity:0.15} 50%{transform:translateX(16px);opacity:1} 100%{transform:translateX(32px);opacity:0.15} }
+        @keyframes slideIn   { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
       `}</style>
 
-      {/* ── Left: stage cards ─────────────────────────────────────────── */}
-      <div style={{ display: "flex", flexDirection: "column", width: 220, flexShrink: 0, borderRight: `1px solid ${C.border}` }}>
-        <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-          {stages.map(s => (
-            <div key={s.id} style={{
-              flex: 1, textAlign: "center", padding: "5px 0",
-              fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700,
-              color: s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim
-            }}>{s.label}</div>
-          ))}
-        </div>
+      {/* Stage header labels */}
+      <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+        {stages.map(s => (
+          <div key={s.id} style={{
+            flex: 1, textAlign: "center", padding: "6px 0",
+            fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700,
+            color: s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim
+          }}>{s.label}</div>
+        ))}
+      </div>
 
-        <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 8px", gap: 0, minHeight: 0 }}>
-          {stages.map((s, i) => {
-            const cardBg  = s.done ? "#0d2010" : s.active ? "#140c28" : C.panel2;
-            const cardBdr = s.done ? "#1e4020" : s.active ? "#3a2070" : C.border;
-            const cardGlow = s.active ? "0 0 14px #3a207066" : s.done ? "0 0 8px #1a402044" : "none";
-            const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
-            return (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
-                <div style={{
-                  flex: 1, background: cardBg, border: `1px solid ${cardBdr}`,
-                  borderRadius: 5, padding: "10px 6px", textAlign: "center",
-                  boxShadow: cardGlow, transition: "all 0.4s ease"
-                }}>
-                  {s.done && <div style={{ fontSize: 16, color: C.green, lineHeight: 1, marginBottom: 2 }}>✓</div>}
-                  {s.active && (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, animation: "pulseFade 1.4s ease-in-out infinite" }}>
-                      <Spinner color={C.yellow} size={12} />
-                      <span style={{ fontSize: 9, color: C.yellow, fontWeight: 600 }}>{s.sub}</span>
-                    </div>
-                  )}
-                  {!s.active && !s.done && (
-                    <div style={{ fontSize: 9, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {s.skip ? "skipped" : s.sub}
-                    </div>
-                  )}
-                </div>
-                {i < stages.length - 1 && (
-                  <div style={{ width: 20, height: 2, background: C.dim2, flexShrink: 0, position: "relative", margin: "0 2px" }}>
-                    <div style={{
-                      position: "absolute", top: -4, left: 0, width: 8, height: 8,
-                      borderRadius: "50%", background: s.done ? C.green : C.yellow,
-                      opacity: s.done ? 0.5 : 0.7,
-                      animation: s.active || s.done ? `flowDot 1.4s ease-in-out infinite` : "none",
-                      animationDelay: `${i * 0.46}s`
-                    }} />
+      {/* Stage cards — fill full width */}
+      <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px", gap: 0, minHeight: 0 }}>
+        {stages.map((s, i) => {
+          const cardBg   = s.done ? "#0d2010" : s.active ? "#140c28" : C.panel2;
+          const cardBdr  = s.done ? "#1e4020" : s.active ? "#3a2070" : C.border;
+          const cardGlow = s.active ? "0 0 14px #3a207066" : s.done ? "0 0 8px #1a402044" : "none";
+          const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
+          return (
+            <div key={s.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
+              <div style={{
+                flex: 1, background: cardBg, border: `1px solid ${cardBdr}`,
+                borderRadius: 5, padding: "14px 10px", textAlign: "center",
+                boxShadow: cardGlow, transition: "all 0.4s ease"
+              }}>
+                {s.done && <div style={{ fontSize: 20, color: C.green, lineHeight: 1, marginBottom: 4 }}>✓</div>}
+                {s.active && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, animation: "pulseFade 1.4s ease-in-out infinite" }}>
+                    <Spinner color={C.yellow} size={13} />
+                    <span style={{ fontSize: 10, color: C.yellow, fontWeight: 600 }}>{s.sub}</span>
                   </div>
                 )}
+                {!s.active && !s.done && (
+                  <div style={{ fontSize: 10, color: textColor }}>
+                    {s.skip ? "skipped" : s.sub}
+                  </div>
+                )}
+                <div style={{ fontSize: 9, color: textColor, marginTop: 5, opacity: 0.6, letterSpacing: "0.06em" }}>{s.label}</div>
               </div>
-            );
-          })}
+              {i < stages.length - 1 && (
+                <div style={{ width: 28, height: 2, background: C.dim2, flexShrink: 0, position: "relative", margin: "0 4px" }}>
+                  <div style={{
+                    position: "absolute", top: -4, left: 0, width: 8, height: 8,
+                    borderRadius: "50%", background: s.done ? C.green : C.yellow,
+                    opacity: s.done ? 0.5 : 0.7,
+                    animation: s.active || s.done ? `flowDot 1.4s ease-in-out infinite` : "none",
+                    animationDelay: `${i * 0.46}s`
+                  }} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {recentDone.length > 0 && (
+        <div style={{
+          borderTop: `1px solid ${C.border}`, padding: "5px 12px",
+          display: "flex", gap: 4, overflowX: "hidden", flexShrink: 0, alignItems: "center"
+        }}>
+          <span style={{ fontSize: 8, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>Done:</span>
+          {recentDone.slice(0, 5).map((f, i) => (
+            <div key={i} style={{
+              background: "#0d2010", border: `1px solid #1a3a20`,
+              borderRadius: 3, padding: "2px 6px", fontSize: 8,
+              fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
+              animation: "slideIn 0.2s ease",
+              maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+            }}>✓ {f}</div>
+          ))}
         </div>
-
-        {recentDone.length > 0 && (
-          <div style={{
-            borderTop: `1px solid ${C.border}`, padding: "4px 8px",
-            display: "flex", gap: 4, overflowX: "hidden", flexShrink: 0, alignItems: "center"
-          }}>
-            <span style={{ fontSize: 8, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>Done:</span>
-            {recentDone.slice(0, 3).map((f, i) => (
-              <div key={i} style={{
-                background: "#0d2010", border: `1px solid #1a3a20`,
-                borderRadius: 3, padding: "2px 5px", fontSize: 8,
-                fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
-                animation: "slideIn 0.2s ease",
-                maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
-              }}>✓ {f}</div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── Right: live image preview ─────────────────────────────────── */}
-      <div style={{ flex: 1, position: "relative", overflow: "hidden", background: "#08090f", minWidth: 0 }}>
-        {previewPath ? (
-          <>
-            <img
-              key={previewPath}
-              src={`${BASE}/image?path=${encodeURIComponent(previewPath)}`}
-              alt=""
-              style={{
-                width: "100%", height: "100%", objectFit: "contain",
-                display: "block",
-                animation: "blurPulse 2s ease-in-out infinite",
-              }}
-              onLoad={e => { e.target.style.animation = "previewIn 0.3s ease"; }}
-            />
-            <div style={{
-              position: "absolute", bottom: 6, left: 0, right: 0,
-              textAlign: "center", fontSize: 9, color: "rgba(255,255,255,0.45)",
-              fontFamily: "JetBrains Mono", pointerEvents: "none",
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              padding: "0 8px"
-            }}>{currentFile}</div>
-          </>
-        ) : (
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            height: "100%", color: C.dim2, fontSize: 11
-          }}>
-            {stage ? <Spinner color={C.dim} size={14} /> : "—"}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -839,7 +804,7 @@ function LogPanel({ logRef, log, running }) {
             <div style={{ color: C.dim, fontSize: 12 }}>Configure and press Run Pipeline.</div>
           ) : log.map((e, i) => (
             <div key={i} style={{
-              overflowWrap: "break-word", wordBreak: "break-word",
+              whiteSpace: "pre-wrap", wordBreak: "break-all",
               color: KIND_COLOR[e.kind] ?? C.dim,
               opacity: e.kind === "info" ? 0.55 : 1,
               paddingLeft: e.kind === "section" ? 0 : 4,
@@ -1146,16 +1111,18 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
           padding: "0 0 12px 12px"
         }}>
 
-          {/* Top area — changes by state */}
-          {(running || done) ? (
-            /* Running / done: big preview on top */
-            <div style={{ flex: "0 0 52%", display: "flex", flexDirection: "column", minHeight: 0, marginTop: 12 }}>
-              <LivePreview
-                running={running} done={done}
-                previewPath={previewPath} currentFile={currentFile}
-                imageDone={imageDone} totalImages={totalImages}
-              />
-              {/* Compact stage bar below preview */}
+          {/* Top area — Zone1 handles all states: idle, running, done */}
+          <div style={{ flex: "0 0 42%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <Zone1
+              running={running} done={done}
+              stage={stage} stagesDone={stagesDone}
+              currentFile={currentFile} previewPath={previewPath} recentDone={recentDone}
+              imageDone={imageDone} totalImages={totalImages}
+              doUpscale={doUpscale} doRembg={doRembg}
+              inputDir={inputDir} setInputDir={setInputDir}
+              rembgModel={rembgModel}
+            />
+            {(running || done) && (
               <Zone2
                 upStats={upStats} bgStats={bgStats}
                 totalImages={totalImages} elapsed={elapsed}
@@ -1163,21 +1130,8 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
                 doUpscale={doUpscale} doRembg={doRembg}
                 stagesDone={stagesDone}
               />
-            </div>
-          ) : (
-            /* Idle: drop-zone */
-            <div style={{ flex: "0 0 42%", display: "flex", minHeight: 0 }}>
-              <Zone1
-                running={running} done={done}
-                stage={stage} stagesDone={stagesDone}
-                currentFile={currentFile} previewPath={previewPath} recentDone={recentDone}
-                imageDone={imageDone} totalImages={totalImages}
-                doUpscale={doUpscale} doRembg={doRembg}
-                inputDir={inputDir} setInputDir={setInputDir}
-                rembgModel={rembgModel}
-              />
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Bottom: log + error panels always visible */}
           <div style={{ flex: 1, display: "flex", gap: 0, minHeight: 0, marginTop: 10 }}>

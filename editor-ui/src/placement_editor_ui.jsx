@@ -318,8 +318,7 @@ export default function PlacementEditor() {
       tabIndex={0}
       onKeyDown={onKeyDown}
       style={{
-        display:"flex", background:C.bg, height:"100%",
-        overflow:"hidden",
+        display:"flex", background:C.bg, height:"100%", overflow:"hidden",
         fontFamily:"'Outfit', 'DM Sans', system-ui, sans-serif",
         color:C.text, outline:"none", userSelect:"none",
         fontSize:13,
