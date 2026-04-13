@@ -87,6 +87,9 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const [saved,      setSaved]      = useState(false);
   const [loading,    setLoading]    = useState(true);
   const [guideOpacity, setGuideOpacity] = useState(1.0);  // loaded from settings
+  const [refImgOpacity, setRefImgOpacity] = useState(0.05);
+  const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
+  const [templateRefImg, setTemplateRefImg] = useState(null);
 
   // Phase 4: canvas view zoom (CSS scale, does not affect composition output)
   // 0.75 = 75% of DS (540px rendered), 1.0 = 720px, 1.25 = 900px, 1.5 = 1080px
@@ -107,8 +110,13 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
           const sRes = await fetch(`${BASE}/settings`);
           if (sRes.ok) {
             const sData = await sRes.json();
-            const opacity = sData?.settings?.appearance?.guide_opacity;
-            if (typeof opacity === "number") setGuideOpacity(Math.max(0, Math.min(1, opacity)));
+            const ap = sData?.settings?.appearance || {};
+            const guideOp = ap.guide_opacity;
+            const refOp = ap.ref_img_opacity;
+            const bgColor = ap.canvas_bg_color;
+            if (typeof guideOp === "number") setGuideOpacity(Math.max(0, Math.min(1, guideOp)));
+            if (typeof refOp === "number") setRefImgOpacity(Math.max(0, Math.min(1, refOp)));
+            if (typeof bgColor === "string" && /^#[0-9a-fA-F]{6}$/.test(bgColor)) setCanvasBgColor(bgColor);
           }
         } catch { }
 
@@ -137,6 +145,28 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       }
     })();
   }, []);
+
+  const templateRefSrc = useCallback((tmpl) => {
+    if (!tmpl?.ref_image) return "";
+    if (tmpl.ref_image.startsWith("data:")) return tmpl.ref_image;
+    if (tmpl.ref_image.includes("/") || tmpl.ref_image.includes("\\")) {
+      return `/api/image?path=${encodeURIComponent(tmpl.ref_image)}`;
+    }
+    return `/api/templates/image?name=${encodeURIComponent(tmpl.ref_image)}`;
+  }, []);
+
+  useEffect(() => {
+    const tmpl = templates[template];
+    const src = templateRefSrc(tmpl);
+    if (!src) {
+      setTemplateRefImg(null);
+      return;
+    }
+    const img = new window.Image();
+    img.onload = () => setTemplateRefImg(img);
+    img.onerror = () => setTemplateRefImg(null);
+    img.src = src;
+  }, [template, templates, templateRefSrc]);
 
   async function initFromFolder(folder, startIdx, guidesOverride) {
     const result = await getImages(folder);
@@ -193,8 +223,15 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     const ctx = canvas.getContext("2d");
     const S   = scaleFactor();
     ctx.clearRect(0, 0, DS, DS);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, DS, DS);
+
+    if (templateRefImg?.complete) {
+      ctx.save();
+      ctx.globalAlpha = refImgOpacity;
+      ctx.drawImage(templateRefImg, 0, 0, DS, DS);
+      ctx.restore();
+    }
 
     // ── 1. Draw product images ──────────────────────────────────────────────
     ctx.setLineDash([]);
@@ -260,7 +297,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     }
 
     ctx.setLineDash([]);
-  }, [items, selId, template, scaleLocked, guides, templates, guideOpacity]);
+  }, [items, selId, template, scaleLocked, guides, templates, guideOpacity, refImgOpacity, templateRefImg, canvasBgColor]);
 
   // ── Wheel zoom (product scale) ────────────────────────────────────────────
   useEffect(() => {
@@ -475,7 +512,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       tabIndex={0}
       onKeyDown={onKeyDown}
       style={{
-        display:"flex", background:C.bg, minHeight:"100vh",
+        display:"flex", background:C.bg, height:"100%", minHeight:0, overflow:"hidden",
         fontFamily:"'Outfit','DM Sans',system-ui,sans-serif",
         color:C.text, outline:"none", userSelect:"none", fontSize:13,
       }}
@@ -615,15 +652,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
           <div style={{ marginTop:6, marginBottom:2, borderRadius:3, overflow:"hidden",
             border:`1px solid ${C.border}`, background:"#ffffff10" }}>
             <img
-              src={
-                !templates[template].ref_image
-                  ? null
-                  : templates[template].ref_image.startsWith("data:")
-                    ? templates[template].ref_image                          // base64 from Templates.jsx upload
-                    : templates[template].ref_image.includes("/") || templates[template].ref_image.includes("\\")
-                      ? `/api/image?path=${encodeURIComponent(templates[template].ref_image)}`  // absolute path
-                      : `/api/templates/image?name=${encodeURIComponent(templates[template].ref_image)}` // bare filename → templates/
-              }
+              src={templateRefSrc(templates[template])}
               alt="reference"
               style={{ width:"100%", display:"block", objectFit:"contain", maxHeight:140 }}
               onError={e => { e.target.style.display="none"; }}
@@ -633,6 +662,17 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
             </div>
           </div>
         )}
+
+        <Divider label="Canvas" />
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+          <input
+            type="color"
+            value={canvasBgColor}
+            onChange={e => setCanvasBgColor(e.target.value)}
+            style={{ width:36, height:24, padding:0, border:"none", background:"transparent", cursor:"pointer" }}
+          />
+          <span style={{ fontSize:10, color:C.dim, fontFamily:"JetBrains Mono" }}>{canvasBgColor}</span>
+        </div>
 
         <Divider label="Snap / Align" />
         <div style={{ display:"flex", gap:3, marginBottom:5 }}>

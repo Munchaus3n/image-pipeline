@@ -178,6 +178,7 @@ class PipelineConfig(BaseModel):
     input_dir:      str = ""
     output_dir:     str = ""
     exclude_rembg:  list[str] = []
+    rembg_model:    str = ""
 
 class TemplatesPayload(BaseModel):
     templates: dict
@@ -429,12 +430,22 @@ def clear_session():
 
 _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
-                     "rembg_model": "birefnet-general", "history_keep": 30},
+                     "contrast_gain": 1.4, "hole_fill_threshold": 30,
+                     "rembg_model": "birefnet-general",
+                     "rembg_model_options": [
+                         "birefnet-general",
+                         "birefnet-general-lite",
+                         "birefnet-massive",
+                         "birefnet-dis",
+                         "birefnet-hrsod",
+                         "bria-rmbg",
+                     ],
+                     "history_keep": 30},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
                      "thumbnail_size": 400, "folder_mode": "bulk", "output_dir": ""},
-    "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05},
+    "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#ffffff"},
 }
 
 @app.get("/settings")
@@ -492,9 +503,14 @@ async def run_pipeline(cfg: PipelineConfig):
     # Read rembg_model from settings.json if present
     try:
         _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")) if SETTINGS_FILE.exists() else {}
-        rembg_model = _s.get("processing", {}).get("rembg_model", "birefnet-general")
+        processing = _s.get("processing", {})
+        rembg_model = cfg.rembg_model.strip() or processing.get("rembg_model", "birefnet-general")
         if rembg_model:
             cmd += ["--rembg-model", rembg_model]
+        cmd += ["--crop-padding", str(processing.get("crop_padding", 0.04))]
+        cmd += ["--edge-blur", str(processing.get("edge_blur", 1.2))]
+        cmd += ["--contrast-gain", str(processing.get("contrast_gain", 1.4))]
+        cmd += ["--hole-fill-threshold", str(processing.get("hole_fill_threshold", 30))]
     except Exception:
         pass
 

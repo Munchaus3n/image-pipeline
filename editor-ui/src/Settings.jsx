@@ -89,7 +89,14 @@ function Select({ value, onChange, options }) {
 }
 
 const DEFAULT = {
-  processing:   { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30 },
+  processing:   {
+    crop_padding: 0.04,
+    edge_blur: 1.2,
+    contrast_gain: 1.4,
+    hole_fill_threshold: 30,
+    rembg_model: "birefnet-general",
+    history_keep: 30,
+  },
   upscaler_api: { provider: "local", url: "", key: "", model: "" },
   rembg_api:    { provider: "local", url: "", key: "" },
   output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", output_dir: "" },
@@ -243,6 +250,15 @@ export default function Settings() {
             <Slider value={s.processing.edge_blur} min={0} max={5} step={0.1}
               onChange={v => set("processing", "edge_blur", v)}
               format={v => v.toFixed(1)} />
+          </Row>
+          <Row label="Contrast gain" hint="Inference prepass for low-contrast product/background separation">
+            <Slider value={s.processing.contrast_gain ?? 1.4} min={1.0} max={2.0} step={0.05}
+              onChange={v => set("processing", "contrast_gain", v)}
+              format={v => `${v.toFixed(2)}×`} />
+          </Row>
+          <Row label="Hole fill threshold" hint="Lower = preserve openings, higher = fill more enclosed holes">
+            <NumInput value={s.processing.hole_fill_threshold ?? 30} min={0} max={255} width={60}
+              onChange={v => set("processing", "hole_fill_threshold", v)} />
           </Row>
           <Row label="History folders to keep" hint="Older runs in history/ auto-deleted">
             <NumInput value={s.processing.history_keep} min={1} max={200} width={60}

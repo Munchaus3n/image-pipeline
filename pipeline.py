@@ -7,18 +7,16 @@
 import sys, io, os
 
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-if sys.stdout.encoding.lower() != "utf-8":
+if (sys.stdout.encoding or "").lower() != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-if sys.stderr.encoding.lower() != "utf-8":
+if (sys.stderr.encoding or "").lower() != "utf-8":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from PIL import Image, ImageFilter, ImageChops
-import numpy as np
-from scipy.ndimage import binary_fill_holes
+from PIL import Image
 import onnxruntime as ort
 
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
@@ -30,6 +28,8 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.prompt import Prompt
 from rich.rule import Rule
+
+from bg_quality import BgQualityConfig, postprocess_mask, preprocess_for_inference, refine_edges, tight_crop
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -194,29 +194,6 @@ def has_transparency(path: Path) -> bool:
         return False
 
 
-def tight_crop(img: Image.Image, padding: float = 0.04) -> Image.Image:
-    if img.mode != "RGBA":
-        return img
-    bbox = img.split()[3].getbbox()
-    if bbox is None:
-        return img
-    x1, y1, x2, y2 = bbox
-    pad = int(max(x2 - x1, y2 - y1) * padding)
-    return img.crop((
-        max(0, x1 - pad), max(0, y1 - pad),
-        min(img.width, x2 + pad), min(img.height, y2 + pad)
-    ))
-
-
-def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
-    if img.mode != "RGBA":
-        return img
-    r, g, b, alpha = img.split()
-    inner   = alpha.point(lambda p: 255 if p >= 240 else 0)
-    blurred = alpha.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-    return Image.merge("RGBA", (r, g, b, ImageChops.lighter(blurred, inner)))
-
-
 def _select_onnx_providers() -> tuple[list[str], str]:
     """Auto-select the best available ONNX Runtime provider.
 
@@ -236,81 +213,29 @@ def _select_onnx_providers() -> tuple[list[str], str]:
     return ["CPUExecutionProvider"], "CPU"
 
 
-def _fill_mask_holes(mask: Image.Image, threshold: int = 30) -> Image.Image:
-    """Fill interior transparent holes in a BiRefNet alpha mask.
-
-    BiRefNet correctly assigns partial transparency to glass, chrome, and
-    reflective surfaces. For e-commerce product photography (products always
-    opaque against a white background) those interior semi-transparent regions
-    look like damage.  This fixes that by:
-      1. Thresholding the mask to get a rough foreground binary
-      2. Filling any region that is fully enclosed by foreground (scipy)
-      3. Clamping those newly-filled pixels to 255 (fully opaque)
-      4. Leaving all existing soft edge values untouched
-
-    Result: interior glass/reflection holes → opaque; real product edges stay soft.
-    """
-    mask_np = np.array(mask)               # L-mode 0-255
-    binary  = mask_np > threshold          # rough foreground
-    filled  = binary_fill_holes(binary)    # fill enclosed holes
-    # Only override pixels that fill added (were bg, now enclosed) → clamp to 255
-    result  = np.where(filled & ~binary, 255, mask_np).astype(np.uint8)
-    return Image.fromarray(result, mode="L")
-
-
-BIREFNET_MAX = 1024   # BiRefNet's internal inference resolution; no benefit going larger
-
-def remove_bg(src: Path, dst: Path, session) -> bool:
+def remove_bg(src: Path, dst: Path, session, cfg: BgQualityConfig) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         img = Image.open(src).convert("RGBA")
 
         # Already transparent — just clean up edges and crop, skip inference
         if has_transparency(src):
-            result = tight_crop(refine_edges(img))
+            result = tight_crop(refine_edges(img, blur_radius=cfg.edge_blur), padding=cfg.crop_padding)
             result.save(dst, format="PNG")
             return True
-
-        # Downscale to BIREFNET_MAX for inference only.
-        # BiRefNet resizes internally to 1024px anyway; feeding a 4k image wastes
-        # RAM with no quality gain. Keep the full-res image separate for compositing.
-        w, h = img.size
-        if max(w, h) > BIREFNET_MAX:
-            scale = BIREFNET_MAX / max(w, h)
-            infer_img = img.resize(
-                (max(1, int(w * scale)), max(1, int(h * scale))),
-                Image.LANCZOS
-            )
-        else:
-            infer_img = img
 
         # Run inference with only_mask=True to get BiRefNet's raw sigmoid output.
         # DO NOT use post_process_mask=True — it applies a hard binary threshold
         # (np.where(mask < 127, 0, 255)) that destroys BiRefNet's smooth gradient
         # edges and causes pixelated/staircase cutouts.
-        #
-        # Contrast enhancement: apply 1.4× contrast to the inference image ONLY.
-        # This improves segmentation of low-contrast products (white object on white bg,
-        # overexposed images, glass) without affecting the output — the mask is always
-        # applied back to the original full-res unmodified image.
-        from PIL import ImageEnhance
-        infer_rgb  = infer_img.convert("RGB")
-        infer_rgb  = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
+        infer_rgb = preprocess_for_inference(img, cfg)
         mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
 
-        # Scale mask back to full-res.
-        # Use BICUBIC — better gradient preservation than LANCZOS for alpha masks.
-        if mask_small.size != img.size:
-            mask = mask_small.resize(img.size, Image.BICUBIC)
-        else:
-            mask = mask_small
-
-        # Fill enclosed transparent holes (glass, chrome, blender bowls) → opaque.
-        # Only affects fully-enclosed interior regions; real edge gradients untouched.
-        mask = _fill_mask_holes(mask)
+        # Preserve soft mask edges; fill only enclosed interior holes.
+        mask = postprocess_mask(mask_small, img.size, cfg)
 
         img.putalpha(mask)
-        result = tight_crop(refine_edges(img))
+        result = tight_crop(refine_edges(img, blur_radius=cfg.edge_blur), padding=cfg.crop_padding)
         result.save(dst, format="PNG")
         return True
     except Exception as e:
@@ -366,17 +291,21 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
 def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
                     dst_root: Path, src_root: Path,
                     no_rembg_originals: set | None = None,
-                    corrupted_dir: Path | None = None) -> list[Path]:
-    section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
+                    corrupted_dir: Path | None = None,
+                    excluded_rembg: set[str] | None = None,
+                    quality_cfg: BgQualityConfig | None = None) -> list[Path]:
+    section(f"Stage 2 / 2 — Background Removal  [dim]({REMBG_MODEL})[/dim]")
 
-    no_rembg_names = {p.name for p in (no_rembg_originals or set())}
+    no_rembg_names = {p.name.lower() for p in (no_rembg_originals or set())}
+    excluded = {x.lower() for x in (excluded_rembg or set())}
+    quality_cfg = quality_cfg or BgQualityConfig()
     print(f"__total__:{len(upscaled)}", flush=True)
 
     providers, device_label = _select_onnx_providers()
-    info(f"Using {device_label} for background removal (BiRefNet).")
+    info(f"Using {device_label} for background removal ({REMBG_MODEL}).")
     if device_label == "CPU":
         info("  → To enable GPU: pip uninstall onnxruntime && pip install onnxruntime-directml")
-    info("Loading BiRefNet — first run downloads ~973MB...")
+    info(f"Loading {REMBG_MODEL} — first run may download model weights...")
     console.print()
 
     session = new_session(REMBG_MODEL, providers=providers)
@@ -395,10 +324,10 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         if dst.exists():
             skip(f"{src.name} (already processed)")
             print(f"__skip_rembg__:{src.name}", flush=True)
-        elif src.name in no_rembg_names:
+        elif src.name.lower() in no_rembg_names or src.name.lower() in excluded:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                tight_crop(Image.open(src).convert("RGBA")).save(dst, format="PNG")
+                tight_crop(Image.open(src).convert("RGBA"), padding=quality_cfg.crop_padding).save(dst, format="PNG")
                 ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
                 print(f"__skip_rembg__:{src.name}", flush=True)
             except Exception as e:
@@ -418,7 +347,7 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         for src, dst in to_run:
             progress.update(task, description=src.name)
             print(f"__processing__:{src}", flush=True)
-            if remove_bg(src, dst, session):
+            if remove_bg(src, dst, session, quality_cfg):
                 ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}")
                 print(f"__ok_rembg__:{src.name}", flush=True)
             else:
@@ -448,6 +377,11 @@ def main():
     parser.add_argument("--scale",       default="4", choices=["2", "4"])
     parser.add_argument("--no-rembg",    action="store_true")
     parser.add_argument("--rembg-model", default="", help="Override BiRefNet model name")
+    parser.add_argument("--exclude-rembg", default="", help="Comma-separated file names to skip bg removal")
+    parser.add_argument("--crop-padding", type=float, default=0.04, help="Padding ratio for tight crop")
+    parser.add_argument("--edge-blur", type=float, default=1.2, help="Edge blur radius for alpha refinement")
+    parser.add_argument("--contrast-gain", type=float, default=1.4, help="Contrast gain for inference prepass")
+    parser.add_argument("--hole-fill-threshold", type=int, default=30, help="Threshold used for interior-hole fill")
     args = parser.parse_args()
 
     header()
@@ -498,6 +432,15 @@ def main():
     if args.rembg_model.strip():
         REMBG_MODEL = args.rembg_model.strip()
     info(f"BiRefNet model: {REMBG_MODEL}")
+    quality_cfg = BgQualityConfig(
+        crop_padding=max(0.0, args.crop_padding),
+        edge_blur=max(0.0, args.edge_blur),
+        contrast_gain=max(0.1, args.contrast_gain),
+        hole_fill_threshold=max(0, min(255, args.hole_fill_threshold)),
+    )
+    excluded_rembg = {x.strip() for x in args.exclude_rembg.split(",") if x.strip()}
+    if excluded_rembg:
+        info(f"Exclude-rembg list: {len(excluded_rembg)} file(s)")
 
     # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
     input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
@@ -565,7 +508,9 @@ def main():
     if do_rembg:
         src_root = upscale_dir if do_upscale else input_dir
         batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set,
-                        corrupted_dir=corrupted_dir)
+                        corrupted_dir=corrupted_dir,
+                        excluded_rembg=excluded_rembg,
+                        quality_cfg=quality_cfg)
     else:
         skip("background removal")
 

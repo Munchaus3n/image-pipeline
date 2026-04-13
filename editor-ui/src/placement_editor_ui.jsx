@@ -87,6 +87,7 @@ export default function PlacementEditor() {
   const [saved,      setSaved]      = useState(false);
   const [queueIdx]                  = useState(0);
   const [queueTotal]                = useState(12);
+  const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
 
   const sel = items.find(it => it.id === selId) ?? null;
 
@@ -98,7 +99,7 @@ export default function PlacementEditor() {
     ctx.clearRect(0, 0, DS, DS);
 
     // White canvas bg
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, DS, DS);
 
     // All guides (dashed)
@@ -173,7 +174,7 @@ export default function PlacementEditor() {
       ctx.textAlign = "left";
       ctx.fillText(info, 8, DS-8);
     }
-  }, [items, selId, template, scaleLocked]);
+  }, [items, selId, template, scaleLocked, canvasBgColor]);
 
   // ── Mouse ─────────────────────────────────────────────────────────────
   const onMouseDown = useCallback((e) => {
@@ -318,7 +319,7 @@ export default function PlacementEditor() {
       tabIndex={0}
       onKeyDown={onKeyDown}
       style={{
-        display:"flex", background:C.bg, minHeight:"100vh",
+        display:"flex", background:C.bg, height:"100%", minHeight:0, overflow:"hidden",
         fontFamily:"'Outfit', 'DM Sans', system-ui, sans-serif",
         color:C.text, outline:"none", userSelect:"none",
         fontSize:13,
@@ -474,6 +475,17 @@ export default function PlacementEditor() {
         <div style={{ display:"flex", gap:4 }}>
           <Btn onClick={()=>doAlign("h")} style={{ flex:1, textAlign:"center", fontSize:10 }}>H-Center</Btn>
           <Btn onClick={()=>doAlign("v")} style={{ flex:1, textAlign:"center", fontSize:10 }}>V-Center</Btn>
+        </div>
+
+        <Divider label="Canvas" />
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+          <input
+            type="color"
+            value={canvasBgColor}
+            onChange={e => setCanvasBgColor(e.target.value)}
+            style={{ width:36, height:24, padding:0, border:"none", background:"transparent", cursor:"pointer" }}
+          />
+          <span style={{ fontSize:10, color:C.dim, fontFamily:"JetBrains Mono" }}>{canvasBgColor}</span>
         </div>
 
         {/* SCALE */}

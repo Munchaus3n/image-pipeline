@@ -249,7 +249,7 @@ function usePipeline() {
     }
   }, [classify]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [] }) => {
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], rembgModel = "" }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -271,6 +271,7 @@ function usePipeline() {
           folder_mode: folderMode, do_upscale: doUpscale, scale,
           do_rembg: doRembg, input_dir: inputDir.trim(), output_dir: outputDir.trim(),
           exclude_rembg: excludeList,
+          rembg_model: rembgModel,
         }),
         signal: ctrl.signal,
       });
@@ -950,6 +951,15 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
   const [canvasSize, setCanvasSize] = useState("1440");
   const [thumbnail, setThumbnail] = useState(true);
   const [excludeTags, setExcludeTags] = useState([]);
+  const [rembgModel, setRembgModel] = useState("birefnet-general");
+  const [rembgModelOptions, setRembgModelOptions] = useState([
+    "birefnet-general",
+    "birefnet-general-lite",
+    "birefnet-massive",
+    "birefnet-dis",
+    "birefnet-hrsod",
+    "bria-rmbg",
+  ]);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   // Load persisted settings from the API on first mount
@@ -963,6 +973,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
         if (s.output?.output_dir)  setOutputDir(s.output.output_dir);
         if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
         if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
+        if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
+        if (Array.isArray(s.processing?.rembg_model_options) && s.processing.rembg_model_options.length) {
+          setRembgModelOptions(s.processing.rembg_model_options);
+        }
       })
       .catch(() => {})
       .finally(() => setSettingsLoaded(true));
@@ -976,8 +990,29 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
   } = usePipeline();
 
   const handleStart = useCallback(() => {
-    start({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList: excludeTags });
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags]);
+    start({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList: excludeTags, rembgModel });
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, rembgModel]);
+
+  const handleModelChange = useCallback(async (nextModel) => {
+    setRembgModel(nextModel);
+    try {
+      const r = await fetch(`${BASE}/settings`);
+      const data = r.ok ? await r.json() : null;
+      const current = data?.settings ?? {};
+      const merged = {
+        ...current,
+        processing: {
+          ...(current.processing || {}),
+          rembg_model: nextModel,
+        },
+      };
+      await fetch(`${BASE}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: merged }),
+      });
+    } catch { }
+  }, []);
 
   const handleGoToEditor = useCallback(() => {
     onGoToEditor({ outputDir: outputDir.trim(), canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
@@ -1037,10 +1072,25 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
             </Row>
           )}
 
-          <Row label="Remove BG (BiRefNet)">
-            <Btn label="On" active={doRembg} color={C.green} onClick={() => setDoRembg(true)} />
-            <Btn label="Off" active={!doRembg} color={C.red} onClick={() => setDoRembg(false)} />
-          </Row>
+            <Row label={`Remove BG (${rembgModel})`}>
+              <Btn label="On" active={doRembg} color={C.green} onClick={() => setDoRembg(true)} />
+              <Btn label="Off" active={!doRembg} color={C.red} onClick={() => setDoRembg(false)} />
+            </Row>
+            {doRembg && (
+              <Row label="BG model">
+                <select
+                  value={rembgModel}
+                  onChange={e => handleModelChange(e.target.value)}
+                  style={{
+                    background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
+                    borderRadius: 4, padding: "4px 8px", fontSize: 11, minWidth: 170,
+                    fontFamily: "inherit", outline: "none",
+                  }}
+                >
+                  {rembgModelOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </Row>
+            )}
 
           <div style={{ marginTop: 16, marginBottom: 16, borderTop: `1px solid ${C.border}` }} />
           <SectionLabel>Output settings</SectionLabel>
@@ -1092,7 +1142,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
               ? <div style={{ fontSize: 12, color: C.red }}>✕ Enable at least one stage</div>
               : <>
                 {doUpscale && <div style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
-                {doRembg && <div style={{ fontSize: 12, color: C.green }}>✓ Remove BG (BiRefNet)</div>}
+                {doRembg && <div style={{ fontSize: 12, color: C.green }}>✓ Remove BG ({rembgModel})</div>}
               </>
             }
           </div>
