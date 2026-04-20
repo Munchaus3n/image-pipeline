@@ -21,6 +21,43 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from PIL import Image
 from sse_starlette.sse import EventSourceResponse
+from contextlib import asynccontextmanager
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+# Thumbnail writes are CPU+disk bound — run them on a thread pool so they
+# never block the save response. The editor advances immediately; thumb
+# writes finish in the background a few hundred ms later.
+_thumb_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="thumb")
+
+# ── Model warm-up ─────────────────────────────────────────────────────────────
+# Runs once in a background thread when api.py starts.
+# Ensures model weights are downloaded + in OS file cache before the first
+# pipeline run, eliminating the 5-15s "first run stall".
+
+def _warmup_worker():
+    try:
+        from rembg import new_session
+        import onnxruntime as ort
+        # Read model name from settings if already saved, else use default
+        model = "birefnet-general"
+        try:
+            if SETTINGS_FILE.exists():
+                _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+                model = _s.get("processing", {}).get("rembg_model", model)
+        except Exception:
+            pass
+        # Always warm up on CPU — we just want weights on disk/OS cache.
+        # The real pipeline run will pick the right provider (DML/CUDA/CPU).
+        new_session(model, providers=["CPUExecutionProvider"])
+    except Exception:
+        pass  # Warm-up is best-effort; never crash the server
+
+@asynccontextmanager
+async def lifespan(app_instance: "FastAPI"):
+    t = threading.Thread(target=_warmup_worker, daemon=True, name="model-warmup")
+    t.start()
+    yield
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -178,6 +215,8 @@ class PipelineConfig(BaseModel):
     input_dir:      str = ""
     output_dir:     str = ""
     exclude_rembg:  list[str] = []
+    skip_files:     list[str] = []
+    rembg_model:    str = ""
 
 class TemplatesPayload(BaseModel):
     templates: dict
@@ -187,7 +226,7 @@ class SettingsPayload(BaseModel):
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Image Pipeline API", version="1.2.0")
+app = FastAPI(title="Image Pipeline API", version="1.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -311,7 +350,8 @@ def save_templates(payload: TemplatesPayload):
 
 @app.get("/source")
 def get_source(output_dir: str = ""):
-    base = Path(output_dir.strip()) if output_dir.strip() else OUTPUT_ROOT
+    # Custom output: pipeline wrote into <chosen>/output, so resolve to that subfolder.
+    base = (Path(output_dir.strip()) / "output") if output_dir.strip() else OUTPUT_ROOT
     folder, label = detect_source_folder(base)
     images = images_in_folder(folder)
     return {"folder": str(folder), "label": label, "count": len(images)}
@@ -336,6 +376,42 @@ def serve_image(path: str = Query(...)):
     return FileResponse(str(p))
 
 
+@app.get("/preview")
+def serve_preview(path: str = Query(...), size: int = Query(default=800)):
+    """Serve a downscaled preview image — much faster than loading full-res for sidebar display.
+    size: max dimension in pixels (default 800). Original returned if already smaller."""
+    p = Path(path)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"Not found: {path}")
+    if p.suffix.lower() not in SUPPORTED_EXTS:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    size = max(64, min(1600, size))
+
+    try:
+        img = Image.open(p)
+        # If image is already small enough, serve directly
+        if max(img.width, img.height) <= size:
+            return FileResponse(str(p))
+
+        # Downscale preserving aspect ratio
+        img.thumbnail((size, size), Image.LANCZOS)
+
+        import io
+        buf = io.BytesIO()
+        fmt = "PNG" if p.suffix.lower() == ".png" else "JPEG"
+        quality_kwargs = {} if fmt == "PNG" else {"quality": 85, "optimize": True}
+        img.save(buf, format=fmt, **quality_kwargs)
+        buf.seek(0)
+
+        from fastapi.responses import Response
+        mime = "image/png" if fmt == "PNG" else "image/jpeg"
+        return Response(content=buf.getvalue(), media_type=mime,
+                        headers={"Cache-Control": "public, max-age=60"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Save composition ──────────────────────────────────────────────────────────
 
 @app.post("/save")
@@ -343,7 +419,25 @@ def save_composition(req: SaveRequest):
     if not req.items:
         raise HTTPException(status_code=400, detail="No items to save")
 
-    cs = req.canvas_size if req.canvas_size and req.canvas_size > 0 else CANVAS_SIZE
+    # canvas_size: request > settings.json > config.ini constant
+    cs = req.canvas_size if req.canvas_size and req.canvas_size > 0 else None
+    if cs is None:
+        try:
+            if SETTINGS_FILE.exists():
+                _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+                cs = _s.get("output", {}).get("canvas_size") or None
+        except Exception:
+            pass
+    cs = int(cs) if cs else CANVAS_SIZE
+
+    # thumbnail_size: settings.json > 400
+    thumb_size = 400
+    try:
+        if SETTINGS_FILE.exists():
+            _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            thumb_size = int(_s.get("output", {}).get("thumbnail_size") or 400)
+    except Exception:
+        pass
     canvas = Image.new("RGBA", (cs, cs), (0, 0, 0, 0))
 
     for item in req.items:
@@ -367,15 +461,30 @@ def save_composition(req: SaveRequest):
     save_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(save_path)
 
+    # Thumbnail: fire-and-forget on thread pool.
+    # The editor gets its response and advances to the next image immediately;
+    # the 400px thumb finishes writing a few hundred ms later in background.
     thumb_path = None
     if req.thumbnail:
-        thumb_dir  = save_path.parent / "400"
+        thumb_dir  = save_path.parent / str(thumb_size)
         thumb_dir.mkdir(parents=True, exist_ok=True)
-        white = Image.new("RGBA", (cs, cs), (255, 255, 255, 255))
-        white.paste(canvas, mask=canvas.split()[3])
         thumb_file = thumb_dir / save_path.name
-        white.convert("RGB").resize((400, 400), Image.LANCZOS).save(thumb_file, quality=95)
         thumb_path = str(thumb_file)
+
+        _canvas_snap = canvas.copy()
+        _cs          = cs
+        _tf          = thumb_file
+        _ts          = thumb_size
+
+        def _write_thumb(snap, size, dst, ts):
+            try:
+                white = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+                white.paste(snap, mask=snap.split()[3])
+                white.convert("RGB").resize((ts, ts), Image.LANCZOS).save(dst, quality=95)
+            except Exception:
+                pass
+
+        _thumb_executor.submit(_write_thumb, _canvas_snap, _cs, _tf, _ts)
 
     return {"saved": str(save_path), "thumb": thumb_path}
 
@@ -429,13 +538,24 @@ def clear_session():
 
 _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
-                     "rembg_model": "birefnet-general", "history_keep": 30, "force_cpu": False},
+                                          "rembg_model": "birefnet-general", "rembg_fallback": "auto",
+                     "history_keep": 30, "force_cpu": False, "wipe_input_after_run": False},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
                      "thumbnail_size": 400, "folder_mode": "bulk", "output_dir": ""},
-    "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05},
+       "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#ffffff", "theme": "dark"},
+    "guides":       {"use_custom": False, "custom": {}},
 }
+
+_REMBG_MODELS = [
+    "birefnet-general",
+    "birefnet-general-lite",
+    "birefnet-massive",
+    "birefnet-dis",
+    "birefnet-hrsod",
+    "bria-rmbg",
+]
 
 @app.get("/settings")
 def get_settings():
@@ -463,6 +583,16 @@ def save_settings(payload: SettingsPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/models/rembg")
+def list_rembg_models():
+    return {"models": _REMBG_MODELS}
+
+
+@app.get("/history-path")
+def get_history_path():
+    return {"path": str(BASE_DIR / "history")}
+
+
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
 @app.get("/pipeline/status")
@@ -485,16 +615,28 @@ async def run_pipeline(cfg: PipelineConfig):
     if not cfg.do_upscale:  cmd.append("--no-upscale")
     if not cfg.do_rembg:    cmd.append("--no-rembg")
     if cfg.input_dir.strip():   cmd += ["--input-dir",  cfg.input_dir.strip()]
-    if cfg.output_dir.strip():  cmd += ["--output-dir", cfg.output_dir.strip()]
+    if cfg.output_dir.strip():
+        # Custom output: write into <chosen_dir>/output so the user folder is
+        # never wiped. Default (empty) keeps the existing ./output behaviour.
+        from pathlib import Path as _P
+        custom_out = str(_P(cfg.output_dir.strip()) / "output")
+        cmd += ["--output-dir", custom_out]
     if cfg.exclude_rembg:
         cmd += ["--exclude-rembg", ",".join(f.strip() for f in cfg.exclude_rembg if f.strip())]
+    if cfg.skip_files:
+        cmd += ["--skip-files", ",".join(f.strip() for f in cfg.skip_files if f.strip())]
 
     # Read processing settings from settings.json
     try:
         _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")) if SETTINGS_FILE.exists() else {}
-        rembg_model = _s.get("processing", {}).get("rembg_model", "birefnet-general")
+        rembg_model = (cfg.rembg_model or "").strip() or _s.get("processing", {}).get("rembg_model", "birefnet-general")
         if rembg_model:
             cmd += ["--rembg-model", rembg_model]
+        rembg_fallback = _s.get("processing", {}).get("rembg_fallback", "auto")
+        if rembg_fallback:
+            cmd += ["--rembg-fallback", str(rembg_fallback)]
+        if _s.get("processing", {}).get("wipe_input_after_run", False):
+            cmd.append("--wipe-input-after-run")
         if _s.get("processing", {}).get("force_cpu", False):
             cmd.append("--force-cpu")
     except Exception:

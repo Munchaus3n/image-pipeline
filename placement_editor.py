@@ -400,6 +400,9 @@ class PlacementEditor:
         self._update_layers()
         self._update_queue_label()
         self.root.title(f"Placement Editor  |  {path.name}")
+        # Return keyboard focus to the root window so arrow keys and scroll
+        # work immediately without the user having to click anything.
+        self.root.focus_force()
 
     def _queue_save(self):
         if not self.items:

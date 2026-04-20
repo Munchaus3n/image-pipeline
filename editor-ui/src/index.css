@@ -1,111 +1,140 @@
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+/* ── Lovable-inspired design system ────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+*, *::before, *::after { box-sizing: border-box; }
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+:root,
+[data-theme="light"] {
+  /* Base colors - Light theme */
+  --bg:        hsl(228, 14%, 97%);
+  --panel:     hsl(0, 0%, 100%);
+  --panel2:    hsl(220, 14%, 94%);
+  --border:    hsl(220, 13%, 90%);
+  --text:      hsl(224, 20%, 15%);
+  --dim:       hsl(220, 10%, 46%);
+  --dim2:      hsl(224, 16%, 64%);
+  
+  /* Accent colors */
+  --accent:    hsl(224, 100%, 65%);
+  --accent-fg: hsl(0, 0%, 100%);
+  --green:     hsl(142, 71%, 45%);
+  --green-bg:  hsl(142, 71%, 95%);
+  --green-bdr: hsl(142, 71%, 80%);
+  --red:       hsl(0, 84%, 60%);
+  --red-bg:    hsl(0, 84%, 95%);
+  --red-bdr:   hsl(0, 84%, 80%);
+  --yellow:    hsl(38, 92%, 50%);
+  --yellow-bg: hsl(38, 92%, 95%);
+  --yellow-bdr: hsl(38, 92%, 75%);
+  --magenta:   hsl(290, 75%, 60%);
+  
+  /* Utility */
+  --img-bg:    hsl(220, 14%, 94%);
+  --scrollbar: hsl(220, 13%, 85%);
+  --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+[data-theme="dark"] {
+  /* Base colors - Dark theme */
+  --bg:        hsl(225, 22%, 11%);
+  --panel:     hsl(225, 22%, 11%);
+  --panel2:    hsl(222, 20%, 16%);
+  --border:    hsl(222, 20%, 18%);
+  --text:      hsl(210, 40%, 95%);
+  --dim:       hsl(0, 0%, 76%);
+  --dim2:      hsl(223, 9%, 48%);
+  
+  /* Accent colors */
+  --accent:    hsl(224, 100%, 65%);
+  --accent-fg: hsl(0, 0%, 100%);
+  --green:     hsl(142, 71%, 45%);
+  --green-bg:  hsl(142, 71%, 12%);
+  --green-bdr: hsl(142, 71%, 25%);
+  --red:       hsl(0, 84%, 60%);
+  --red-bg:    hsl(0, 84%, 12%);
+  --red-bdr:   hsl(0, 84%, 25%);
+  --yellow:    hsl(51, 97%, 56%);
+  --yellow-bg: hsla(56, 97%, 72%, 0.315);
+  --yellow-bdr: hsl(49, 72%, 52%);
+  --magenta:   hsl(290, 75%, 60%);
+  
+  /* Utility */
+  --img-bg:    hsl(228, 20%, 5%);
+  --scrollbar: hsl(222, 20%, 22%);
+  --shadow:    0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.25);
 }
 
+/* ── Base reset ───────────────────────────────────────────────────── */
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
+  width: 100%;
   min-height: 100svh;
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+/* ── Scrollbars ───────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim2); }
+
+/* ── Typography ───────────────────────────────────────────────────── */
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
 }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
+/* ── Form elements ────────────────────────────────────────────────── */
+input[type=number] { color-scheme: dark; }
+::placeholder { color: var(--dim2); opacity: 0.6; }
+
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+/* ── Button base ──────────────────────────────────────────────────── */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+button:active:not(:disabled) {
+  transform: scale(0.97);
 }
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Animations ───────────────────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-slide-in-right { animation: slide-in-right 0.2s ease-out; }

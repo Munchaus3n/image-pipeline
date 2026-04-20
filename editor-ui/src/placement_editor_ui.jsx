@@ -90,6 +90,12 @@ export default function PlacementEditor() {
 
   const sel = items.find(it => it.id === selId) ?? null;
 
+  // Auto-select first item whenever selId is null or no longer in the list.
+  // This fires after skip/next advances to a new image and items are replaced.
+  useEffect(() => {
+    if (!sel && items.length > 0) setSelId(items[0].id);
+  }, [items, sel]);
+
   // ── Draw ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -98,7 +104,7 @@ export default function PlacementEditor() {
     ctx.clearRect(0, 0, DS, DS);
 
     // White canvas bg
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = "#f5f5f1";
     ctx.fillRect(0, 0, DS, DS);
 
     // All guides (dashed)

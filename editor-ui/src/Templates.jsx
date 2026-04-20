@@ -3,10 +3,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const BASE = "/api";
 
 const C = {
-  bg: "#0b0d14", panel: "#0f1219", panel2: "#161926",
-  border: "#1d2235", text: "#d8e0f0", dim: "#454f6b", dim2: "#262d44",
-  green: "#4ade80", blue: "#60a5fa", yellow: "#facc15",
-  red: "#f87171", magenta: "#e879f9",
+  bg:      "var(--bg)",      panel:   "var(--panel)",   panel2:  "var(--panel2)",
+  border:  "var(--border)",  text:    "var(--text)",    dim:     "var(--dim)",
+  dim2:    "var(--dim2)",    accent:  "var(--accent)",
+  green:   "var(--green)",   blue:    "var(--accent)",
+  yellow:  "var(--yellow)",  red:     "var(--red)",     magenta: "var(--magenta)",
 };
 
 const ZONES = ["none", "green", "blue", "magenta", "red"];
@@ -153,7 +154,7 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
           style={{
             border: `1px dashed ${dragging ? C.blue : C.border}`,
             borderRadius: 4, padding: "12px",
-            background: dragging ? "#0d1a2a" : C.panel,
+            background: dragging ? "color-mix(in srgb,var(--accent) 8%,var(--panel))" : C.panel,
             transition: "border-color 0.15s, background 0.15s",
             marginBottom: hasImage ? 8 : 0,
           }}
@@ -170,7 +171,7 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
                 onClick={() => set("ref_image", "")}
                 style={{
                   position: "absolute", top: 4, right: 4,
-                  background: "rgba(0,0,0,0.7)", color: "#fff",
+                  background: "rgba(0,0,0,0.65)", color: "var(--accent-fg)",
                   border: "none", borderRadius: 3,
                   padding: "2px 6px", fontSize: 11, cursor: "pointer",
                 }}>✕</button>
@@ -203,13 +204,13 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
 
       <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
         <button onClick={handleSave} disabled={saving} style={{
-          background: "#0d2818", color: C.green, border: `1px solid #1e4a2e`,
+          background: "var(--green-bg)", color: C.green, border: `1px solid var(--green-bdr)`,
           borderRadius: 4, padding: "7px 18px", fontSize: 11, fontWeight: 600,
           cursor: "pointer", fontFamily: "inherit",
         }}>{saving ? "Saving…" : "Save template"}</button>
         <button
           onClick={onCancel}
-          onMouseEnter={e => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = "#4a1a1a"; }}
+          onMouseEnter={e => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = "var(--red-bdr)"; }}
           onMouseLeave={e => { e.currentTarget.style.color = C.dim; e.currentTarget.style.borderColor = C.border; }}
           style={{
             background: "transparent", color: C.dim, border: `1px solid ${C.border}`,
@@ -219,7 +220,7 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
         {!isNew && onDelete && (
           <button
             onClick={onDelete}
-            onMouseEnter={e => { e.currentTarget.style.background = "#2a0d0d"; e.currentTarget.style.color = C.red; }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--red-bg)"; e.currentTarget.style.color = C.red; }}
             onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = C.dim; }}
             style={{
               marginLeft: "auto", background: "transparent", color: C.dim,
@@ -282,15 +283,17 @@ export default function Templates({ onBack, hideHeader }) {
 
   return (
     <div style={{
-      display: "flex", flexDirection: "column", background: C.bg, minHeight: "100vh",
+      display: "flex", flexDirection: "column", background: C.bg, height: "100%", minHeight: 0,
       fontFamily: "'Outfit','DM Sans',system-ui,sans-serif", color: C.text, fontSize: 13
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-        button:hover{filter:brightness(1.18)} button:active{filter:brightness(0.88)}
+        button:hover{filter:brightness(1.12)} button:active{filter:brightness(0.9)}
         ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
-        ::-webkit-scrollbar-thumb{background:#1d2235;border-radius:2px}
-        ::placeholder{color:#2e3850}
+        ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
+        ::placeholder{color:var(--dim2);opacity:0.7}
+        [data-theme="dark"] select option{background:hsl(222,20%,16%);color:hsl(210,40%,95%)}
+        [data-theme="light"] select option{background:hsl(220,14%,94%);color:hsl(224,20%,15%)}
       `}</style>
 
       {/* Header — hidden when nav strip is provided by Root */}
@@ -335,7 +338,7 @@ export default function Templates({ onBack, hideHeader }) {
               textTransform: "uppercase", fontWeight: 600
             }}>Templates</div>
             <button onClick={() => setEditing("new")} style={{
-              background: "#0d2818", color: C.green, border: `1px solid #1e4a2e`,
+              background: "var(--green-bg)", color: C.green, border: `1px solid var(--green-bdr)`,
               borderRadius: 4, padding: "4px 12px", fontSize: 11, fontWeight: 600,
               cursor: "pointer", fontFamily: "inherit",
             }}>+ New</button>

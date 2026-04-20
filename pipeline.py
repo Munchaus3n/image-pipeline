@@ -14,11 +14,12 @@ if sys.stderr.encoding.lower() != "utf-8":
 
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime
 from pathlib import Path
 from PIL import Image, ImageFilter, ImageChops
 import numpy as np
-from scipy.ndimage import binary_fill_holes
+from scipy.ndimage import binary_fill_holes, label
 import onnxruntime as ort
 
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
@@ -236,29 +237,47 @@ def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
     return ["CPUExecutionProvider"], "CPU"
 
 
-def _fill_mask_holes(mask: Image.Image, threshold: int = 30) -> Image.Image:
-    """Fill interior transparent holes in a BiRefNet alpha mask.
+def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: float = 0.003) -> Image.Image:
+    """Fill only small enclosed holes in a BiRefNet alpha mask.
 
-    BiRefNet correctly assigns partial transparency to glass, chrome, and
-    reflective surfaces. For e-commerce product photography (products always
-    opaque against a white background) those interior semi-transparent regions
-    look like damage.  This fixes that by:
-      1. Thresholding the mask to get a rough foreground binary
-      2. Filling any region that is fully enclosed by foreground (scipy)
-      3. Clamping those newly-filled pixels to 255 (fully opaque)
-      4. Leaving all existing soft edge values untouched
-
-    Result: interior glass/reflection holes → opaque; real product edges stay soft.
+    This preserves intended cutouts/gaps while repairing tiny interior holes
+    common on glossy product surfaces.
     """
-    mask_np = np.array(mask)               # L-mode 0-255
-    binary  = mask_np > threshold          # rough foreground
-    filled  = binary_fill_holes(binary)    # fill enclosed holes
-    # Only override pixels that fill added (were bg, now enclosed) → clamp to 255
-    result  = np.where(filled & ~binary, 255, mask_np).astype(np.uint8)
+    mask_np = np.array(mask)            # L-mode 0-255
+    binary = mask_np > threshold        # rough foreground
+    filled = binary_fill_holes(binary)  # fill enclosed holes
+    new_holes = filled & ~binary
+    if not np.any(new_holes):
+        return mask
+
+    # Only fill small enclosed holes to avoid swallowing intentional gaps
+    # between multiple close objects (e.g. cup handle area).
+    hole_labels, hole_count = label(new_holes)
+    max_hole_px = int(mask_np.size * max_hole_ratio)
+    result = mask_np.copy()
+    for idx in range(1, hole_count + 1):
+        area = int((hole_labels == idx).sum())
+        if area <= max_hole_px:
+            result[hole_labels == idx] = 255
+
+    result = result.astype(np.uint8)
     return Image.fromarray(result, mode="L")
 
 
 BIREFNET_MAX = 1024   # BiRefNet's internal inference resolution; no benefit going larger
+
+def _prefetch_image(path: Path) -> None:
+    """Read and fully decode the next image file in a background thread.
+
+    This warms the OS page cache so the main thread's Image.open() call
+    returns immediately from memory instead of waiting for disk I/O.
+    GPU inference dominates the wall time so this costs nothing visible.
+    """
+    try:
+        img = Image.open(path)
+        img.load()   # force full decode — not just the header
+    except Exception:
+        pass
 
 def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -357,14 +376,21 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
     return outputs
 
 
-def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
-                    dst_root: Path, src_root: Path,
-                    no_rembg_originals: set | None = None,
-                    corrupted_dir: Path | None = None,
-                    force_cpu: bool = False) -> list[Path]:
+def batch_remove_bg(
+    upscaled: list[Path],
+    upscale_root: Path,
+    dst_root: Path,
+    src_root: Path,
+    no_rembg_originals: set | None = None,
+    exclude_names: set[str] | None = None,
+    corrupted_dir: Path | None = None,
+    force_cpu: bool = False,
+    rembg_fallback: str = "auto",
+) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
 
     no_rembg_names = {p.name for p in (no_rembg_originals or set())}
+    excluded = {n.strip().lower() for n in (exclude_names or set()) if n.strip()}
     print(f"__total__:{len(upscaled)}", flush=True)
 
     providers, device_label = _select_onnx_providers(force_cpu=force_cpu)
@@ -379,7 +405,11 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         session = new_session(REMBG_MODEL, providers=providers)
     except Exception as e:
         # Auto-fallback: DML can OOM during model load on some GPUs
-        if not force_cpu and ("8007000E" in str(e) or "not enough memory" in str(e).lower()):
+        if (
+            rembg_fallback == "auto"
+            and not force_cpu
+            and ("8007000E" in str(e) or "not enough memory" in str(e).lower())
+        ):
             warn("DirectML OOM during load — retrying on CPU...")
             session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
         else:
@@ -399,7 +429,7 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         if dst.exists():
             skip(f"{src.name} (already processed)")
             print(f"__skip_rembg__:{src.name}", flush=True)
-        elif src.name in no_rembg_names:
+        elif src.name in no_rembg_names or src.name.lower() in excluded:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tight_crop(Image.open(src).convert("RGBA")).save(dst, format="PNG")
@@ -415,23 +445,31 @@ def batch_remove_bg(upscaled: list[Path], upscale_root: Path,
         ok("All images already processed.")
         return outputs
 
-    with Progress(SpinnerColumn(spinner_name="dots"),
-                  TextColumn("  [dim]{task.description}[/dim]"),
-                  BarColumn(), TaskProgressColumn(), console=console) as progress:
-        task = progress.add_task("Removing BG...", total=len(to_run))
-        for src, dst in to_run:
-            progress.update(task, description=src.name)
-            print(f"__processing__:{src}", flush=True)
-            if remove_bg(src, dst, session, model_name=REMBG_MODEL):
-                ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}")
-                print(f"__ok_rembg__:{src.name}", flush=True)
-            else:
-                print(f"__err_rembg__:{src.name}", flush=True)
-                # Copy the best available version (upscaled or original) to corrupted/
-                if corrupted_dir:
-                    _copy_corrupted(src, upscale_root, corrupted_dir)
-                    warn(f"  → copied to corrupted/{src.name}")
-            progress.advance(task)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch") as prefetch_pool:
+        prefetch_future: Future | None = None
+
+        with Progress(SpinnerColumn(spinner_name="dots"),
+                      TextColumn("  [dim]{task.description}[/dim]"),
+                      BarColumn(), TaskProgressColumn(), console=console) as progress:
+            task = progress.add_task("Removing BG...", total=len(to_run))
+            for i, (src, dst) in enumerate(to_run):
+                # Kick off pre-read of the NEXT file while GPU works on this one.
+                # Zero GPU cost — just warms OS page cache from disk in background.
+                if i + 1 < len(to_run):
+                    next_src = to_run[i + 1][0]
+                    prefetch_future = prefetch_pool.submit(_prefetch_image, next_src)
+
+                progress.update(task, description=src.name)
+                print(f"__processing__:{src}", flush=True)
+                if remove_bg(src, dst, session, model_name=REMBG_MODEL):
+                    ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}")
+                    print(f"__ok_rembg__:{src.name}", flush=True)
+                else:
+                    print(f"__err_rembg__:{src.name}", flush=True)
+                    if corrupted_dir:
+                        _copy_corrupted(src, upscale_root, corrupted_dir)
+                        warn(f"  → copied to corrupted/{src.name}")
+                progress.advance(task)
 
     return outputs
 
@@ -453,8 +491,16 @@ def main():
     parser.add_argument("--no-rembg",    action="store_true")
     parser.add_argument("--rembg-model", default="", help="Override rembg model name")
     parser.add_argument("--force-cpu",   action="store_true", help="Force CPU; skips DirectML/CUDA")
+    parser.add_argument("--exclude-rembg", default="",
+                        help="Comma-separated filenames to skip BG removal")
+    parser.add_argument("--skip-files", default="",
+                        help="Comma-separated filenames to skip entirely (not processed at all)")
+    parser.add_argument("--rembg-fallback", default="auto", choices=["auto", "manual"],
+                        help="auto: retry CPU on GPU load OOM; manual: do not fallback automatically")
+    parser.add_argument("--wipe-input-after-run", action="store_true",
+                        help="Delete input files after run instead of archiving to history/")
     args = parser.parse_args()
-
+    
     header()
 
     if not NCNN_EXE.exists():
@@ -530,6 +576,12 @@ def main():
         sys.exit(1)
 
     images, no_rembg_set = collect_images(input_dir, folder_mode == "clean")
+    excluded_names = {s.strip().lower() for s in args.exclude_rembg.split(",") if s.strip()}
+    skip_names     = {s.strip().lower() for s in args.skip_files.split(",")    if s.strip()}
+    if skip_names:
+        before = len(images)
+        images = [p for p in images if p.name.lower() not in skip_names]
+        info(f"Skipped {before - len(images)} file(s) (removed from session)")
 
     if not images:
         err(f"No images found in: {input_dir}")
@@ -543,6 +595,8 @@ def main():
     table.add_row("Images",    str(len(images)))
     if no_rembg_set:
         table.add_row("No-rembg", f"{len(no_rembg_set)} (upscale + crop only)")
+    if excluded_names:
+        table.add_row("Skip list", f"{len(excluded_names)} file(s)")
     table.add_row("Upscale",   f"NCNN {ncnn_model} ×{ncnn_scale}" if do_upscale else "skip")
     table.add_row("Remove BG", REMBG_MODEL if do_rembg else "skip")
     table.add_row("Input →",   str(input_dir))
@@ -570,26 +624,27 @@ def main():
     if do_rembg:
         src_root = upscale_dir if do_upscale else input_dir
         batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set,
+                        exclude_names=excluded_names,
                         corrupted_dir=corrupted_dir,
-                        force_cpu=args.force_cpu)
+                        force_cpu=args.force_cpu,
+                        rembg_fallback=args.rembg_fallback)
     else:
         skip("background removal")
 
-    stamp    = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    hist_dir = BASE_DIR / "history" / stamp
-    hist_dir.mkdir(parents=True, exist_ok=True)
-
-    for src in [p for p in input_dir.rglob("*") if p.is_file()]:
-        dst = hist_dir / src.relative_to(input_dir)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dst))
-
-    for p in sorted(input_dir.rglob("*"), reverse=True):
-        if p.is_dir():
-            try: p.rmdir()
-            except OSError: pass
-
-    ok(f"Input archived → history/{stamp}/")
+    if args.wipe_input_after_run:
+        for src in [p for p in input_dir.rglob("*") if p.is_file()]:
+            try:
+                src.unlink(missing_ok=True)
+            except Exception:
+                pass
+        for p in sorted(input_dir.rglob("*"), reverse=True):
+            if p.is_dir():
+                try:
+                    p.rmdir()
+                except OSError:
+                    pass
+        ok("Input wiped (settings: wipe_input_after_run = true).")
+    # else: leave input files in place — no history move
 
     corrupted_files = list(corrupted_dir.rglob("*")) if corrupted_dir.exists() else []
     corrupted_count = sum(1 for p in corrupted_files if p.is_file())

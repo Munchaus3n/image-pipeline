@@ -7,11 +7,20 @@ const BASE = "/api";
 const openFolder = (path = "") =>
   fetch(`${BASE}/open-folder?path=${encodeURIComponent(path)}`).catch(() => {});
 
+const getHistoryPath = async () => {
+  const r = await fetch(`${BASE}/history-path`);
+  if (!r.ok) return "";
+  const j = await r.json();
+  return j.path || "";
+};
+
 const C = {
-  bg: "#0b0d14", panel: "#0f1219", panel2: "#161926",
-  border: "#1d2235", text: "#e2e8f8", dim: "#6b7a9e", dim2: "#2a3350",
-  green: "#4ade80", blue: "#60a5fa", yellow: "#facc15",
-  red: "#f87171", magenta: "#e879f9",
+  bg:      "var(--bg)",      panel:   "var(--panel)",   panel2:  "var(--panel2)",
+  border:  "var(--border)",  text:    "var(--text)",    dim:     "var(--dim)",
+  dim2:    "var(--dim2)",    accent:  "var(--accent)",
+  green:   "var(--green)",   greenBg: "var(--green-bg)", greenBdr: "var(--green-bdr)",
+  red:     "var(--red)",     redBg:   "var(--red-bg)",   redBdr:  "var(--red-bdr)",
+  yellow:  "var(--yellow)",  blue:    "var(--accent)",   magenta: "var(--magenta)",
 };
 
 // ── Primitives ────────────────────────────────────────────────────────────────
@@ -29,16 +38,37 @@ function Row({ label, children }) {
 }
 
 function Btn({ label, active, color, onClick, style = {} }) {
-  const bg = active ? (color ? color + "22" : "#1e2a42") : "transparent";
+  const bg = active ? (color ? color + "22" : "color-mix(in srgb, var(--accent) 12%, transparent)") : "transparent";
   const fg = active ? (color || C.text) : C.dim;
-  const bdr = active ? (color ? color + "55" : "#2e4060") : "transparent";
+  const bdr = active ? (color ? color + "55" : "color-mix(in srgb, var(--accent) 35%, transparent)") : "transparent";
   return (
     <button onClick={onClick} style={{
       background: bg, color: fg, border: `1px solid ${bdr}`,
-      borderRadius: 4, padding: "4px 12px", fontSize: 11, minWidth: 42,
+      borderRadius: 8, padding: "4px 12px", fontSize: 11, minWidth: 42,
       cursor: "pointer", fontFamily: "inherit", fontWeight: active ? 600 : 400,
       ...style,
     }}>{label}</button>
+  );
+}
+
+// Sliding pill toggle — replaces On/Off Btn pairs. CSS-only, no library.
+function PillToggle({ value, onChange }) {
+  return (
+    <div onClick={() => onChange(!value)} style={{
+      width: 40, height: 22, borderRadius: 11, cursor: "pointer", flexShrink: 0,
+      background: value ? C.greenBg : C.redBg,
+      border: `1px solid ${value ? C.greenBdr : C.redBdr}`,
+      position: "relative", transition: "background 0.2s ease, border-color 0.2s ease",
+    }}>
+      <div style={{
+        width: 16, height: 16, borderRadius: "50%",
+        background: value ? C.green : C.red,
+        position: "absolute", top: 2,
+        left: value ? 20 : 2,
+        transition: "left 0.2s ease, background 0.2s ease",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+      }} />
+    </div>
   );
 }
 
@@ -63,7 +93,7 @@ function FolderInput({ value, onChange, placeholder }) {
       />
       <button onClick={browse} style={{
         background: C.panel2, color: C.dim,
-        border: `1px solid ${C.border}`, borderRadius: 4, padding: "5px 9px",
+        border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 9px",
         fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0
       }}>…</button>
     </div>
@@ -249,7 +279,7 @@ function usePipeline() {
     }
   }, [classify]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [] }) => {
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "" }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -270,7 +300,7 @@ function usePipeline() {
         body: JSON.stringify({
           folder_mode: folderMode, do_upscale: doUpscale, scale,
           do_rembg: doRembg, input_dir: inputDir.trim(), output_dir: outputDir.trim(),
-          exclude_rembg: excludeList,
+          exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel,
         }),
         signal: ctrl.signal,
       });
@@ -365,7 +395,7 @@ function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, rec
         flex: 1, display: "flex", flexDirection: "column",
         margin: "12px 12px 0 0", borderRadius: 6, overflow: "hidden",
         border: `2px dashed ${dragOver ? C.blue : C.border}`,
-        background: dragOver ? "#0d1a2e" : "transparent",
+        background: dragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
         transition: "border-color 0.15s, background 0.15s"
       }}>
 
@@ -475,9 +505,9 @@ function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, rec
       {/* Stage cards — fill full width */}
       <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px", gap: 0, minHeight: 0 }}>
         {stages.map((s, i) => {
-          const cardBg   = s.done ? "#0d2010" : s.active ? "#140c28" : C.panel2;
-          const cardBdr  = s.done ? "#1e4020" : s.active ? "#3a2070" : C.border;
-          const cardGlow = s.active ? "0 0 14px #3a207066" : s.done ? "0 0 8px #1a402044" : "none";
+          const cardBg   = s.done ? "var(--green-bg)" : s.active ? "color-mix(in srgb, var(--accent) 10%, transparent)" : C.panel2;
+          const cardBdr  = s.done ? "var(--green-bdr)" : s.active ? "color-mix(in srgb, var(--accent) 40%, transparent)" : C.border;
+          const cardGlow = s.active ? "0 0 14px color-mix(in srgb, var(--accent) 30%, transparent)" : s.done ? "0 0 8px color-mix(in srgb, var(--green) 20%, transparent)" : "none";
           const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
           return (
             <div key={s.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
@@ -524,7 +554,7 @@ function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, rec
           <span style={{ fontSize: 8, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>Done:</span>
           {recentDone.slice(0, 5).map((f, i) => (
             <div key={i} style={{
-              background: "#0d2010", border: `1px solid #1a3a20`,
+              background: "var(--green-bg)", border: `1px solid var(--green-bdr)`,
               borderRadius: 3, padding: "2px 6px", fontSize: 8,
               fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
               animation: "slideIn 0.2s ease",
@@ -591,7 +621,7 @@ function LivePreview({ running, done, previewPath, currentFile, imageDone, total
   return (
     <div style={{
       flex: 1, position: "relative", borderRadius: 6, overflow: "hidden",
-      background: "#07080e", border: `1px solid ${C.border}`, minHeight: 0,
+      background: "var(--img-bg)", border: `1px solid ${C.border}`, minHeight: 0,
     }}>
       <style>{`
         @keyframes previewFadeIn { from{opacity:0} to{opacity:1} }
@@ -776,13 +806,12 @@ function TagInput({ tags, onChange }) {
 
 // ── LogPanel — collapsible output log ────────────────────────────────────────
 
-function LogPanel({ logRef, log, running }) {
-  const [open, setOpen] = useState(true);
+function LogPanel({ logRef, log, running, open, setOpen, flex }) {
   return (
     <div style={{
-      flex: open ? 1 : "0 0 auto", minWidth: 0,
+      flex: open ? flex : "0 0 28px", minWidth: 0, minHeight: 0,
       display: "flex", flexDirection: "column",
-      marginRight: 6, transition: "flex 0.2s ease"
+      transition: "flex 0.2s ease"
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
         <div style={{ fontSize: 10, letterSpacing: "0.12em", color: C.dim, textTransform: "uppercase", fontWeight: 700 }}>
@@ -822,16 +851,15 @@ function LogPanel({ logRef, log, running }) {
 
 // ── ErrorPanel — collapsible with context lines ───────────────────────────────
 
-function ErrorPanel({ errorRef, errors, imageError }) {
-  const [open, setOpen] = useState(true);
+function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
   const [expanded, setExpanded] = useState({});
   const hasErrors = imageError > 0;
 
   return (
     <div style={{
-      width: open ? 290 : "auto", flexShrink: 0,
+      flex: open ? flex : "0 0 28px", minHeight: 0,
       display: "flex", flexDirection: "column",
-      transition: "width 0.2s ease"
+      transition: "flex 0.2s ease"
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
         <div style={{
@@ -849,8 +877,8 @@ function ErrorPanel({ errorRef, errors, imageError }) {
       {open && (
         <div ref={errorRef} style={{
           flex: 1, overflowY: "auto",
-          background: hasErrors ? "#110808" : C.panel,
-          border: `1px solid ${hasErrors ? "#3a1515" : C.border}`,
+          background: hasErrors ? "var(--red-bg)" : C.panel,
+          border: `1px solid ${hasErrors ? "var(--red-bdr)" : C.border}`,
           borderRadius: 4, padding: "8px 10px",
           fontFamily: "JetBrains Mono", fontSize: 10, lineHeight: 1.7,
         }}>
@@ -859,7 +887,7 @@ function ErrorPanel({ errorRef, errors, imageError }) {
           ) : errors.map((e, i) => (
             <div key={i} style={{
               paddingBottom: 8, marginBottom: 8,
-              borderBottom: i < errors.length - 1 ? `1px solid #2a1212` : "none"
+              borderBottom: i < errors.length - 1 ? `1px solid var(--red-bdr)` : "none"
             }}>
               {/* Main error line */}
               <div style={{
@@ -882,12 +910,12 @@ function ErrorPanel({ errorRef, errors, imageError }) {
                   {expanded[i] && (
                     <div style={{
                       marginTop: 4, padding: "4px 6px",
-                      background: "#0a0505", borderRadius: 3,
-                      border: `1px solid #2a1212`,
+                      background: "color-mix(in srgb, var(--red) 6%, var(--panel))", borderRadius: 3,
+                      border: `1px solid var(--red-bdr)`,
                     }}>
                       {e.context.map((line, j) => (
                         <div key={j} style={{
-                          color: "#7a5050", whiteSpace: "pre-wrap", wordBreak: "break-word",
+                          color: C.dim, whiteSpace: "pre-wrap", wordBreak: "break-word",
                           fontSize: 9,
                         }}>{line}</div>
                       ))}
@@ -905,21 +933,29 @@ function ErrorPanel({ errorRef, errors, imageError }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
+export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
   const [folderMode, setFolderMode] = useState("bulk");
   const [doUpscale, setDoUpscale] = useState(true);
   const [scale, setScale] = useState("4");
   const [doRembg, setDoRembg] = useState(true);
-  const [inputDir, setInputDir] = useState("");
-  const [outputDir, setOutputDir] = useState("");
   const [canvasSize, setCanvasSize] = useState("1440");
   const [thumbnail, setThumbnail] = useState(true);
-  const [excludeTags, setExcludeTags] = useState([]);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [rembgModel, setRembgModel] = useState("birefnet-general");
+  const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
+  const [logOpen, setLogOpen] = useState(true);
+  const [errOpen, setErrOpen] = useState(true);
 
-  // Load persisted settings from the API on first mount
-  useEffect(() => {
+  const loadSettings = useCallback(() => {
+    fetch(`${BASE}/models/rembg`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (Array.isArray(data?.models) && data.models.length) {
+          setRembgModels(data.models);
+        }
+      })
+      .catch(() => {});
+
     fetch(`${BASE}/settings`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -935,6 +971,13 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
       .finally(() => setSettingsLoaded(true));
   }, []);
 
+// Load persisted settings on mount and when window regains focus.
+  useEffect(() => {
+    loadSettings();
+    window.addEventListener("focus", loadSettings);
+    return () => window.removeEventListener("focus", loadSettings);
+  }, [loadSettings]);
+
   const {
     running, done, log, errors, imageDone, imageSkipped, imageError,
     totalImages, currentFile, previewPath, recentDone, elapsed, stage, stagesDone,
@@ -943,11 +986,22 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
   } = usePipeline();
 
   const handleStart = useCallback(() => {
-    start({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList: excludeTags });
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags]);
+    // removedImages is a Set of filenames — convert to array for the API
+    const skipList    = removedImages ? [...removedImages] : [];
+    // also strip any excludeTags that are in removedImages (shouldn't happen, but safety)
+    const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
+    start({
+      folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
+      excludeList: activeExclude, skipList, rembgModel,
+    });
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel]);
 
   const handleGoToEditor = useCallback(() => {
-    onGoToEditor({ outputDir: outputDir.trim(), canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
+    const trimmed = outputDir.trim();
+    // When a custom output dir is set, the pipeline wrote into <dir>/output.
+    // Pass that resolved path so the editor opens the right source folder.
+    const editorOutputDir = trimmed ? trimmed + "/output" : trimmed;
+    onGoToEditor({ outputDir: editorOutputDir, canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
   }, [onGoToEditor, outputDir, canvasSize, thumbnail]);
 
   const nothingSelected = !doUpscale && !doRembg;
@@ -959,18 +1013,17 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
       color: C.text, fontSize: 13
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-        button:hover{filter:brightness(1.18)} button:active{filter:brightness(0.88)}
+        button:hover { filter: brightness(1.15); }
         ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
-        ::-webkit-scrollbar-thumb{background:#1d2235;border-radius:2px}
-        ::placeholder{color:#2e3850} input[type=number]{color-scheme:dark}
+        ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
+        select option{background:var(--panel2)}
       `}</style>
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
 
         {/* Sidebar */}
         <div style={{
-          width: 282, background: C.panel, borderRight: `1px solid ${C.border}`,
+          width: 300, background: C.panel, borderRight: `1px solid ${C.border}`,
           padding: "14px", display: "flex", flexDirection: "column",
           flexShrink: 0, overflowY: "auto"
         }}>
@@ -993,8 +1046,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
           </Row>
 
           <Row label="Upscale (NCNN)">
-            <Btn label="On" active={doUpscale} color={C.green} onClick={() => setDoUpscale(true)} />
-            <Btn label="Off" active={!doUpscale} color={C.red} onClick={() => setDoUpscale(false)} />
+            <PillToggle value={doUpscale} onChange={setDoUpscale} />
           </Row>
 
           {doUpscale && (
@@ -1004,10 +1056,29 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
             </Row>
           )}
 
-          <Row label="Remove BG (BiRefNet)">
-            <Btn label="On" active={doRembg} color={C.green} onClick={() => setDoRembg(true)} />
-            <Btn label="Off" active={!doRembg} color={C.red} onClick={() => setDoRembg(false)} />
+          <Row label="Remove BG">
+            <PillToggle value={doRembg} onChange={setDoRembg} />
           </Row>
+          {doRembg && (
+            <>
+              <Row label="BG model">
+                <select
+                  value={rembgModel}
+                  onChange={e => setRembgModel(e.target.value)}
+                  style={{
+                    background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
+                    borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
+                    outline: "none", fontFamily: "inherit", colorScheme: "dark",
+                  }}
+                >
+                  {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </Row>
+              <Row label="Fallback">
+                <span style={{ fontSize: 11, color: C.dim }}>auto</span>
+              </Row>
+            </>
+          )}
 
           <div style={{ marginTop: 16, marginBottom: 16, borderTop: `1px solid ${C.border}` }} />
           <SectionLabel>Output settings</SectionLabel>
@@ -1030,21 +1101,8 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
           </Row>
 
           <Row label="Thumbnail (400px)">
-            <Btn label="On" active={thumbnail} color={C.green} onClick={() => setThumbnail(true)} />
-            <Btn label="Off" active={!thumbnail} color={C.red} onClick={() => setThumbnail(false)} />
+            <PillToggle value={thumbnail} onChange={setThumbnail} />
           </Row>
-
-          {/* Exclude from BG removal */}
-          {doRembg && (
-            <>
-              <div style={{ marginTop: 14, marginBottom: 6, borderTop: `1px solid ${C.border}`, paddingTop: 12 }} />
-              <SectionLabel>Exclude from BG removal</SectionLabel>
-              <div style={{ fontSize: 10, color: C.dim, marginBottom: 5, lineHeight: 1.5 }}>
-                Type filename → Enter to add. Click × to remove.
-              </div>
-              <TagInput tags={excludeTags} onChange={setExcludeTags} />
-            </>
-          )}
 
           {/* Will run summary */}
           <div style={{
@@ -1059,7 +1117,17 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
               ? <div style={{ fontSize: 12, color: C.red }}>✕ Enable at least one stage</div>
               : <>
                 {doUpscale && <div style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
-                {doRembg && <div style={{ fontSize: 12, color: C.green }}>✓ Remove BG ({rembgModel || "birefnet-general"})</div>}
+                {doRembg && (() => {
+                  const skipCount    = removedImages?.size ?? 0;
+                  const exclCount    = excludeTags.filter(n => !removedImages?.has(n)).length;
+                  return (
+                    <div style={{ fontSize: 12, color: C.green }}>
+                      ✓ Remove BG ({rembgModel || "birefnet-general"})
+                      {exclCount > 0 && <span style={{ color: C.yellow }}> · {exclCount} excluded</span>}
+                      {skipCount  > 0 && <span style={{ color: C.dim   }}> · {skipCount} skipped</span>}
+                    </div>
+                  );
+                })()}
               </>
             }
           </div>
@@ -1069,24 +1137,25 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
             {!running ? (
               <button onClick={handleStart} disabled={nothingSelected} style={{
                 width: "100%", padding: "10px 0",
-                background: nothingSelected ? C.dim2 : "#0d2818",
+                background: nothingSelected ? C.dim2 : C.greenBg,
                 color: nothingSelected ? C.dim : C.green,
-                border: `1px solid ${nothingSelected ? C.border : "#1e4a2e"}`,
-                borderRadius: 4, fontSize: 13, fontWeight: 600,
+                border: `1px solid ${nothingSelected ? C.border : C.greenBdr}`,
+                borderRadius: 8, fontSize: 13, fontWeight: 600,
                 cursor: nothingSelected ? "not-allowed" : "pointer", fontFamily: "inherit",
               }}>▶  Run Pipeline</button>
             ) : (
               <button onClick={stop} style={{
-                width: "100%", padding: "10px 0", background: "#200d0d", color: C.red,
-                border: `1px solid #3a1515`, borderRadius: 4, fontSize: 13, fontWeight: 600,
+                width: "100%", padding: "10px 0", background: C.redBg, color: C.red,
+                border: `1px solid ${C.redBdr}`, borderRadius: 8, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", fontFamily: "inherit",
               }}>■  Stop</button>
             )}
 
             <button onClick={handleGoToEditor} style={{
               width: "100%", marginTop: 6, padding: "10px 0",
-              background: "#0d1a2a", color: C.blue, border: `1px solid #1a2e4a`,
-              borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+              color: C.accent, border: `1px solid color-mix(in srgb, var(--accent) 30%, transparent)`,
+              borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
             }}>Open Editor →</button>
 
             <button
@@ -1094,7 +1163,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
               style={{
                 width: "100%", marginTop: 6, padding: "10px 0",
                 background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
-                borderRadius: 4, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+                borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
               }}
             >
               📁 Open Output Folder
@@ -1102,41 +1171,52 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates }) {
           </div>
         </div>
 
-        {/* Right: new layout
-            Idle/done:  drop-zone fills top | log+error share bottom
-            Running:    preview fills top  | compact stage bar | log+error share bottom
-        */}
-        <div style={{
-          flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0,
-          padding: "0 0 12px 12px"
-        }}>
+        {/* Right zone: Zone1 top + Zone2 stats + Log/Error full width */}
+        <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px" }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
 
-          {/* Top area — Zone1 handles all states: idle, running, done */}
-          <div style={{ flex: "0 0 42%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <Zone1
-              running={running} done={done}
-              stage={stage} stagesDone={stagesDone}
-              currentFile={currentFile} previewPath={previewPath} recentDone={recentDone}
-              imageDone={imageDone} totalImages={totalImages}
-              doUpscale={doUpscale} doRembg={doRembg}
-              inputDir={inputDir} setInputDir={setInputDir}
-              rembgModel={rembgModel}
-            />
-            {(running || done) && (
-              <Zone2
-                upStats={upStats} bgStats={bgStats}
-                totalImages={totalImages} elapsed={elapsed}
-                running={running} done={done} stage={stage}
+            {/* Top: drop zone / running animation / done */}
+            <div style={{ flex: "0 0 56%", minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <Zone1
+                running={running} done={done}
+                stage={stage} stagesDone={stagesDone}
+                currentFile={currentFile} previewPath={previewPath} recentDone={recentDone}
+                imageDone={imageDone} totalImages={totalImages}
                 doUpscale={doUpscale} doRembg={doRembg}
-                stagesDone={stagesDone}
+                inputDir={inputDir} setInputDir={setInputDir}
+                rembgModel={rembgModel}
               />
-            )}
-          </div>
+              {(running || done) && (
+                <Zone2
+                  upStats={upStats} bgStats={bgStats}
+                  totalImages={totalImages} elapsed={elapsed}
+                  running={running} done={done} stage={stage}
+                  doUpscale={doUpscale} doRembg={doRembg}
+                  stagesDone={stagesDone}
+                />
+              )}
+            </div>
 
-          {/* Bottom: log + error panels always visible */}
-          <div style={{ flex: 1, display: "flex", gap: 0, minHeight: 0, marginTop: 10 }}>
-            <LogPanel logRef={logRef} log={log} running={running} />
-            <ErrorPanel errorRef={errorRef} errors={errors} imageError={imageError} />
+            {/* Bottom: Error + Log panels, full width */}
+            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+              <ErrorPanel
+                errorRef={errorRef}
+                errors={errors}
+                imageError={imageError}
+                open={errOpen}
+                setOpen={setErrOpen}
+                flex={logOpen && errOpen ? 1 : (errOpen ? 9 : 1)}
+              />
+              <LogPanel
+                logRef={logRef}
+                log={log}
+                running={running}
+                open={logOpen}
+                setOpen={setLogOpen}
+                flex={logOpen && errOpen ? 1 : (logOpen ? 9 : 1)}
+              />
+            </div>
+
           </div>
         </div>
       </div>
