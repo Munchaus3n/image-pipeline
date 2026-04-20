@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import ConfirmModal from "./ConfirmModal.jsx";
 
 const BASE = "/api";
 
@@ -240,6 +241,7 @@ export default function Templates({ onBack, hideHeader }) {
   const [editing, setEditing] = useState(null);   // null | "new" | templateName
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -252,7 +254,12 @@ export default function Templates({ onBack, hideHeader }) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      load();
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [load]);
 
   const handleSave = async (form) => {
     const key = form.name.trim();
@@ -265,13 +272,18 @@ export default function Templates({ onBack, hideHeader }) {
   };
 
   const handleDelete = async (name) => {
-    if (!window.confirm(`Delete "${name}"?`)) return;
+    setConfirmDelete(name);
+  };
+
+  const confirmDeleteTemplate = async () => {
+    if (!confirmDelete) return;
     const updated = { ...templates };
-    delete updated[name];
+    delete updated[confirmDelete];
     await apiPost("/templates/save", { templates: updated });
     setTemplates(updated);
     setEditing(null);
-    setStatus(`Deleted "${name}"`);
+    setStatus(`Deleted "${confirmDelete}"`);
+    setConfirmDelete(null);
     setTimeout(() => setStatus(""), 2000);
   };
 
@@ -415,6 +427,15 @@ export default function Templates({ onBack, hideHeader }) {
           )}
         </div>
       </div>
+      <ConfirmModal
+        open={Boolean(confirmDelete)}
+        title="Delete template?"
+        message={confirmDelete ? `Delete "${confirmDelete}"? This cannot be undone.` : ""}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={confirmDeleteTemplate}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }

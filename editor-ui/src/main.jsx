@@ -15,7 +15,7 @@ const TABS = [
   { id:"settings",  label:"Settings"  },
 ];
 
-function Root() {
+export function Root() {
   const [screen, setScreen] = useState("input");
   const [theme,  setTheme]  = useState("dark");
 
