@@ -1,5 +1,39 @@
 {
+  "processing": {
+    "crop_padding": 0.04,
+    "edge_blur": 1.2,
+    "rembg_model": "birefnet-general",
+    "rembg_fallback": "auto",
+    "history_keep": 30,
+    "force_cpu": false,
+    "wipe_input_after_run": false
+  },
+  "upscaler_api": {
+    "provider": "local",
+    "url": "",
+    "key": "",
+    "model": ""
+  },
+  "rembg_api": {
+    "provider": "local",
+    "url": "",
+    "key": ""
+  },
+  "output": {
+    "canvas_size": 1440,
+    "thumbnail": true,
+    "thumbnail_size": 400,
+    "folder_mode": "bulk",
+    "output_dir": ""
+  },
   "appearance": {
+    "guide_opacity": 1,
+    "ref_img_opacity": 0.05,
+    "canvas_bg_color": "#f5f5f1",
     "theme": "dark"
+  },
+  "guides": {
+    "use_custom": false,
+    "custom": {}
   }
 }

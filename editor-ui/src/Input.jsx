@@ -21,6 +21,7 @@ export default function Input({
   const [search,        setSearch]        = useState("");
   const [selected,      setSelected]      = useState(new Set());
   const [previewPath,   setPreviewPath]   = useState(null);
+  const [previewLoadError, setPreviewLoadError] = useState(false);
   const [browseLoading, setBrowseLoading] = useState(false);
   const lastSelectedRef = useRef(null);  // for shift-click range
 
@@ -35,6 +36,7 @@ export default function Input({
     setExcludeTags([]);
     setRemovedImages(new Set());
     setPreviewPath(null);
+    setPreviewLoadError(false);
     lastSelectedRef.current = null;
     ;(async () => {
       setLoading(true);
@@ -53,7 +55,7 @@ export default function Input({
     try {
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(inputDir)}`);
       const { path } = await r.json();
-      if (path) { setInputDir(path); setSelected(new Set()); setPreviewPath(null); }
+      if (path) { setInputDir(path); setSelected(new Set()); setPreviewPath(null); setPreviewLoadError(false); }
     } catch {}
     setBrowseLoading(false);
   }, [inputDir, setInputDir]);
@@ -301,7 +303,7 @@ export default function Input({
                     {/* Eye icon — top-right, visible on hover only */}
                     <div
                       className="inp-eye"
-                      onClick={e => { e.stopPropagation(); setPreviewPath(isPreview ? null : absPath); }}
+                      onClick={e => { e.stopPropagation(); setPreviewPath(isPreview ? null : absPath); setPreviewLoadError(false); }}
                       style={{
                         position: "absolute", top: 5, right: 5, zIndex: 2,
                         width: 22, height: 22, borderRadius: 4,
@@ -365,18 +367,30 @@ export default function Input({
                 padding: "9px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0,
               }}>
                 <span style={{ fontSize: 9, color: C.dim, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Preview</span>
-                <button onClick={() => setPreviewPath(null)} style={{
+                <button onClick={() => { setPreviewPath(null); setPreviewLoadError(false); }} style={{
                   background: "transparent", border: "none", color: C.dim,
                   fontSize: 14, cursor: "pointer", lineHeight: 1, padding: 0,
                 }}>✕</button>
               </div>
 
               {/* Image */}
-              <img
-                src={`${BASE}/preview?path=${encodeURIComponent(previewPath)}&size=600`}
-                alt=""
-                style={{ width: "100%", aspectRatio: "1", objectFit: "contain", background: "var(--img-bg)", flexShrink: 0 }}
-              />
+              {previewLoadError ? (
+                <div style={{
+                  width: "100%", aspectRatio: "1", flexShrink: 0,
+                  background: "var(--img-bg)", color: C.dim,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11, textAlign: "center", padding: 12,
+                }}>
+                  Preview unavailable. Try another image.
+                </div>
+              ) : (
+                <img
+                  src={`${BASE}/preview?path=${encodeURIComponent(previewPath)}&size=600`}
+                  alt=""
+                  onError={() => setPreviewLoadError(true)}
+                  style={{ width: "100%", aspectRatio: "1", objectFit: "contain", background: "var(--img-bg)", flexShrink: 0 }}
+                />
+              )}
 
               {/* Info + controls */}
               <div style={{ padding: "12px", flex: 1, overflowY: "auto" }}>
@@ -409,6 +423,7 @@ export default function Input({
                   setExcludeTags(prev => prev.filter(x => x !== name));
                   setRemovedImages(prev => { const n = new Set(prev); n.add(name); return n; });
                   setPreviewPath(null);
+                  setPreviewLoadError(false);
                 }} style={{
                   width: "100%", background: "transparent", color: C.dim,
                   border: `1px solid ${C.border}`, borderRadius: 4,

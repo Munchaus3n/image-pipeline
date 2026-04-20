@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   getConfig, getSource, getImages,
   imageUrl, saveComposition, skipImage,
@@ -149,6 +149,8 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const dragRef      = useRef(null);
   const undoRef      = useRef(null);
   const prefetchRef  = useRef(null); // holds pre-loaded next htmlImg + metadata
+  const nextItemIdRef = useRef(1);
+  const refImageCacheRef = useRef(new Map());
 
   const [guides,     setGuides]     = useState({});
   const [templates,  setTemplates]  = useState({});
@@ -168,12 +170,26 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
   const [canvasSizeState, setCanvasSizeState] = useState(1440); // editable canvas size
   const [activeSnapZone, setActiveSnapZone] = useState(null); // tracks last snapped guide zone
+  const [showRefOnCanvas, setShowRefOnCanvas] = useState(true);
+  const [refOpacity, setRefOpacity] = useState(0.22);
+  const [refCanvasImage, setRefCanvasImage] = useState(null);
 
   // Phase 4: canvas view zoom (CSS scale, does not affect composition output)
   // 0.75 = 75% of DS (540px rendered), 1.0 = 720px, 1.25 = 900px, 1.5 = 1080px
   const [zoom, setZoom] = useState(1.0);
 
   const sel = items.find(it => it.id === selId) ?? null;
+  const templateRefSrc = useMemo(() => {
+    const ri = templates[template]?.ref_image;
+    if (!ri) return null;
+    if (ri.startsWith("data:")) return ri;
+    if (ri.includes("/") || ri.includes("\\")) return `/api/image?path=${encodeURIComponent(ri)}`;
+    return `/api/templates/image?name=${encodeURIComponent(ri)}`;
+  }, [template, templates]);
+
+  useEffect(() => {
+    if (!sel && items.length > 0) setSelId(items[0].id);
+  }, [items, sel]);
 
   // Focus the canvas container whenever a valid item is selected.
   // Using useEffect (not an inline call) because it runs after React commits
@@ -183,6 +199,32 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       containerRef.current?.focus({ preventScroll: true });
     }
   }, [selId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!templateRefSrc) {
+      setRefCanvasImage(null);
+      return () => { cancelled = true; };
+    }
+
+    const cacheKey = `${template}::${templateRefSrc}`;
+    const cache = refImageCacheRef.current;
+    let loader = cache.get(cacheKey);
+    if (!loader) {
+      loader = new Promise((resolve) => {
+        const img = new window.Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = templateRefSrc;
+      });
+      cache.set(cacheKey, loader);
+    }
+
+    loader.then((img) => {
+      if (!cancelled) setRefCanvasImage(img);
+    });
+    return () => { cancelled = true; };
+  }, [template, templateRefSrc]);
 
   useEffect(() => {
     (async () => {
@@ -329,7 +371,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     const initScale  = (g.bottom - g.top) / height;
 
     const newItem = {
-      id:       Date.now(),
+      id:       nextItemIdRef.current++,
       label:    path.split(/[\\/]/).pop(),
       filePath: path,
       canvasX:  CANVAS_SIZE / 2,
@@ -352,7 +394,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
 
   // ── Canvas draw ───────────────────────────────────────────────────────────
   // Draws into the 720×720 pixel buffer. CSS zoom scales the element visually.
-  // Draw order: background → items → selection UI → guides (always on top)
+  // Draw order: background → template ref overlay → items → selection UI → guides
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || Object.keys(guides).length === 0) return;
@@ -362,7 +404,20 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, DS, DS);
 
-    // ── 1. Draw product images ──────────────────────────────────────────────
+    // ── 1. Draw template reference overlay ──────────────────────────────────
+    if (showRefOnCanvas && refCanvasImage?.complete && refCanvasImage.naturalWidth > 0 && refCanvasImage.naturalHeight > 0) {
+      const contain = Math.min(DS / refCanvasImage.naturalWidth, DS / refCanvasImage.naturalHeight);
+      const rw = refCanvasImage.naturalWidth * contain;
+      const rh = refCanvasImage.naturalHeight * contain;
+      const rx = (DS - rw) / 2;
+      const ry = (DS - rh) / 2;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, refOpacity));
+      ctx.drawImage(refCanvasImage, rx, ry, rw, rh);
+      ctx.restore();
+    }
+
+    // ── 2. Draw product images ──────────────────────────────────────────────
     ctx.setLineDash([]);
     for (const item of items) {
       const { x, y, w, h } = itemBounds(item);
@@ -374,7 +429,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       }
     }
 
-    // ── 2. Selection highlight ──────────────────────────────────────────────
+    // ── 3. Selection highlight ──────────────────────────────────────────────
     if (sel) {
       const { x, y, w, h } = itemBounds(sel);
       ctx.strokeStyle = "rgba(250,204,21,0.85)";
@@ -388,7 +443,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       });
     }
 
-    // ── 3. All guides — dashed lines ──────────────────────────────────────
+    // ── 4. All guides — dashed lines ──────────────────────────────────────
     const opHex = Math.round(guideOpacity * 255).toString(16).padStart(2, "0");
     for (const g of Object.values(guides)) {
       const t=g.top*S, b=g.bottom*S, l=g.left*S, r=g.right*S;
@@ -403,7 +458,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       ctx.stroke();
     }
 
-    // ── 4. Active snap zone — solid colored border ────────────────────────
+    // ── 5. Active snap zone — solid colored border ────────────────────────
     const snapZone = activeSnapZone && guides[activeSnapZone] ? activeSnapZone
       : (templates[template]?.zone && guides[templates[template].zone]) ? templates[template].zone
       : null;
@@ -428,7 +483,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     }
 
     ctx.setLineDash([]);
-  }, [items, selId, template, scaleLocked, guides, templates, guideOpacity, canvasBgColor, activeSnapZone]);
+  }, [items, selId, template, scaleLocked, guides, templates, guideOpacity, canvasBgColor, activeSnapZone, showRefOnCanvas, refOpacity, refCanvasImage]);
 
   // ── Wheel zoom (product scale) ────────────────────────────────────────────
   useEffect(() => {
@@ -869,14 +924,30 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
           {templates[template]?.ref_image && (
             <RefImage
               key={template}
-              src={(() => {
-                const ri = templates[template].ref_image;
-                if (!ri) return null;
-                if (ri.startsWith("data:")) return ri;
-                if (ri.includes("/") || ri.includes("\\")) return `/api/image?path=${encodeURIComponent(ri)}`;
-                return `/api/templates/image?name=${encodeURIComponent(ri)}`;
-              })()}
+                           src={templateRefSrc}
             />
+          )}
+          {!!templates[template]?.ref_image && (
+            <div style={{ marginBottom:5, padding:"4px 6px", border:`1px solid ${C.border}`, borderRadius:5, background:C.panel2 }}>
+              <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer", marginBottom:4 }}>
+                <input type="checkbox" checked={showRefOnCanvas} onChange={e => setShowRefOnCanvas(e.target.checked)} />
+                Show ref on canvas
+              </label>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:2 }}>
+                <span style={{ fontSize:9, color:C.dim }}>Ref opacity</span>
+                <span style={{ fontSize:9, color:C.dim, fontFamily:"JetBrains Mono" }}>{Math.round(refOpacity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0.15}
+                max={0.35}
+                step={0.01}
+                value={refOpacity}
+                onChange={e => setRefOpacity(parseFloat(e.target.value))}
+                disabled={!showRefOnCanvas}
+                style={{ width:"100%" }}
+              />
+            </div>
           )}
 
           {/* ── Snap & Align (collapsible) ── */}

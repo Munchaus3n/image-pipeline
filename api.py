@@ -400,6 +400,21 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
         import io
         buf = io.BytesIO()
         fmt = "PNG" if p.suffix.lower() == ".png" else "JPEG"
+        
+        # JPEG cannot encode alpha or many palette/extended modes.
+        if fmt == "JPEG" and img.mode not in {"RGB", "L"}:
+            has_alpha = (
+                img.mode in {"RGBA", "LA"}
+                or (img.mode == "P" and "transparency" in img.info)
+            )
+            if has_alpha:
+                alpha_img = img.convert("RGBA")
+                flat = Image.new("RGBA", alpha_img.size, (255, 255, 255, 255))
+                flat.alpha_composite(alpha_img)
+                img = flat.convert("RGB")
+            else:
+                img = img.convert("RGB")
+
         quality_kwargs = {} if fmt == "PNG" else {"quality": 85, "optimize": True}
         img.save(buf, format=fmt, **quality_kwargs)
         buf.seek(0)
@@ -409,7 +424,8 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
         return Response(content=buf.getvalue(), media_type=mime,
                         headers={"Cache-Control": "public, max-age=60"})
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        detail = f"Preview generation failed (mode={getattr(img, 'mode', 'unknown')}, fmt={locals().get('fmt', 'unknown')}): {e}"
+        raise HTTPException(status_code=500, detail=detail)
 
 
 # ── Save composition ──────────────────────────────────────────────────────────
@@ -580,8 +596,8 @@ def save_settings(payload: SettingsPayload):
         )
         return {"ok": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        detail = f"Preview generation failed (mode={getattr(img, 'mode', 'unknown')}, fmt={locals().get('fmt', 'unknown')}): {e}"
+        raise HTTPException(status_code=500, detail=detail)
 
 @app.get("/models/rembg")
 def list_rembg_models():
