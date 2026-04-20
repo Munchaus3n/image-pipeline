@@ -93,7 +93,11 @@ export default function PlacementEditor() {
   // Auto-select first item whenever selId is null or no longer in the list.
   // This fires after skip/next advances to a new image and items are replaced.
   useEffect(() => {
-    if (!sel && items.length > 0) setSelId(items[0].id);
+    if (!sel && items.length > 0) {
+      const firstId = items[0].id;
+      const t = setTimeout(() => setSelId(firstId), 0);
+      return () => clearTimeout(t);
+    }
   }, [items, sel]);
 
   // ── Draw ──────────────────────────────────────────────────────────────
@@ -179,7 +183,7 @@ export default function PlacementEditor() {
       ctx.textAlign = "left";
       ctx.fillText(info, 8, DS-8);
     }
-  }, [items, selId, template, scaleLocked]);
+  }, [items, selId, sel, template, scaleLocked]);
 
   // ── Mouse ─────────────────────────────────────────────────────────────
   const onMouseDown = useCallback((e) => {
@@ -228,23 +232,7 @@ export default function PlacementEditor() {
     };
     canvas.addEventListener("wheel", handler, { passive: false });
     return () => canvas.removeEventListener("wheel", handler);
-  }, [scaleLocked, selId]);
-
-  // ── Keyboard ──────────────────────────────────────────────────────────
-  const onKeyDown = useCallback((e) => {
-    if (!selId) return;
-    const n = e.shiftKey ? 10 : 1;
-    const map = { ArrowLeft:[-n,0], ArrowRight:[n,0], ArrowUp:[0,-n], ArrowDown:[0,n] };
-    if (map[e.key]) {
-      e.preventDefault();
-      const [dx,dy] = map[e.key];
-      setItems(prev => prev.map(it => it.id===selId ? {...it,canvasX:it.canvasX+dx,canvasY:it.canvasY+dy} : it));
-      return;
-    }
-    if (e.key==="Enter") doSave();
-    if (e.key==="s"||e.key==="S") doSkip();
-    if ((e.ctrlKey||e.metaKey) && e.key==="z") doUndo();
-  }, [selId]);
+  }, [scaleLocked, selId, sel]);
 
   // ── Actions ───────────────────────────────────────────────────────────
   function doUndo() {
@@ -264,6 +252,22 @@ export default function PlacementEditor() {
   function doSkip() {
     setStatus("skipped  →  output/skipped/");
   }
+
+  // ── Keyboard ──────────────────────────────────────────────────────────
+  const onKeyDown = useCallback((e) => {
+    if (!selId) return;
+    const n = e.shiftKey ? 10 : 1;
+    const map = { ArrowLeft:[-n,0], ArrowRight:[n,0], ArrowUp:[0,-n], ArrowDown:[0,n] };
+    if (map[e.key]) {
+      e.preventDefault();
+      const [dx,dy] = map[e.key];
+      setItems(prev => prev.map(it => it.id===selId ? {...it,canvasX:it.canvasX+dx,canvasY:it.canvasY+dy} : it));
+      return;
+    }
+    if (e.key==="Enter") doSave();
+    if (e.key==="s"||e.key==="S") doSkip();
+    if ((e.ctrlKey||e.metaKey) && e.key==="z") doUndo();
+  }, [selId]);
 
   function removeSelected() {
     if (!selId) return;
@@ -533,7 +537,7 @@ export default function PlacementEditor() {
         </div>
 
         {/* STATUS */}
-        <div style={{ marginTop:"auto", paddingTop:20, borderTop:`1px solid ${C.border}`, marginTop:16 }}>
+        <div style={{ marginTop:"auto", paddingTop:20, borderTop:`1px solid ${C.border}` }}>
           <div style={{ fontSize:9, color:C.dim, lineHeight:1.7, fontFamily:"JetBrains Mono" }}>
             {status}
           </div>

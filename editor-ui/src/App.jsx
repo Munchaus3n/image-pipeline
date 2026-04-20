@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import ConfirmModal from "./ConfirmModal.jsx";
 import {
   getConfig, getSource, getImages,
   imageUrl, saveComposition, skipImage,
@@ -148,6 +149,8 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const prefetchRef  = useRef(null); // holds pre-loaded next htmlImg + metadata
   const nextItemIdRef = useRef(1);
   const refImageCacheRef = useRef(new Map());
+  const initRanRef = useRef(false);
+  const confirmResolverRef = useRef(null);
 
   const [guides,     setGuides]     = useState({});
   const [templates,  setTemplates]  = useState({});
@@ -162,7 +165,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const [comboMode,  setComboMode]  = useState(false);
   const [status,     setStatus]     = useState("loading…");
   const [saved,      setSaved]      = useState(false);
-  const [loading,    setLoading]    = useState(true);
   const [guideOpacity, setGuideOpacity] = useState(1.0);  // loaded from settings
   const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
   const [canvasSizeState, setCanvasSizeState] = useState(1440); // editable canvas size
@@ -170,6 +172,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const [showRefOnCanvas, setShowRefOnCanvas] = useState(true);
   const [refOpacity, setRefOpacity] = useState(0.22);
   const [refCanvasImage, setRefCanvasImage] = useState(null);
+  const [confirmState, setConfirmState] = useState(null);
 
   // Phase 4: canvas view zoom (CSS scale, does not affect composition output)
   // 0.75 = 75% of DS (540px rendered), 1.0 = 720px, 1.25 = 900px, 1.5 = 1080px
@@ -227,7 +230,22 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     return () => { cancelled = true; };
   }, [template, templateRefSrc]);
 
+  const askConfirm = useCallback((title, message, confirmLabel = "Confirm", cancelLabel = "Cancel") => {
+    return new Promise((resolve) => {
+      confirmResolverRef.current = resolve;
+      setConfirmState({ title, message, confirmLabel, cancelLabel });
+    });
+  }, []);
+
+  const closeConfirm = useCallback((confirmed) => {
+    confirmResolverRef.current?.(confirmed);
+    confirmResolverRef.current = null;
+    setConfirmState(null);
+  }, []);
+
   useEffect(() => {
+    if (initRanRef.current) return;
+    initRanRef.current = true;
     (async () => {
       try {
         const cfg = await getConfig();
@@ -244,7 +262,9 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
               resolvedSize = fromSettings;
             }
           }
-        } catch { }
+        } catch {
+          // ignore local settings load errors
+        }
         CANVAS_SIZE = resolvedSize;
         setCanvasSizeState(resolvedSize);
         setGuides(cfg.guides);
@@ -269,7 +289,9 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
               setGuides(mergedGuides);
             }
           }
-        } catch { }
+        } catch {
+          // ignore local appearance settings errors
+        }
 
         const session = await getSession();
         if (session.exists) {
@@ -277,13 +299,15 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
             // Already completed — clear silently, don't prompt.
             await clearSession().catch(() => {});
           } else {
-            const resume = window.confirm(
-              `Resume from image ${session.queue_index + 1}/${session.total}?\n${session.src_root}`
+            const resume = await askConfirm(
+              "Resume previous editor session?",
+              `Resume from image ${session.queue_index + 1}/${session.total}?\n${session.src_root}`,
+              "Resume",
+              "Start over",
             );
             if (resume) {
               await initFromFolder(session.src_root, session.queue_index, cfg.guides);
               if (session.template && cfg.templates[session.template]) setTemplate(session.template);
-              setLoading(false);
               return;
             } else {
               await clearSession();
@@ -294,13 +318,11 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         const src = await getSource(outputDir);
         setSrcLabel(src.label);
         await initFromFolder(src.folder, 0, cfg.guides);
-        setLoading(false);
       } catch (e) {
         setStatus(`API error: ${e.message}\nIs api.py running?`);
-        setLoading(false);
       }
     })();
-  }, []);
+  }, [askConfirm, canvasSizeProp, outputDir, initFromFolder]);
 
   async function initFromFolder(folder, startIdx, guidesOverride) {
     const result = await getImages(folder);
@@ -385,10 +407,8 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
 
     if (isCombo) {
       setItems(prev => [...prev, newItem]);
-      imagesRef.current = [...imagesRef.current, htmlImg];
     } else {
       setItems([newItem]);
-      imagesRef.current = [htmlImg];
     }
     setSelId(newItem.id);
   }
@@ -484,7 +504,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     }
 
     ctx.setLineDash([]);
-  }, [items, selId, template, scaleLocked, guides, templates, guideOpacity, canvasBgColor, activeSnapZone, showRefOnCanvas, refOpacity, refCanvasImage]);
+  }, [items, selId, sel, template, scaleLocked, guides, templates, guideOpacity, canvasBgColor, activeSnapZone, showRefOnCanvas, refOpacity, refCanvasImage]);
 
   // ── Wheel zoom (product scale) ────────────────────────────────────────────
   useEffect(() => {
@@ -550,30 +570,15 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
 
   const onMouseUp = useCallback(() => { dragRef.current = null; }, []);
 
-  const onKeyDown = useCallback((e) => {
-    const n = e.shiftKey ? 10 : 1;
-    const map = { ArrowLeft:[-n,0], ArrowRight:[n,0], ArrowUp:[0,-n], ArrowDown:[0,n] };
-    if (map[e.key]) {
-      e.preventDefault();
-      if (!selId) return;
-      const [dx,dy] = map[e.key];
-      setItems(prev => prev.map(it => it.id===selId ? {...it,canvasX:it.canvasX+dx,canvasY:it.canvasY+dy} : it));
-      return;
-    }
-    if (e.key==="Enter") doSave();
-    if (e.key==="s"||e.key==="S") doSkip();
-    if ((e.ctrlKey||e.metaKey) && e.key==="z") doUndo();
-  }, [selId, items, queue, queueIdx, srcFolder, template, comboMode]);
-
-  function doUndo() {
+  const doUndo = useCallback(() => {
     if (!undoRef.current) return;
     const { id,canvasX,canvasY,scale } = undoRef.current;
     setItems(prev => prev.map(it => it.id===id ? {...it,canvasX,canvasY,scale} : it));
     undoRef.current = null;
     setStatus("undone.");
-  }
+  }, []);
 
-  async function doSave() {
+  const doSave = useCallback(async () => {
     if (!items.length) return;
     try {
       // Start pre-loading next image NOW — runs in parallel with the API calls below.
@@ -600,16 +605,31 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       prefetchRef.current = null; // clear stale prefetch on error
       setStatus(`save failed: ${e.message}`);
     }
-  }
+  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, template, advance, prefetchNextImage]);
 
-  async function doSkip() {
+  const doSkip = useCallback(async () => {
     prefetchNextImage(queue, queueIdx + 1);
     if (queueIdx < queue.length) {
-      try { await skipImage(queue[queueIdx]); } catch (_) {}
+      try { await skipImage(queue[queueIdx]); } catch { void 0; }
     }
     setStatus("skipped.");
     advance();
-  }
+  }, [queue, queueIdx, advance, prefetchNextImage]);
+
+  const onKeyDown = useCallback((e) => {
+    const n = e.shiftKey ? 10 : 1;
+    const map = { ArrowLeft:[-n,0], ArrowRight:[n,0], ArrowUp:[0,-n], ArrowDown:[0,n] };
+    if (map[e.key]) {
+      e.preventDefault();
+      if (!selId) return;
+      const [dx,dy] = map[e.key];
+      setItems(prev => prev.map(it => it.id===selId ? {...it,canvasX:it.canvasX+dx,canvasY:it.canvasY+dy} : it));
+      return;
+    }
+    if (e.key==="Enter") doSave();
+    if (e.key==="s"||e.key==="S") doSkip();
+    if ((e.ctrlKey||e.metaKey) && e.key==="z") doUndo();
+  }, [selId, doSave, doSkip, doUndo]);
 
   function advance() {
     const nextIdx = queueIdx + 1;
@@ -710,16 +730,17 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   ];
 
   return (
-    <div
-      ref={containerRef}
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      style={{
-        display:"flex", background:C.bg, height:"100%", minHeight:0,
-        fontFamily:"'Outfit','DM Sans',system-ui,sans-serif",
-        color:C.text, outline:"none", userSelect:"none", fontSize:13,
-      }}
-    >
+    <>
+      <div
+        ref={containerRef}
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        style={{
+          display:"flex", background:C.bg, height:"100%", minHeight:0,
+          fontFamily:"'Outfit','DM Sans',system-ui,sans-serif",
+          color:C.text, outline:"none", userSelect:"none", fontSize:13,
+        }}
+      >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
         ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
@@ -1103,6 +1124,16 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
           )}
         </div>
       </div>
-    </div>
+      </div>
+      <ConfirmModal
+        open={Boolean(confirmState)}
+        title={confirmState?.title}
+        message={confirmState?.message}
+        confirmLabel={confirmState?.confirmLabel}
+        cancelLabel={confirmState?.cancelLabel}
+        onConfirm={() => closeConfirm(true)}
+        onCancel={() => closeConfirm(false)}
+      />
+    </>
   );
 }

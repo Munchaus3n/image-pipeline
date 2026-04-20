@@ -7,13 +7,6 @@ const BASE = "/api";
 const openFolder = (path = "") =>
   fetch(`${BASE}/open-folder?path=${encodeURIComponent(path)}`).catch(() => {});
 
-const getHistoryPath = async () => {
-  const r = await fetch(`${BASE}/history-path`);
-  if (!r.ok) return "";
-  const j = await r.json();
-  return j.path || "";
-};
-
 const C = {
   bg:      "var(--bg)",      panel:   "var(--panel)",   panel2:  "var(--panel2)",
   border:  "var(--border)",  text:    "var(--text)",    dim:     "var(--dim)",
@@ -78,7 +71,9 @@ function FolderInput({ value, onChange, placeholder }) {
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(value)}`);
       const { path } = await r.json();
       if (path) onChange(path);
-    } catch { }
+    } catch {
+      void 0;
+    }
   }, [value, onChange]);
 
   return (
@@ -116,12 +111,12 @@ function FieldLabel({ children }) {
 }
 
 function Spinner({ color = C.yellow, size = 12 }) {
-  const [f, setF] = useState(0);
   const ch = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const [f, setF] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setF(x => (x + 1) % ch.length), 80);
     return () => clearInterval(t);
-  }, []);
+  }, [ch.length]);
   return <span style={{ fontFamily: "JetBrains Mono", fontSize: size, color }}>{ch[f]}</span>;
 }
 
@@ -141,14 +136,13 @@ function usePipeline() {
   const [imageSkipped, setImageSkipped] = useState(0);
   const [imageError, setImageError] = useState(0);
   const [totalImages, setTotalImages] = useState(0);
-  const [currentFile, setCurrentFile] = useState("");
-  const [previewPath, setPreviewPath] = useState("");  // absolute path for live preview
   const [recentDone, setRecentDone] = useState([]);
   const [elapsed, setElapsed] = useState(0);
   const [stage, setStage] = useState(null);
   const [stagesDone, setStagesDone] = useState({ upscale: false, rembg: false });
   const [upStats, setUpStats] = useState({ done: 0, skip: 0, err: 0 });
   const [bgStats, setBgStats] = useState({ done: 0, skip: 0, err: 0 });
+  const [imageProgress, setImageProgress] = useState({});
 
   const abortRef   = useRef(null);
   const logRef     = useRef(null);
@@ -199,46 +193,50 @@ function usePipeline() {
     }
     if (raw.startsWith("__ok_upscale__:")) {
       const fname = raw.slice(15);
+      setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "ok" } }));
       if (!doneSet.current.has(fname)) {
         doneSet.current.add(fname);
         setImageDone(doneSet.current.size);
         setRecentDone(prev => [fname, ...prev].slice(0, 8));
       }
       setUpStats(s => ({ ...s, done: s.done + 1 }));
-      setCurrentFile("");
       return;
     }
     if (raw.startsWith("__ok_rembg__:")) {
       const fname = raw.slice(13);
+      setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "ok" } }));
       if (!doneSet.current.has(fname)) {
         doneSet.current.add(fname);
         setImageDone(doneSet.current.size);
         setRecentDone(prev => [fname, ...prev].slice(0, 8));
       }
       setBgStats(s => ({ ...s, done: s.done + 1 }));
-      setCurrentFile("");
       return;
     }
     if (raw.startsWith("__skip_upscale__:")) {
       const fname = raw.slice(17);
+      setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "skip" } }));
       if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
       setUpStats(s => ({ ...s, skip: s.skip + 1 }));
       return;
     }
     if (raw.startsWith("__skip_rembg__:")) {
       const fname = raw.slice(15);
+      setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "skip" } }));
       if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
       setBgStats(s => ({ ...s, skip: s.skip + 1 }));
       return;
     }
     if (raw.startsWith("__err_upscale__:")) {
       const fname = raw.slice(16);
+      setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "error" } }));
       if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
       setUpStats(s => ({ ...s, err: s.err + 1 }));
       return;
     }
     if (raw.startsWith("__err_rembg__:")) {
       const fname = raw.slice(14);
+      setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "error" } }));
       if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
       setBgStats(s => ({ ...s, err: s.err + 1 }));
       return;
@@ -246,8 +244,12 @@ function usePipeline() {
 
     if (raw.startsWith("__processing__:")) {
       const fullPath = raw.slice(15);
-      setPreviewPath(fullPath);
-      setCurrentFile(fullPath.replace(/.*[/\\]/, ""));
+      const fileName = fullPath.replace(/.*[/\\]/, "");
+      setImageProgress(prev => {
+        const current = prev[fileName];
+        if (current) return prev;
+        return { ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } };
+      });
       return;
     }
 
@@ -268,9 +270,6 @@ function usePipeline() {
       setStage("rembg");
     }
 
-    const extM = raw.match(/^([^\s✓✗↷─═]+\.(png|jpg|jpeg|webp|tiff))$/i);
-    if (extM) setCurrentFile(extM[1].trim());
-
     if (kind === "error") {
       setErrors(prev => {
         if (prev[prev.length - 1]?.raw === raw) return prev;
@@ -285,11 +284,12 @@ function usePipeline() {
     abortRef.current = ctrl;
     setLog([]); setErrors([]);
     setImageDone(0); setImageSkipped(0); setImageError(0);
-    setTotalImages(0); setCurrentFile(""); setPreviewPath(""); setRecentDone([]);
+    setTotalImages(0); setRecentDone([]);
     setElapsed(0); setDone(false); setRunning(true);
     setStage(null); setStagesDone({ upscale: false, rembg: false });
     setUpStats({ done: 0, skip: 0, err: 0 });
     setBgStats({ done: 0, skip: 0, err: 0 });
+    setImageProgress({});
     stageRef.current = "upscale";
     recentLog.current = [];
     doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set();
@@ -322,10 +322,10 @@ function usePipeline() {
           if (msg.startsWith("__done__")) {
             appendLine(msg.includes("exit=0") ? "✓ Pipeline complete." : "✗ Pipeline exited with errors.");
             setStagesDone({ upscale: true, rembg: true });
-            setStage("done"); setDone(true); setRunning(false); setCurrentFile("");
+            setStage("done"); setDone(true); setRunning(false);
           } else if (msg.startsWith("__error__")) {
             appendLine(`Error: ${msg.replace("__error__ ", "")}`);
-            setRunning(false); setCurrentFile("");
+            setRunning(false);
           } else {
             appendLine(msg);
           }
@@ -340,22 +340,22 @@ function usePipeline() {
 
   const stop = useCallback(async () => {
     abortRef.current?.abort();
-    try { await fetch(`${BASE}/pipeline/stop`, { method: "POST" }); } catch { }
+    try { await fetch(`${BASE}/pipeline/stop`, { method: "POST" }); } catch { void 0; }
     appendLine("Stopped by user.");
-    setRunning(false); setCurrentFile(""); setStage(null);
+    setRunning(false); setStage(null);
   }, [appendLine]);
 
   return {
     running, done, log, errors, imageDone, imageSkipped, imageError,
-    totalImages, currentFile, previewPath, recentDone, elapsed, stage, stagesDone,
-    upStats, bgStats,
+    totalImages, recentDone, elapsed, stage, stagesDone,
+    upStats, bgStats, imageProgress,
     logRef, errorRef, start, stop
   };
 }
 
 // ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
 
-function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, recentDone,
+function Zone1({ running, done, stage, stagesDone, recentDone,
   imageDone, totalImages, doUpscale, doRembg, inputDir, setInputDir, rembgModel }) {
   const [dragOver, setDragOver] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState([]);
@@ -385,7 +385,9 @@ function Zone1({ running, done, stage, stagesDone, currentFile, previewPath, rec
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(inputDir)}`);
       const { path } = await r.json();
       if (path) { setInputDir(path); setDroppedFiles([]); }
-    } catch { }
+    } catch {
+      void 0;
+    }
     setBrowseLoading(false);
   };
 
@@ -578,18 +580,15 @@ function SmStat({ label, value, color }) {
 
 // ── LivePreview — full-area image preview during run ─────────────────────────
 
-function LivePreview({ running, done, previewPath, currentFile, imageDone, totalImages }) {
-  const [loaded, setLoaded] = useState(false);
-  const [prevSrc, setPrevSrc] = useState("");
+function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
+  const [loadedSrc, setLoadedSrc] = useState("");
 
   // Track source changes to show loading state
   const src = previewPath
     ? `${BASE}/image?path=${encodeURIComponent(previewPath)}`
     : "";
 
-  useEffect(() => {
-    if (src !== prevSrc) { setLoaded(false); setPrevSrc(src); }
-  }, [src]);
+  const loaded = Boolean(src) && loadedSrc === src;
 
   if (done && !running) return (
     <div style={{
@@ -644,8 +643,8 @@ function LivePreview({ running, done, previewPath, currentFile, imageDone, total
             key={src}
             src={src}
             alt=""
-            onLoad={() => setLoaded(true)}
-            onError={() => setLoaded(true)}
+            onLoad={() => setLoadedSrc(src)}
+            onError={() => setLoadedSrc(src)}
             style={{
               width: "100%", height: "100%", objectFit: "contain", display: "block",
               opacity: loaded ? 1 : 0,
@@ -662,7 +661,7 @@ function LivePreview({ running, done, previewPath, currentFile, imageDone, total
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             textAlign: "center",
           }}>
-            {currentFile || previewPath.replace(/.*[/\\]/, "")}
+            {previewPath.replace(/.*[/\\]/, "")}
           </div>
         </>
       ) : (
@@ -806,7 +805,15 @@ function TagInput({ tags, onChange }) {
 
 // ── LogPanel — collapsible output log ────────────────────────────────────────
 
-function LogPanel({ logRef, log, running, open, setOpen, flex }) {
+function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) {
+  const progressEntries = Object.entries(imageProgress);
+  const progressColor = (status) => {
+    if (status === "error") return C.red;
+    if (status === "skip") return C.dim2;
+    if (status === "ok") return C.green;
+    return C.yellow;
+  };
+
   return (
     <div style={{
       flex: open ? flex : "0 0 28px", minWidth: 0, minHeight: 0,
@@ -824,11 +831,56 @@ function LogPanel({ logRef, log, running, open, setOpen, flex }) {
       </div>
       {open && (
         <div ref={logRef} style={{
-          flex: 1, overflowY: "auto", background: C.panel,
+          flex: 1, overflowY: "auto", overflowX: "hidden", background: C.panel,
           border: `1px solid ${C.border}`, borderRadius: 4,
           padding: "8px 12px", fontFamily: "JetBrains Mono",
-          fontSize: 11, lineHeight: 1.7,
+          fontSize: 11, lineHeight: 1.7, display: "flex", flexDirection: "column", gap: 8,
         }}>
+          {progressEntries.length > 0 && (
+            <div style={{
+              borderBottom: `1px solid ${C.border}`,
+              paddingBottom: 8,
+              marginBottom: 2,
+            }}>
+              {progressEntries.slice(-8).map(([name, meta]) => (
+                <div key={name} style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  gap: 8,
+                  alignItems: "center",
+                  marginBottom: 4,
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{
+                      color: C.dim,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}>
+                      #{name}
+                    </div>
+                    <div style={{
+                      marginTop: 3,
+                      height: 4,
+                      borderRadius: 999,
+                      background: "color-mix(in srgb, var(--border) 55%, transparent)",
+                    }}>
+                      <div style={{
+                        width: `${meta.percent}%`,
+                        height: "100%",
+                        borderRadius: 999,
+                        background: progressColor(meta.status),
+                        transition: "width 0.18s ease",
+                      }} />
+                    </div>
+                  </div>
+                  <div style={{ color: progressColor(meta.status), fontWeight: 600 }}>
+                    {meta.percent}%
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           {log.length === 0 && !running ? (
             <div style={{ color: C.dim, fontSize: 12 }}>Configure and press Run Pipeline.</div>
           ) : log.map((e, i) => (
@@ -933,14 +985,13 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
+export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
   const [folderMode, setFolderMode] = useState("bulk");
   const [doUpscale, setDoUpscale] = useState(true);
   const [scale, setScale] = useState("4");
   const [doRembg, setDoRembg] = useState(true);
   const [canvasSize, setCanvasSize] = useState("1440");
   const [thumbnail, setThumbnail] = useState(true);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [rembgModel, setRembgModel] = useState("birefnet-general");
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
   const [logOpen, setLogOpen] = useState(true);
@@ -967,9 +1018,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
         if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
         if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
       })
-      .catch(() => {})
-      .finally(() => setSettingsLoaded(true));
-  }, []);
+      .catch(() => {
+        void 0;
+      });
+  }, [setOutputDir]);
 
 // Load persisted settings on mount and when window regains focus.
   useEffect(() => {
@@ -979,9 +1031,9 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
   }, [loadSettings]);
 
   const {
-    running, done, log, errors, imageDone, imageSkipped, imageError,
-    totalImages, currentFile, previewPath, recentDone, elapsed, stage, stagesDone,
-    upStats, bgStats,
+    running, done, log, errors, imageDone, imageError,
+    totalImages, recentDone, elapsed, stage, stagesDone,
+    upStats, bgStats, imageProgress,
     logRef, errorRef, start, stop,
   } = usePipeline();
 
@@ -1180,7 +1232,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
               <Zone1
                 running={running} done={done}
                 stage={stage} stagesDone={stagesDone}
-                currentFile={currentFile} previewPath={previewPath} recentDone={recentDone}
+                recentDone={recentDone}
                 imageDone={imageDone} totalImages={totalImages}
                 doUpscale={doUpscale} doRembg={doRembg}
                 inputDir={inputDir} setInputDir={setInputDir}
@@ -1214,6 +1266,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
                 open={logOpen}
                 setOpen={setLogOpen}
                 flex={logOpen && errOpen ? 1 : (logOpen ? 9 : 1)}
+                imageProgress={imageProgress}
               />
             </div>
 

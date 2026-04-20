@@ -45,10 +45,12 @@ export default function Input({
         const data = await r.json();
         if (Array.isArray(data?.images)) setThumbs(data.images.slice(0, 500));
         else setThumbs([]);
-      } catch { setThumbs([]); }
+      } catch {
+        setThumbs([]);
+      }
       finally { setLoading(false); }
     })();
-  }, [inputDir]);
+  }, [inputDir, setExcludeTags, setRemovedImages, setThumbs]);
 
   const browse = useCallback(async () => {
     setBrowseLoading(true);
@@ -56,7 +58,9 @@ export default function Input({
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(inputDir)}`);
       const { path } = await r.json();
       if (path) { setInputDir(path); setSelected(new Set()); setPreviewPath(null); setPreviewLoadError(false); }
-    } catch {}
+    } catch {
+      void 0;
+    }
     setBrowseLoading(false);
   }, [inputDir, setInputDir]);
 
