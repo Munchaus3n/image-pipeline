@@ -576,6 +576,18 @@ def main():
         sys.exit(1)
 
     images, no_rembg_set = collect_images(input_dir, folder_mode == "clean")
+
+     # Safety fallback: if user selected Bulk mode but the chosen folder only has
+    # images in subfolders, auto-switch to recursive collection instead of
+    # failing with "No images found".
+    if not images and folder_mode == "bulk":
+        nested_images, nested_no_rembg = collect_images(input_dir, recursive=True)
+        if nested_images:
+            warn("No top-level images found in Bulk mode — detected images in subfolders. Using recursive scan.")
+            images = nested_images
+            no_rembg_set = nested_no_rembg
+            folder_mode = "clean"
+
     excluded_names = {s.strip().lower() for s in args.exclude_rembg.split(",") if s.strip()}
     skip_names     = {s.strip().lower() for s in args.skip_files.split(",")    if s.strip()}
     if skip_names:
