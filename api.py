@@ -704,6 +704,16 @@ async def run_pipeline(cfg: PipelineConfig):
                 cwd=str(BASE_DIR),
             )
             _pipeline_proc = proc
+            try:
+                SESSION_FILE.write_text(json.dumps(
+                    SessionData(
+                        src_root=cfg.input_dir.strip() or str(BASE_DIR / "input"),
+                        queue_index=0,
+                        template=cfg.folder_mode,
+                    ).model_dump()
+                ))
+            except Exception:
+                pass
 
             while True:
                 chunk = await proc.stdout.read(4096)
@@ -713,6 +723,8 @@ async def run_pipeline(cfg: PipelineConfig):
                     yield {"data": line}
 
             await proc.wait()
+            if proc.returncode == 0:
+                SESSION_FILE.unlink(missing_ok=True)
             yield {"data": f"__done__ exit={proc.returncode}"}
 
         except Exception as e:
