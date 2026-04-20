@@ -16,7 +16,9 @@ import configparser
 import subprocess
 import threading
 from pathlib import Path
+
 from typing import AsyncGenerator
+from typing import Literal
 
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 
@@ -34,9 +36,16 @@ PYTHON_EXE = sys.executable
 
 app = FastAPI(title="Image Pipeline API")
 
+_LOCAL_ORIGINS = [
+    "http://127.0.0.1",
+    "http://localhost",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_LOCAL_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -46,6 +55,33 @@ _pipeline_process: subprocess.Popen | None = None
 _cancel_flag = threading.Event()
 
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tiff"}
+_ALLOWED_ROOTS = tuple(p.resolve() for p in {BASE_DIR, BASE_DIR / "output", BASE_DIR / "input", BASE_DIR / "templates"})
+
+
+def _resolve_safe_path(raw: str, *, must_exist: bool = True, allow_file: bool = True, allow_dir: bool = True) -> Path:
+    value = (raw or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="Path is required")
+
+    p = Path(value).expanduser()
+    try:
+        resolved = p.resolve(strict=must_exist)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Not found: {value}")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if must_exist:
+        if allow_file and resolved.is_file():
+            pass
+        elif allow_dir and resolved.is_dir():
+            pass
+        else:
+            raise HTTPException(status_code=400, detail="Invalid path type")
+
+    if not any(resolved == root or root in resolved.parents for root in _ALLOWED_ROOTS):
+        raise HTTPException(status_code=403, detail="Path outside allowed roots")
+    return resolved
 
 
 # ── Models ─────────────────────────────────────────────────────────────────────
@@ -53,9 +89,9 @@ SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tiff"}
 class PipelineConfig(BaseModel):
     input_folder:       str
     output_folder:      str
-    folder_mode:        str   # "bulk" | "clean"
+    folder_mode:        Literal["bulk", "clean"]
     upscaling_enabled:  bool
-    upscale_factor:     str   # "2x" | "4x"
+    upscale_factor:     Literal["2x", "4x"]
     bg_removal_enabled: bool
 
 class PlacementSave(BaseModel):
@@ -106,7 +142,7 @@ def health():
 @app.get("/images")
 def list_images(folder: str, recursive: bool = False):
     """List all supported images in a folder. Returns paths + count by type."""
-    root = Path(folder)
+    root = _resolve_safe_path(folder, must_exist=True, allow_file=False, allow_dir=True)
     if not root.exists():
         raise HTTPException(404, f"Folder not found: {folder}")
 
@@ -138,7 +174,7 @@ def list_images(folder: str, recursive: bool = False):
 @app.get("/image")
 def get_image(path: str):
     """Return a single image as base64 data URL."""
-    p = Path(path)
+    p = _resolve_safe_path(path, must_exist=True, allow_file=True, allow_dir=False)
     if not p.exists():
         raise HTTPException(404, f"Image not found: {path}")
     return {"data_url": image_to_base64(p)}
@@ -234,7 +270,7 @@ def save_placement(data: PlacementSave):
 def open_folder(path: str):
     """Open folder in system file explorer."""
     import platform
-    p = Path(path)
+    p = _resolve_safe_path(path, must_exist=True, allow_file=False, allow_dir=True)
     if not p.exists():
         raise HTTPException(404, f"Folder not found: {path}")
     system = platform.system()

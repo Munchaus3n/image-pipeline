@@ -49,9 +49,6 @@ function loadImageSize(url) {
 // — key={template} on the call site ensures full remount when template changes
 function RefImage({ src }) {
   const [err, setErr] = useState(false);
-  // Reset error state when src changes (new template selected)
-  const prevSrc = useRef(null);
-  if (prevSrc.current !== src) { prevSrc.current = src; if (err) setErr(false); }
 
   if (!src) return null;
   return (
@@ -218,6 +215,10 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         img.src = templateRefSrc;
       });
       cache.set(cacheKey, loader);
+      if (cache.size > 32) {
+        const first = cache.keys().next().value;
+        if (first) cache.delete(first);
+      }
     }
 
     loader.then((img) => {

@@ -14,11 +14,12 @@ import subprocess
 import sys
 import configparser
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from PIL import Image
 from sse_starlette.sse import EventSourceResponse
 from contextlib import asynccontextmanager
@@ -146,6 +147,33 @@ def mirror_save_path(src: Path, src_root: Path) -> Path:
         rel = Path(src.name)
     return OUTPUT_ROOT / "final" / rel
 
+_ALLOWED_ROOTS = tuple(p.resolve() for p in {BASE_DIR, OUTPUT_ROOT, TEMPLATES_DIR, BASE_DIR / "input"})
+
+def _resolve_safe_path(raw: str, *, must_exist: bool = True, allow_file: bool = True, allow_dir: bool = True) -> Path:
+    value = (raw or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="Path is required")
+
+    p = Path(value).expanduser()
+    try:
+        resolved = p.resolve(strict=must_exist)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Not found: {value}")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if must_exist:
+        if allow_file and resolved.is_file():
+            pass
+        elif allow_dir and resolved.is_dir():
+            pass
+        else:
+            raise HTTPException(status_code=400, detail="Invalid path type")
+
+    if not any(resolved == root or root in resolved.parents for root in _ALLOWED_ROOTS):
+        raise HTTPException(status_code=403, detail="Path outside allowed roots")
+    return resolved
+
 # ── Template helpers ──────────────────────────────────────────────────────────
 
 CUSTOM_TEMPLATES_FILE = BASE_DIR / "templates_custom.json"
@@ -197,7 +225,7 @@ class SaveRequest(BaseModel):
     queue_index: int
     is_combo:    bool       = False
     thumbnail:   bool       = True
-    canvas_size: int | None = None
+    canvas_size: int | None = Field(default=None, ge=1, le=8192)
 
 class SkipRequest(BaseModel):
     image_path: str
@@ -208,14 +236,14 @@ class SessionData(BaseModel):
     template:    str
 
 class PipelineConfig(BaseModel):
-    folder_mode:    str
+    folder_mode:    Literal["bulk", "clean"]
     do_upscale:     bool
-    scale:          str
+    scale:          Literal["2", "4"]
     do_rembg:       bool
     input_dir:      str = ""
     output_dir:     str = ""
-    exclude_rembg:  list[str] = []
-    skip_files:     list[str] = []
+    exclude_rembg:  list[str] = Field(default_factory=list)
+    skip_files:     list[str] = Field(default_factory=list)
     rembg_model:    str = ""
 
 class TemplatesPayload(BaseModel):
@@ -228,9 +256,16 @@ class SettingsPayload(BaseModel):
 
 app = FastAPI(title="Image Pipeline API", version="1.2.0", lifespan=lifespan)
 
+_LOCAL_ORIGINS = [
+    "http://127.0.0.1",
+    "http://localhost",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_LOCAL_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -305,9 +340,8 @@ def open_folder(path: str = ""):
     If path is empty or missing, opens OUTPUT_ROOT.
     Uses os.startfile on Windows (most reliable), open/xdg-open elsewhere.
     """
-    p = Path(path.strip()) if path.strip() else OUTPUT_ROOT
+    p = _resolve_safe_path(path, must_exist=True, allow_file=False, allow_dir=True) if path.strip() else OUTPUT_ROOT.resolve()
     if not p.exists():
-        # Create it so the explorer doesn't error
         p.mkdir(parents=True, exist_ok=True)
     if platform.system() == "Windows":
         # os.startfile is the correct way to open a folder in Explorer
@@ -351,7 +385,7 @@ def save_templates(payload: TemplatesPayload):
 @app.get("/source")
 def get_source(output_dir: str = ""):
     # Custom output: pipeline wrote into <chosen>/output, so resolve to that subfolder.
-    base = (Path(output_dir.strip()) / "output") if output_dir.strip() else OUTPUT_ROOT
+    base = (_resolve_safe_path(output_dir, must_exist=True, allow_file=False, allow_dir=True) / "output") if output_dir.strip() else OUTPUT_ROOT
     folder, label = detect_source_folder(base)
     images = images_in_folder(folder)
     return {"folder": str(folder), "label": label, "count": len(images)}
@@ -359,7 +393,7 @@ def get_source(output_dir: str = ""):
 
 @app.get("/images")
 def list_images(folder: str = Query(...)):
-    path = Path(folder)
+    path = _resolve_safe_path(folder, must_exist=True, allow_file=False, allow_dir=True)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Folder not found: {folder}")
     images = images_in_folder(path)
@@ -368,7 +402,7 @@ def list_images(folder: str = Query(...)):
 
 @app.get("/image")
 def serve_image(path: str = Query(...)):
-    p = Path(path)
+    p = _resolve_safe_path(path, must_exist=True, allow_file=True, allow_dir=False)
     if not p.exists():
         raise HTTPException(status_code=404, detail=f"Not found: {path}")
     if p.suffix.lower() not in SUPPORTED_EXTS:
@@ -380,7 +414,7 @@ def serve_image(path: str = Query(...)):
 def serve_preview(path: str = Query(...), size: int = Query(default=800)):
     """Serve a downscaled preview image — much faster than loading full-res for sidebar display.
     size: max dimension in pixels (default 800). Original returned if already smaller."""
-    p = Path(path)
+    p = _resolve_safe_path(path, must_exist=True, allow_file=True, allow_dir=False)
     if not p.exists():
         raise HTTPException(status_code=404, detail=f"Not found: {path}")
     if p.suffix.lower() not in SUPPORTED_EXTS:
@@ -389,7 +423,8 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
     size = max(64, min(1600, size))
 
     try:
-        img = Image.open(p)
+        with Image.open(p) as opened:
+            img = opened.copy()
         # If image is already small enough, serve directly
         if max(img.width, img.height) <= size:
             return FileResponse(str(p))
@@ -460,7 +495,8 @@ def save_composition(req: SaveRequest):
         p = Path(item.image_path)
         if not p.exists():
             raise HTTPException(status_code=404, detail=f"Source image not found: {item.image_path}")
-        img = Image.open(p).convert("RGBA")
+        with Image.open(p) as opened:
+            img = opened.convert("RGBA")
         w   = max(1, int(img.width  * item.scale))
         h   = max(1, int(img.height * item.scale))
         resized = img.resize((w, h), Image.LANCZOS)
@@ -596,8 +632,7 @@ def save_settings(payload: SettingsPayload):
         )
         return {"ok": True}
     except Exception as e:
-        detail = f"Preview generation failed (mode={getattr(img, 'mode', 'unknown')}, fmt={locals().get('fmt', 'unknown')}): {e}"
-        raise HTTPException(status_code=500, detail=detail)
+        raise HTTPException(status_code=500, detail=f"Failed to save settings: {e}")
 
 @app.get("/models/rembg")
 def list_rembg_models():

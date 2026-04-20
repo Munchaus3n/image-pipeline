@@ -134,7 +134,8 @@ _NCNN_TILE_SIZE      = "256"  # tile size passed to -t flag
 def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    src_img   = Image.open(src)
+    with Image.open(src) as opened:
+        src_img = opened.copy()
     has_alpha = src_img.mode in ("RGBA", "LA") or (
         src_img.mode == "P" and "transparency" in src_img.info
     )
@@ -177,7 +178,8 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
             tmp_png.unlink(missing_ok=True)
 
     if alpha_mask is not None:
-        upscaled = Image.open(dst).convert("RGBA")
+        with Image.open(dst) as opened:
+            upscaled = opened.convert("RGBA")
         upscaled.putalpha(alpha_mask.resize((upscaled.width, upscaled.height), Image.LANCZOS))
         upscaled.save(dst, format="PNG")
 
@@ -186,10 +188,10 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
 
 def has_transparency(path: Path) -> bool:
     try:
-        img = Image.open(path)
-        if img.mode not in ("RGBA", "LA"):
-            return False
-        return img.split()[-1].getextrema()[0] < 255
+        with Image.open(path) as img:
+            if img.mode not in ("RGBA", "LA"):
+                return False
+            return img.split()[-1].getextrema()[0] < 255
     except Exception:
         return False
 
@@ -274,15 +276,16 @@ def _prefetch_image(path: Path) -> None:
     GPU inference dominates the wall time so this costs nothing visible.
     """
     try:
-        img = Image.open(path)
-        img.load()   # force full decode — not just the header
+        with Image.open(path) as img:
+            img.load()   # force full decode — not just the header
     except Exception:
         pass
 
 def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
-        img = Image.open(src).convert("RGBA")
+        with Image.open(src) as opened:
+            img = opened.convert("RGBA")
 
         # Already transparent — just clean up edges and crop, skip inference
         if has_transparency(src):
@@ -432,7 +435,8 @@ def batch_remove_bg(
         elif src.name in no_rembg_names or src.name.lower() in excluded:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                tight_crop(Image.open(src).convert("RGBA")).save(dst, format="PNG")
+                with Image.open(src) as opened:
+                    tight_crop(opened.convert("RGBA")).save(dst, format="PNG")
                 ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
                 print(f"__skip_rembg__:{src.name}", flush=True)
             except Exception as e:
