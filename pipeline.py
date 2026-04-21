@@ -394,6 +394,8 @@ def batch_remove_bg(
 
     no_rembg_names = {p.name for p in (no_rembg_originals or set())}
     excluded = {n.strip().lower() for n in (exclude_names or set()) if n.strip()}
+    # Stem-only set so product.jpg still excludes product.png after upscaling converts to PNG
+    excluded_stems = {Path(n).stem.lower() for n in excluded}
     print(f"__total__:{len(upscaled)}", flush=True)
 
     providers, device_label = _select_onnx_providers(force_cpu=force_cpu)
@@ -432,12 +434,12 @@ def batch_remove_bg(
         if dst.exists():
             skip(f"{src.name} (already processed)")
             print(f"__skip_rembg__:{src.name}", flush=True)
-        elif src.name in no_rembg_names or src.name.lower() in excluded:
+        elif src.name in no_rembg_names or src.name.lower() in excluded or src.stem.lower() in excluded_stems:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 with Image.open(src) as opened:
                     tight_crop(opened.convert("RGBA")).save(dst, format="PNG")
-                ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
+                ok(f"{src.name} → processed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
                 print(f"__skip_rembg__:{src.name}", flush=True)
             except Exception as e:
                 err(f"Crop failed on {src.name}: {e}")
@@ -466,7 +468,7 @@ def batch_remove_bg(
                 progress.update(task, description=src.name)
                 print(f"__processing__:{src}", flush=True)
                 if remove_bg(src, dst, session, model_name=REMBG_MODEL):
-                    ok(f"{src.name} → bg_removed/{dst.relative_to(dst_root)}")
+                    ok(f"{src.name} → processed/{dst.relative_to(dst_root)}")
                     print(f"__ok_rembg__:{src.name}", flush=True)
                 else:
                     print(f"__err_rembg__:{src.name}", flush=True)
@@ -560,7 +562,7 @@ def main():
     input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
     output_base = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
     upscale_dir   = output_base / "upscaled"
-    rembg_dir     = output_base / "bg_removed"
+    rembg_dir     = output_base / "processed"
     corrupted_dir = output_base / "corrupted"
 
     # rembg-only auto-fallback: if input is empty but upscale_dir has content,

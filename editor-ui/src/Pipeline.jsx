@@ -152,6 +152,7 @@ function usePipeline() {
   const doneSet    = useRef(new Set());
   const skipSet    = useRef(new Set());
   const errSet     = useRef(new Set());
+  const sentinelSet = useRef(new Set()); // tracks which filenames already have a progress log entry
   const stageRef   = useRef("upscale");
   const recentLog  = useRef([]);   // last 5 human-readable lines for error context
 
@@ -245,16 +246,15 @@ function usePipeline() {
     if (raw.startsWith("__processing__:")) {
       const fullPath = raw.slice(15);
       const fileName = fullPath.replace(/.*[/\\]/, "");
-      setImageProgress(prev => {
-        const current = prev[fileName];
-        if (current) {
-          return {
-            ...prev,
-            [fileName]: { ...current, status: "running" },
-          };
-        }
-        return { ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } };
-      });
+      if (!sentinelSet.current.has(fileName)) {
+        // First time seeing this file — insert an inline progress entry at this position in the log
+        sentinelSet.current.add(fileName);
+        setLog(prev => [...prev.slice(-800), { raw: "", kind: "progress", filename: fileName }]);
+        setImageProgress(prev => ({ ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } }));
+      } else {
+        // Second stage (rembg) — update status to running, no new log entry
+        setImageProgress(prev => ({ ...prev, [fileName]: { ...prev[fileName], status: "running" } }));
+      }
       return;
     }
 
@@ -297,7 +297,7 @@ function usePipeline() {
     setImageProgress({});
     stageRef.current = "upscale";
     recentLog.current = [];
-    doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set();
+    doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set(); sentinelSet.current = new Set();
 
     try {
       const r = await fetch(`${BASE}/pipeline/run`, {
@@ -811,7 +811,6 @@ function TagInput({ tags, onChange }) {
 // ── LogPanel — collapsible output log ────────────────────────────────────────
 
 function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) {
-  const progressEntries = Object.entries(imageProgress);
   const progressColor = (status) => {
     if (status === "error") return C.red;
     if (status === "skip") return C.dim2;
@@ -844,54 +843,39 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
           padding: "8px 12px", fontFamily: "JetBrains Mono",
           fontSize: 11, lineHeight: 1.7, display: "flex", flexDirection: "column", gap: 8,
         }}>
-          {progressEntries.length > 0 && (
-            <div style={{
-              borderBottom: `1px solid ${C.border}`,
-              paddingBottom: 8,
-              marginBottom: 2,
-            }}>
-              {progressEntries.slice(-8).map(([name, meta]) => (
-                <div key={name} style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 8,
-                  alignItems: "center",
-                  marginBottom: 4,
-                }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{
-                      color: C.dim,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}>
-                      #{name}
-                    </div>
-                    <div style={{
-                      marginTop: 3,
-                      height: 4,
-                      borderRadius: 999,
-                      background: "color-mix(in srgb, var(--border) 55%, transparent)",
-                    }}>
-                      <div style={{
-                        width: `${Math.max(meta.percent, meta.status === "running" ? 2 : 0)}%`,
-                        height: "100%",
-                        borderRadius: 999,
-                        background: progressColor(meta.status),
-                        transition: "width 0.18s ease",
-                      }} />
-                    </div>
-                  </div>
-                  <div style={{ color: progressColor(meta.status), fontWeight: 600 }}>
-                    {meta.percent}%
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
           {log.length === 0 && !running ? (
             <div style={{ color: C.dim, fontSize: 12 }}>Configure and press Run Pipeline.</div>
           ) : log.map((e, i) => {
+            // Inline progress bar — inserted into the log stream by __processing__ token
+            if (e.kind === "progress") {
+              const meta = imageProgress[e.filename];
+              if (!meta) return null;
+              const color = progressColor(meta.status);
+              const pct = Math.max(meta.percent, meta.status === "running" ? 2 : 0);
+              return (
+                <div key={i} style={{ marginBottom: 2 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        color: meta.status === "ok" ? C.green : meta.status === "error" ? C.red : C.dim,
+                        fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {e.filename}
+                      </div>
+                      <div style={{ marginTop: 3, height: 4, borderRadius: 999, background: "color-mix(in srgb, var(--border) 55%, transparent)" }}>
+                        <div style={{
+                          width: `${pct}%`, height: "100%", borderRadius: 999,
+                          background: color, transition: "width 0.18s ease",
+                        }} />
+                      </div>
+                    </div>
+                    <div style={{ color, fontWeight: 600, fontSize: 10, flexShrink: 0, minWidth: 32, textAlign: "right" }}>
+                      {meta.percent}%
+                    </div>
+                  </div>
+                </div>
+              );
+            }
             if (e.kind === "section" && isRuleLike(e.raw)) {
               const label = isPureRule(e.raw) ? "" : extractRuleLabel(e.raw);
               return (

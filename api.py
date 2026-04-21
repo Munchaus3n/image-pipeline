@@ -10,6 +10,7 @@ import os
 import platform
 import re
 import shutil
+import string
 import subprocess
 import sys
 import configparser
@@ -129,9 +130,9 @@ def images_in_folder(folder: Path) -> list[Path]:
 def detect_source_folder(output_root: Path | None = None) -> tuple[Path, str]:
     root = output_root or OUTPUT_ROOT
     for folder, label in [
-        (root     / "bg_removed", f"{root.name}/bg_removed"),
-        (root     / "upscaled",   f"{root.name}/upscaled"),
-        (BASE_DIR / "input",      "input"),
+        (root     / "processed", f"{root.name}/processed"),
+        (root     / "upscaled",  f"{root.name}/upscaled"),
+        (BASE_DIR / "input",     "input"),
     ]:
         if folder.exists() and any(
             p.suffix.lower() in SUPPORTED_EXTS
@@ -145,9 +146,19 @@ def mirror_save_path(src: Path, src_root: Path) -> Path:
         rel = src.relative_to(src_root)
     except ValueError:
         rel = Path(src.name)
-    return OUTPUT_ROOT / "final" / rel
+    return OUTPUT_ROOT / "editor" / rel
 
-_ALLOWED_ROOTS = tuple(p.resolve() for p in {BASE_DIR, OUTPUT_ROOT, TEMPLATES_DIR, BASE_DIR / "input"})
+# Allow any path on any local drive — this is a local-only app with no remote access.
+# On Windows: add every mounted drive root (C:\, D:\, ...).
+# On all platforms: also allow the user's home directory.
+_drive_roots: set[Path] = set()
+if platform.system() == "Windows":
+    _drive_roots = {Path(f"{d}:\\") for d in string.ascii_uppercase if Path(f"{d}:\\").exists()}
+_drive_roots.add(Path.home())
+
+_ALLOWED_ROOTS = tuple(p.resolve() for p in (
+    {BASE_DIR, OUTPUT_ROOT, TEMPLATES_DIR, BASE_DIR / "input"} | _drive_roots
+))
 
 def _resolve_safe_path(raw: str, *, must_exist: bool = True, allow_file: bool = True, allow_dir: bool = True) -> Path:
     value = (raw or "").strip()
@@ -515,8 +526,6 @@ def save_composition(req: SaveRequest):
     canvas.save(save_path)
 
     # Thumbnail: fire-and-forget on thread pool.
-    # The editor gets its response and advances to the next image immediately;
-    # the 400px thumb finishes writing a few hundred ms later in background.
     thumb_path = None
     if req.thumbnail:
         thumb_dir  = save_path.parent / str(thumb_size)
@@ -597,7 +606,7 @@ _DEFAULT_SETTINGS = {
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
                      "thumbnail_size": 400, "folder_mode": "bulk", "output_dir": ""},
-       "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#ffffff", "theme": "dark"},
+    "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#ffffff", "theme": "dark"},
     "guides":       {"use_custom": False, "custom": {}},
 }
 

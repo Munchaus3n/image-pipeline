@@ -17,12 +17,13 @@ export default function Input({
   removedImages, setRemovedImages,
   onGoToProcess,
 }) {
-  const [loading,       setLoading]       = useState(false);
-  const [search,        setSearch]        = useState("");
-  const [selected,      setSelected]      = useState(new Set());
-  const [previewPath,   setPreviewPath]   = useState(null);
+  const [loading,          setLoading]          = useState(false);
+  const [loadError,        setLoadError]        = useState(null);
+  const [search,           setSearch]           = useState("");
+  const [selected,         setSelected]         = useState(new Set());
+  const [previewPath,      setPreviewPath]      = useState(null);
   const [previewLoadError, setPreviewLoadError] = useState(false);
-  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseLoading,    setBrowseLoading]    = useState(false);
   const lastSelectedRef = useRef(null);  // for shift-click range
 
   // Auto-load images whenever inputDir changes — also resets all session state
@@ -30,6 +31,7 @@ export default function Input({
     if (!inputDir.trim()) {
       setThumbs([]); setSelected(new Set());
       setExcludeTags([]); setRemovedImages(new Set());
+      setLoadError(null);
       return;
     }
     setSelected(new Set());
@@ -37,15 +39,23 @@ export default function Input({
     setRemovedImages(new Set());
     setPreviewPath(null);
     setPreviewLoadError(false);
+    setLoadError(null);
     lastSelectedRef.current = null;
     ;(async () => {
       setLoading(true);
       try {
         const r = await fetch(`${BASE}/images?folder=${encodeURIComponent(inputDir.trim())}`);
-        const data = await r.json();
-        if (Array.isArray(data?.images)) setThumbs(data.images.slice(0, 500));
-        else setThumbs([]);
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          setLoadError(err.detail || `Server error ${r.status}`);
+          setThumbs([]);
+        } else {
+          const data = await r.json();
+          if (Array.isArray(data?.images)) setThumbs(data.images.slice(0, 500));
+          else setThumbs([]);
+        }
       } catch {
+        setLoadError("Could not reach the API server.");
         setThumbs([]);
       }
       finally { setLoading(false); }
@@ -56,6 +66,7 @@ export default function Input({
     setBrowseLoading(true);
     try {
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(inputDir)}`);
+      if (!r.ok) throw new Error("Browse failed");
       const { path } = await r.json();
       if (path) { setInputDir(path); setSelected(new Set()); setPreviewPath(null); setPreviewLoadError(false); }
     } catch {
@@ -263,6 +274,19 @@ export default function Input({
           ) : loading ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ color: C.dim, fontSize: 12, fontFamily: "JetBrains Mono" }}>Loading images…</span>
+            </div>
+          ) : loadError ? (
+            <div style={{
+              height: "100%", display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", gap: 10,
+            }}>
+              <div style={{ fontSize: 22, opacity: 0.4 }}>⚠</div>
+              <div style={{ fontSize: 12, color: C.red, fontFamily: "JetBrains Mono", textAlign: "center", maxWidth: 420 }}>
+                {loadError}
+              </div>
+              <div style={{ fontSize: 11, color: C.dim, textAlign: "center" }}>
+                Check that the folder path is correct and try again.
+              </div>
             </div>
           ) : visible.length === 0 ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
