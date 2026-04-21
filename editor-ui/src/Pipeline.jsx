@@ -247,7 +247,12 @@ function usePipeline() {
       const fileName = fullPath.replace(/.*[/\\]/, "");
       setImageProgress(prev => {
         const current = prev[fileName];
-        if (current) return prev;
+        if (current) {
+          return {
+            ...prev,
+            [fileName]: { ...current, status: "running" },
+          };
+        }
         return { ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } };
       });
       return;
@@ -278,7 +283,7 @@ function usePipeline() {
     }
   }, [classify]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "" }) => {
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -300,7 +305,7 @@ function usePipeline() {
         body: JSON.stringify({
           folder_mode: folderMode, do_upscale: doUpscale, scale,
           do_rembg: doRembg, input_dir: inputDir.trim(), output_dir: outputDir.trim(),
-          exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel,
+          exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel, resume,
         }),
         signal: ctrl.signal,
       });
@@ -813,6 +818,9 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
     if (status === "ok") return C.green;
     return C.yellow;
   };
+  const isRuleLike = (raw) => /[─═]{4,}/.test(raw);
+  const isPureRule = (raw) => /^[\s─═]+$/.test(raw.trim());
+  const extractRuleLabel = (raw) => raw.replace(/^[\s─═]+|[\s─═]+$/g, "").trim();
 
   return (
     <div style={{
@@ -866,7 +874,7 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
                       background: "color-mix(in srgb, var(--border) 55%, transparent)",
                     }}>
                       <div style={{
-                        width: `${meta.percent}%`,
+                        width: `${Math.max(meta.percent, meta.status === "running" ? 2 : 0)}%`,
                         height: "100%",
                         borderRadius: 999,
                         background: progressColor(meta.status),
@@ -883,18 +891,36 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
           )}
           {log.length === 0 && !running ? (
             <div style={{ color: C.dim, fontSize: 12 }}>Configure and press Run Pipeline.</div>
-          ) : log.map((e, i) => (
-            <div key={i} style={{
-              whiteSpace: "pre-wrap", wordBreak: "break-all",
-              color: KIND_COLOR[e.kind] ?? C.dim,
-              opacity: e.kind === "info" ? 0.55 : 1,
-              paddingLeft: e.kind === "section" ? 0 : 4,
-              borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
-              marginBottom: e.kind === "section" ? 3 : 0,
-            }}>
-              {e.raw}
-            </div>
-          ))}
+          ) : log.map((e, i) => {
+            if (e.kind === "section" && isRuleLike(e.raw)) {
+              const label = isPureRule(e.raw) ? "" : extractRuleLabel(e.raw);
+              return (
+                <div key={i} style={{ marginBottom: 3 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, borderTop: `1px solid ${C.dim2}`, opacity: 0.7 }} />
+                    {label && (
+                      <span style={{ color: KIND_COLOR.section, whiteSpace: "nowrap" }}>
+                        {label}
+                      </span>
+                    )}
+                    <div style={{ flex: 1, borderTop: `1px solid ${C.dim2}`, opacity: 0.7 }} />
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={i} style={{
+                whiteSpace: "pre-wrap", wordBreak: "break-all",
+                color: KIND_COLOR[e.kind] ?? C.dim,
+                opacity: e.kind === "info" ? 0.55 : 1,
+                paddingLeft: e.kind === "section" ? 0 : 4,
+                borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
+                marginBottom: e.kind === "section" ? 3 : 0,
+              }}>
+                {e.raw}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -996,6 +1022,8 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
   const [logOpen, setLogOpen] = useState(true);
   const [errOpen, setErrOpen] = useState(true);
+  const [resumeSession, setResumeSession] = useState(null);
+  const [showResume, setShowResume] = useState(false);
 
   const loadSettings = useCallback(() => {
     fetch(`${BASE}/models/rembg`)
@@ -1030,12 +1058,45 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
     return () => window.removeEventListener("focus", loadSettings);
   }, [loadSettings]);
 
+  useEffect(() => {
+    fetch(`${BASE}/session`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.exists) {
+          setResumeSession(data);
+          setShowResume(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const {
     running, done, log, errors, imageDone, imageError,
     totalImages, recentDone, elapsed, stage, stagesDone,
     upStats, bgStats, imageProgress,
     logRef, errorRef, start, stop,
   } = usePipeline();
+
+  useEffect(() => {
+    if (!running) return;
+    const stopOnUnload = () => {
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(`${BASE}/pipeline/stop`, "");
+        } else {
+          fetch(`${BASE}/pipeline/stop`, { method: "POST", keepalive: true }).catch(() => {});
+        }
+      } catch {
+        void 0;
+      }
+    };
+    window.addEventListener("beforeunload", stopOnUnload);
+    window.addEventListener("pagehide", stopOnUnload);
+    return () => {
+      window.removeEventListener("beforeunload", stopOnUnload);
+      window.removeEventListener("pagehide", stopOnUnload);
+    };
+  }, [running]);
 
   const handleStart = useCallback(() => {
     // removedImages is a Set of filenames — convert to array for the API
@@ -1044,9 +1105,33 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
     const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
     start({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
-      excludeList: activeExclude, skipList, rembgModel,
+      excludeList: activeExclude, skipList, rembgModel, resume: false,
     });
+    setShowResume(false);
   }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel]);
+
+  const handleResume = useCallback(() => {
+    if (!resumeSession?.src_root) return;
+    setInputDir(resumeSession.src_root);
+    const skipList = removedImages ? [...removedImages] : [];
+    const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
+    start({
+      folderMode, doUpscale, scale, doRembg,
+      inputDir: resumeSession.src_root,
+      outputDir,
+      excludeList: activeExclude,
+      skipList,
+      rembgModel,
+      resume: true,
+    });
+    setShowResume(false);
+  }, [resumeSession, setInputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel]);
+
+  const handleStartFresh = useCallback(async () => {
+    try { await fetch(`${BASE}/session`, { method: "DELETE" }); } catch { void 0; }
+    setShowResume(false);
+    setResumeSession(null);
+  }, []);
 
   const handleGoToEditor = useCallback(() => {
     const trimmed = outputDir.trim();
@@ -1079,6 +1164,39 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
           padding: "14px", display: "flex", flexDirection: "column",
           flexShrink: 0, overflowY: "auto"
         }}>
+          {showResume && resumeSession && (
+            <div style={{
+              marginBottom: 12,
+              background: "color-mix(in srgb, var(--accent) 10%, transparent)",
+              border: `1px solid color-mix(in srgb, var(--accent) 35%, transparent)`,
+              borderRadius: 6,
+              padding: "10px 10px 8px",
+            }}>
+              <div style={{ fontSize: 11, color: C.text, fontWeight: 600, marginBottom: 4 }}>
+                Resume previous session?
+              </div>
+              <div style={{ fontSize: 10, color: C.dim, lineHeight: 1.5 }}>
+                {Math.max(0, (resumeSession.total ?? 0) - (resumeSession.queue_index ?? 0))} image(s) remaining
+              </div>
+              <div style={{ fontSize: 9, color: C.dim2, fontFamily: "JetBrains Mono", marginTop: 4, wordBreak: "break-all" }}>
+                {resumeSession.src_root}
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <button onClick={handleResume} style={{
+                  flex: 1, background: C.greenBg, color: C.green, border: `1px solid ${C.greenBdr}`,
+                  borderRadius: 6, padding: "6px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
+                }}>Resume</button>
+                <button onClick={handleStartFresh} style={{
+                  flex: 1, background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
+                  borderRadius: 6, padding: "6px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
+                }}>Start fresh</button>
+              </div>
+              <button onClick={() => setShowResume(false)} style={{
+                marginTop: 6, background: "transparent", border: "none", color: C.dim2,
+                padding: 0, fontSize: 10, cursor: "pointer", fontFamily: "inherit",
+              }}>dismiss</button>
+            </div>
+          )}
 
           <SectionLabel>Folders</SectionLabel>
           <div style={{ marginBottom: 8 }}>
