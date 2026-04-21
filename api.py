@@ -245,6 +245,7 @@ class PipelineConfig(BaseModel):
     exclude_rembg:  list[str] = Field(default_factory=list)
     skip_files:     list[str] = Field(default_factory=list)
     rembg_model:    str = ""
+    resume:         bool = False
 
 class TemplatesPayload(BaseModel):
     templates: dict
@@ -676,6 +677,8 @@ async def run_pipeline(cfg: PipelineConfig):
         cmd += ["--exclude-rembg", ",".join(f.strip() for f in cfg.exclude_rembg if f.strip())]
     if cfg.skip_files:
         cmd += ["--skip-files", ",".join(f.strip() for f in cfg.skip_files if f.strip())]
+    if cfg.resume:
+        cmd.append("--resume")
 
     # Read processing settings from settings.json
     try:
@@ -695,7 +698,31 @@ async def run_pipeline(cfg: PipelineConfig):
 
     async def event_stream():
         global _pipeline_running, _pipeline_proc
+        proc: asyncio.subprocess.Process | None = None
         _pipeline_running = True
+        progress_index = 0
+        done_prefixes = (
+            ("__ok_rembg__:", "__skip_rembg__:", "__err_rembg__:")
+            if cfg.do_rembg
+            else ("__ok_upscale__:", "__skip_upscale__:", "__err_upscale__:")
+        )
+
+        def _update_session_progress(line: str):
+            nonlocal progress_index
+            if not line.startswith(done_prefixes):
+                return
+            progress_index += 1
+            try:
+                SESSION_FILE.write_text(json.dumps(
+                    SessionData(
+                        src_root=cfg.input_dir.strip() or str(BASE_DIR / "input"),
+                        queue_index=progress_index,
+                        template=cfg.folder_mode,
+                    ).model_dump()
+                ))
+            except Exception:
+                pass
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -715,23 +742,49 @@ async def run_pipeline(cfg: PipelineConfig):
             except Exception:
                 pass
 
+            pending = b""
             while True:
                 chunk = await proc.stdout.read(4096)
                 if not chunk:
                     break
-                for line in _clean(chunk):
+                pending += chunk
+                lines = pending.split(b"\n")
+                pending = lines.pop() if lines else b""
+                for raw_line in lines:
+                    for line in _clean(raw_line):
+                        _update_session_progress(line)
+                        yield {"data": line}
+
+            if pending:
+                for line in _clean(pending):
+                    _update_session_progress(line)
                     yield {"data": line}
 
             await proc.wait()
             if proc.returncode == 0:
                 SESSION_FILE.unlink(missing_ok=True)
             yield {"data": f"__done__ exit={proc.returncode}"}
-
         except Exception as e:
             yield {"data": f"__error__ {e}"}
         finally:
+            if proc and proc.returncode is None:
+                try:
+                    if platform.system() == "Windows":
+                        subprocess.call(
+                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    else:
+                        proc.terminate()
+                        try:
+                            await asyncio.wait_for(proc.wait(), timeout=2)
+                        except asyncio.TimeoutError:
+                            proc.kill()
+                except Exception:
+                    pass
             _pipeline_running = False
-            _pipeline_proc    = None
+            _pipeline_proc = None
 
     return EventSourceResponse(event_stream())
 

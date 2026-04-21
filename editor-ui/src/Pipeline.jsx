@@ -283,7 +283,7 @@ function usePipeline() {
     }
   }, [classify]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "" }) => {
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -305,7 +305,7 @@ function usePipeline() {
         body: JSON.stringify({
           folder_mode: folderMode, do_upscale: doUpscale, scale,
           do_rembg: doRembg, input_dir: inputDir.trim(), output_dir: outputDir.trim(),
-          exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel,
+          exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel, resume,
         }),
         signal: ctrl.signal,
       });
@@ -874,7 +874,7 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
                       background: "color-mix(in srgb, var(--border) 55%, transparent)",
                     }}>
                       <div style={{
-                        width: `${meta.percent}%`,
+                        width: `${Math.max(meta.percent, meta.status === "running" ? 2 : 0)}%`,
                         height: "100%",
                         borderRadius: 999,
                         background: progressColor(meta.status),
@@ -1077,6 +1077,27 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
     logRef, errorRef, start, stop,
   } = usePipeline();
 
+  useEffect(() => {
+    if (!running) return;
+    const stopOnUnload = () => {
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(`${BASE}/pipeline/stop`, "");
+        } else {
+          fetch(`${BASE}/pipeline/stop`, { method: "POST", keepalive: true }).catch(() => {});
+        }
+      } catch {
+        void 0;
+      }
+    };
+    window.addEventListener("beforeunload", stopOnUnload);
+    window.addEventListener("pagehide", stopOnUnload);
+    return () => {
+      window.removeEventListener("beforeunload", stopOnUnload);
+      window.removeEventListener("pagehide", stopOnUnload);
+    };
+  }, [running]);
+
   const handleStart = useCallback(() => {
     // removedImages is a Set of filenames — convert to array for the API
     const skipList    = removedImages ? [...removedImages] : [];
@@ -1084,7 +1105,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
     const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
     start({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
-      excludeList: activeExclude, skipList, rembgModel,
+      excludeList: activeExclude, skipList, rembgModel, resume: false,
     });
     setShowResume(false);
   }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel]);
@@ -1101,6 +1122,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
       excludeList: activeExclude,
       skipList,
       rembgModel,
+      resume: true,
     });
     setShowResume(false);
   }, [resumeSession, setInputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel]);

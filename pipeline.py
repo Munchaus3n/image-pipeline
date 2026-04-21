@@ -503,6 +503,8 @@ def main():
                         help="auto: retry CPU on GPU load OOM; manual: do not fallback automatically")
     parser.add_argument("--wipe-input-after-run", action="store_true",
                         help="Delete input files after run instead of archiving to history/")
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume mode: keep existing output and skip already processed files")
     args = parser.parse_args()
     
     header()
@@ -623,11 +625,15 @@ def main():
     if not args.non_interactive:
         Prompt.ask("  [dim]Press ENTER to start[/dim]")
 
-    # Clear previous output for this output_base only
-    if output_base.exists():
-        shutil.rmtree(output_base)
-    output_base.mkdir(parents=True)
-    ok("Previous output cleared.")
+    # Clear previous output for this output_base only (unless resume mode)
+    if args.resume:
+        output_base.mkdir(parents=True, exist_ok=True)
+        info("Resume mode enabled — keeping existing output.")
+    else:
+        if output_base.exists():
+            shutil.rmtree(output_base)
+        output_base.mkdir(parents=True)
+        ok("Previous output cleared.")
 
     current = images
 
