@@ -151,6 +151,10 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const refImageCacheRef = useRef(new Map());
   const initRanRef = useRef(false);
   const confirmResolverRef = useRef(null);
+  // BUG-06 FIX: loadImage is useCallback but called from initFromFolder/advance which
+  // need stable references. A ref breaks the circular dep chain cleanly — callers
+  // always get the latest version without needing it in their own dep arrays.
+  const loadImageRef = useRef(null);
 
   const [guides,     setGuides]     = useState({});
   const [templates,  setTemplates]  = useState({});
@@ -175,7 +179,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const [confirmState, setConfirmState] = useState(null);
 
   // Phase 4: canvas view zoom (CSS scale, does not affect composition output)
-  // 0.75 = 75% of DS (540px rendered), 1.0 = 720px, 1.25 = 900px, 1.5 = 1080px
   const [zoom, setZoom] = useState(1.0);
 
   const sel = items.find(it => it.id === selId) ?? null;
@@ -191,9 +194,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     if (!sel && items.length > 0) setSelId(items[0].id);
   }, [items, sel]);
 
-  // Focus the canvas container whenever a valid item is selected.
-  // Using useEffect (not an inline call) because it runs after React commits
-  // the DOM — calling focus() before the render completes has no effect.
   useEffect(() => {
     if (selId !== null) {
       containerRef.current?.focus({ preventScroll: true });
@@ -243,108 +243,21 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     setConfirmState(null);
   }, []);
 
-  useEffect(() => {
-    if (initRanRef.current) return;
-    initRanRef.current = true;
-    (async () => {
-      try {
-        const cfg = await getConfig();
-        // Priority: prop passed by Pipeline > settings.json > config.ini
-        let resolvedSize = canvasSizeProp ?? cfg.canvas_size;
-        // Also read from settings.json which is what Settings tab writes to
-        try {
-          const sRes = await fetch(`${BASE}/settings`);
-          if (sRes.ok) {
-            const sData = await sRes.json();
-            const settings = sData?.settings ?? {};
-            const fromSettings = settings?.output?.canvas_size;
-            if (!canvasSizeProp && fromSettings && fromSettings > 0) {
-              resolvedSize = fromSettings;
-            }
-          }
-        } catch {
-          // ignore local settings load errors
-        }
-        CANVAS_SIZE = resolvedSize;
-        setCanvasSizeState(resolvedSize);
-        setGuides(cfg.guides);
-        setTemplates(cfg.templates);
+  // ── BUG-06 FIX: convert plain functions to useCallback for stable references ──
 
-        // Load appearance/settings overrides
-        try {
-          const sRes = await fetch(`${BASE}/settings`);
-          if (sRes.ok) {
-            const sData = await sRes.json();
-            const settings = sData?.settings ?? {};
-            const opacity = settings?.appearance?.guide_opacity;
-            if (typeof opacity === "number") setGuideOpacity(Math.max(0, Math.min(1, opacity)));
-                        const bg = settings?.appearance?.canvas_bg_color;
-            if (typeof bg === "string" && bg) setCanvasBgColor(bg);
-            if (settings?.guides?.use_custom && settings?.guides?.custom) {
-              const mergedGuides = { ...cfg.guides };
-              for (const [zone, vals] of Object.entries(settings.guides.custom)) {
-                if (!mergedGuides[zone]) continue;
-                mergedGuides[zone] = { ...mergedGuides[zone], ...vals };
-              }
-              setGuides(mergedGuides);
-            }
-          }
-        } catch {
-          // ignore local appearance settings errors
-        }
+  // allDone has no state/callback deps — clearSession is a stable import
+  const allDone = useCallback(async () => {
+    setItems([]); setSelId(null);
+    setStatus("all images processed.\noutput → output/final/");
+    await clearSession().catch(() => {});
+  }, []);
 
-        const session = await getSession();
-        if (session.exists) {
-          if (session.queue_index >= session.total) {
-            // Already completed — clear silently, don't prompt.
-            await clearSession().catch(() => {});
-          } else {
-            const resume = await askConfirm(
-              "Resume previous editor session?",
-              `Resume from image ${session.queue_index + 1}/${session.total}?\n${session.src_root}`,
-              "Resume",
-              "Start over",
-            );
-            if (resume) {
-              await initFromFolder(session.src_root, session.queue_index, cfg.guides);
-              if (session.template && cfg.templates[session.template]) setTemplate(session.template);
-              return;
-            } else {
-              await clearSession();
-            }
-          }
-        }
-
-        const src = await getSource(outputDir);
-        setSrcLabel(src.label);
-        await initFromFolder(src.folder, 0, cfg.guides);
-      } catch (e) {
-        setStatus(`API error: ${e.message}\nIs api.py running?`);
-      }
-    })();
-  }, [askConfirm, canvasSizeProp, outputDir, initFromFolder]);
-
-  async function initFromFolder(folder, startIdx, guidesOverride) {
-    const result = await getImages(folder);
-    setSrcFolder(folder);
-    setSrcLabel(folder.split(/[\\/]/).pop());
-    setQueue(result.images);
-    setQueueIdx(startIdx);
-    setItems([]);
-    setSelId(null);
-    await loadImage(result.images, startIdx, false, guidesOverride);
-    setStatus("drag=move  scroll=resize  arrows=nudge  ctrl+z=undo");
-  }
-
-  // Pre-load the next image in the queue during the API save round-trip.
-  // By the time saveComposition + saveSession resolve (~200-400ms), the next
-  // image's HTMLImageElement is already decoded and ready in prefetchRef.
-  function prefetchNextImage(q, nextIdx) {
+  // prefetchNextImage: reads template/guides to pre-size the placement
+  const prefetchNextImage = useCallback((q, nextIdx) => {
     if (nextIdx >= q.length) { prefetchRef.current = null; return; }
     const path = q[nextIdx];
     const url  = imageUrl(path);
     const htmlImg = new window.Image();
-    // Store a promise so advance() can await it if needed
     prefetchRef.current = new Promise((resolve) => {
       htmlImg.onload = () => {
         const activeZone = templates[template]?.zone || "green";
@@ -359,23 +272,21 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       htmlImg.onerror = () => resolve(null);
       htmlImg.src = url;
     });
-  }
+  }, [templates, template, guides]);
 
-  async function loadImage(q, idx, isCombo, guidesOverride) {
+  // loadImage: stable per template/guides/comboMode combo; calls allDone when queue exhausted
+  const loadImage = useCallback(async (q, idx, isCombo, guidesOverride) => {
     if (idx >= q.length) { allDone(); return; }
 
-    // Use the pre-fetched result if it's for this exact index
     let prefetched = null;
     if (prefetchRef.current) {
       prefetched = await prefetchRef.current;
       prefetchRef.current = null;
-      // Discard if it's for a different image (combo mode re-use, etc.)
       if (prefetched && prefetched.path !== q[idx]) prefetched = null;
     }
 
     let htmlImg, width, height;
     if (prefetched) {
-      // Already decoded — zero wait
       ({ htmlImg, width, height } = prefetched);
     } else {
       const path = q[idx];
@@ -386,8 +297,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     }
 
     const path = q[idx];
-    // Use active template zone for initial placement if one is set.
-    // Falls back to green guide, then hardcoded default.
     const activeZone = templates[template]?.zone || "green";
     const guideSrc   = guidesOverride ?? guides;
     const g          = guideSrc[activeZone] ?? guideSrc["green"] ?? { top:224, bottom:1216, left:224, right:1216 };
@@ -411,11 +320,121 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       setItems([newItem]);
     }
     setSelId(newItem.id);
-  }
+  }, [template, templates, guides, comboMode, allDone]); // eslint-disable-line react-hooks/exhaustive-deps
+  // comboMode is unused in loadImage body but kept for correctness (isCombo arg is passed in)
+
+  // Keep the ref in sync so initFromFolder/advance always call the latest version
+  // without needing loadImage in their own dep arrays (breaks circular dep chain).
+  loadImageRef.current = loadImage;
+
+  // initFromFolder: stable (uses loadImageRef to avoid circular dep on loadImage)
+  const initFromFolder = useCallback(async (folder, startIdx, guidesOverride) => {
+    const result = await getImages(folder);
+    setSrcFolder(folder);
+    setSrcLabel(folder.split(/[\\/]/).pop());
+    setQueue(result.images);
+    setQueueIdx(startIdx);
+    setItems([]);
+    setSelId(null);
+    await loadImageRef.current(result.images, startIdx, false, guidesOverride);
+    setStatus("drag=move  scroll=resize  arrows=nudge  ctrl+z=undo");
+  }, []); // getImages is a stable import; all setters are stable; uses ref for loadImage
+
+  // ── Init effect ───────────────────────────────────────────────────────────
+  // BUG-08 FIX: was fetching /api/settings twice sequentially (canvas_size + appearance).
+  // Now fetches once and reads both sections from the single response.
+  useEffect(() => {
+    if (initRanRef.current) return;
+    initRanRef.current = true;
+    (async () => {
+      try {
+        const cfg = await getConfig();
+
+        // Single settings fetch — replaces two sequential fetches (BUG-08)
+        let settings = {};
+        try {
+          const sRes = await fetch(`${BASE}/settings`);
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            settings = sData?.settings ?? {};
+          }
+        } catch { /* ignore */ }
+
+        // Priority: prop passed by Pipeline > settings.json > config.ini
+        let resolvedSize = canvasSizeProp ?? cfg.canvas_size;
+        const fromSettings = settings?.output?.canvas_size;
+        if (!canvasSizeProp && fromSettings && fromSettings > 0) {
+          resolvedSize = fromSettings;
+        }
+        CANVAS_SIZE = resolvedSize;
+        setCanvasSizeState(resolvedSize);
+        setGuides(cfg.guides);
+        setTemplates(cfg.templates);
+
+        // Apply appearance overrides from the single fetch above
+        const opacity = settings?.appearance?.guide_opacity;
+        if (typeof opacity === "number") setGuideOpacity(Math.max(0, Math.min(1, opacity)));
+        const bg = settings?.appearance?.canvas_bg_color;
+        if (typeof bg === "string" && bg) setCanvasBgColor(bg);
+        if (settings?.guides?.use_custom && settings?.guides?.custom) {
+          const mergedGuides = { ...cfg.guides };
+          for (const [zone, vals] of Object.entries(settings.guides.custom)) {
+            if (!mergedGuides[zone]) continue;
+            mergedGuides[zone] = { ...mergedGuides[zone], ...vals };
+          }
+          setGuides(mergedGuides);
+        }
+
+        const session = await getSession();
+        if (session.exists) {
+          if (session.queue_index >= session.total) {
+            // Already completed — clear silently, don't prompt.
+            await clearSession().catch(() => {});
+            // Falls through to getSource below
+          } else {
+            // BUG-01 FIX: capture src_root BEFORE the async confirm dialog,
+            // so we have a stable reference whether user resumes or starts over.
+            const savedSrcRoot = session.src_root;
+            const resume = await askConfirm(
+              "Resume previous editor session?",
+              `Resume from image ${session.queue_index + 1}/${session.total}?\n${session.src_root}`,
+              "Resume",
+              "Start over",
+            );
+            if (resume) {
+              await initFromFolder(savedSrcRoot, session.queue_index, cfg.guides);
+              if (session.template && cfg.templates[session.template]) setTemplate(session.template);
+              return;
+            } else {
+              await clearSession();
+              // BUG-01 FIX: was falling through to getSource(outputDir) which returned
+              // wrong/empty folder when a custom output dir was involved.
+              // Now we restart from the same source folder at index 0.
+              await initFromFolder(savedSrcRoot, 0, cfg.guides);
+              return;
+            }
+          }
+        }
+
+        const src = await getSource(outputDir);
+        setSrcLabel(src.label);
+        await initFromFolder(src.folder, 0, cfg.guides);
+      } catch (e) {
+        setStatus(`API error: ${e.message}\nIs api.py running?`);
+      }
+    })();
+  }, [askConfirm, canvasSizeProp, outputDir, initFromFolder]);
+
+  // ── BUG-17 FIX: advance was a plain function — converted to useCallback ──
+  // Uses loadImageRef so loadImage doesn't need to be in deps (avoids stale closure).
+  const advance = useCallback(() => {
+    const nextIdx = queueIdx + 1;
+    setQueueIdx(nextIdx);
+    if (!comboMode) { setItems([]); setSelId(null); }
+    loadImageRef.current(queue, nextIdx, comboMode);
+  }, [queueIdx, comboMode, queue]);
 
   // ── Canvas draw ───────────────────────────────────────────────────────────
-  // Draws into the 720×720 pixel buffer. CSS zoom scales the element visually.
-  // Draw order: background → template ref overlay → items → selection UI → guides
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || Object.keys(guides).length === 0) return;
@@ -425,7 +444,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, DS, DS);
 
-    // ── 1. Draw template reference overlay ──────────────────────────────────
+    // 1. Draw template reference overlay
     if (showRefOnCanvas && refCanvasImage?.complete && refCanvasImage.naturalWidth > 0 && refCanvasImage.naturalHeight > 0) {
       const contain = Math.min(DS / refCanvasImage.naturalWidth, DS / refCanvasImage.naturalHeight);
       const rw = refCanvasImage.naturalWidth * contain;
@@ -438,7 +457,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       ctx.restore();
     }
 
-    // ── 2. Draw product images ──────────────────────────────────────────────
+    // 2. Draw product images
     ctx.setLineDash([]);
     for (const item of items) {
       const { x, y, w, h } = itemBounds(item);
@@ -450,7 +469,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       }
     }
 
-    // ── 3. Selection highlight ──────────────────────────────────────────────
+    // 3. Selection highlight
     if (sel) {
       const { x, y, w, h } = itemBounds(sel);
       ctx.strokeStyle = "rgba(250,204,21,0.85)";
@@ -464,7 +483,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       });
     }
 
-    // ── 4. All guides — dashed lines ──────────────────────────────────────
+    // 4. All guides — dashed lines
     const opHex = Math.round(guideOpacity * 255).toString(16).padStart(2, "0");
     for (const g of Object.values(guides)) {
       const t=g.top*S, b=g.bottom*S, l=g.left*S, r=g.right*S;
@@ -479,7 +498,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       ctx.stroke();
     }
 
-    // ── 5. Active snap zone — solid colored border ────────────────────────
+    // 5. Active snap zone — solid colored border
     const snapZone = activeSnapZone && guides[activeSnapZone] ? activeSnapZone
       : (templates[template]?.zone && guides[templates[template].zone]) ? templates[template].zone
       : null;
@@ -492,7 +511,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       ctx.strokeStyle = g.color + "ee";
       ctx.lineWidth = 2.5;
       ctx.strokeRect(l, t, r-l, b-t);
-      // corner accent marks
       const cs = 10;
       ctx.lineWidth = 3;
       ctx.strokeStyle = g.color;
@@ -523,13 +541,9 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   }, [scaleLocked, selId]);
 
   // ── Mouse helpers ─────────────────────────────────────────────────────────
-  // Converts CSS-space mouse coordinates to canvas pixel space.
-  // Required because the canvas element is CSS-scaled by `zoom`, but its
-  // internal pixel buffer is always DS×DS. getBoundingClientRect returns
-  // CSS dimensions, so we divide by the actual render ratio.
   const toCanvasCoords = (clientX, clientY) => {
     const rect = canvasRef.current.getBoundingClientRect();
-    const rx = canvasRef.current.width  / rect.width;   // = 1/zoom
+    const rx = canvasRef.current.width  / rect.width;
     const ry = canvasRef.current.height / rect.height;
     return {
       mx: (clientX - rect.left) * rx,
@@ -581,8 +595,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const doSave = useCallback(async () => {
     if (!items.length) return;
     try {
-      // Start pre-loading next image NOW — runs in parallel with the API calls below.
-      // By the time saveComposition + saveSession resolve, next image is decoded.
       prefetchNextImage(queue, queueIdx + 1);
 
       const payload = items.map(it => ({
@@ -602,7 +614,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       await saveSession({ src_root: srcFolder, queue_index: queueIdx + 1, template });
       advance();
     } catch (e) {
-      prefetchRef.current = null; // clear stale prefetch on error
+      prefetchRef.current = null;
       setStatus(`save failed: ${e.message}`);
     }
   }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, template, advance, prefetchNextImage]);
@@ -630,19 +642,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     if (e.key==="s"||e.key==="S") doSkip();
     if ((e.ctrlKey||e.metaKey) && e.key==="z") doUndo();
   }, [selId, doSave, doSkip, doUndo]);
-
-  function advance() {
-    const nextIdx = queueIdx + 1;
-    setQueueIdx(nextIdx);
-    if (!comboMode) { setItems([]); setSelId(null); }
-    loadImage(queue, nextIdx, comboMode);
-  }
-
-  async function allDone() {
-    setItems([]); setSelId(null);
-    setStatus("all images processed.\noutput → output/final/");
-    await clearSession().catch(() => {});
-  }
 
   function removeSelected() {
     if (!selId) return;
@@ -675,7 +674,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   function snapToFull() {
     if (!sel) { setStatus("select an item first."); return; }
     undoRef.current = { id:sel.id, canvasX:sel.canvasX, canvasY:sel.canvasY, scale:sel.scale };
-    // Contain: scale so the image fits entirely within canvas borders
     const snapScale = Math.min(CANVAS_SIZE / sel.origW, CANVAS_SIZE / sel.origH);
     setItems(prev => prev.map(it =>
       it.id===selId ? {
@@ -721,7 +719,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     { lbl:"R", zone:"red",     col:C.red     },
   ];
 
-  // Phase 4: zoom presets
   const zoomPresets = [
     { label:"75%",  value:0.75 },
     { label:"100%", value:1.0  },
@@ -753,11 +750,10 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         [data-theme="light"] select option{background:hsl(220,14%,94%);color:hsl(224,20%,15%)}
       `}</style>
 
-      {/* ── Canvas area — fills all space left of sidebar ──────────── */}
+      {/* ── Canvas area ──────────────────────────────────────────── */}
       <div style={{
         flex:1, display:"flex", flexDirection:"column", minWidth:0, minHeight:0, background:C.bg,
       }}>
-        {/* Canvas scroll/center area */}
         <div style={{
           flex:1, display:"flex", alignItems:"center", justifyContent:"center",
           overflow:"auto", padding:16, minHeight:0,
@@ -776,19 +772,17 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
           </div>
         </div>
 
-        {/* ── Footer bar: hints + pipeline breadcrumb + zoom ── */}
+        {/* ── Footer bar ── */}
         <div style={{
           height:30, borderTop:`1px solid ${C.border}`, background:C.panel,
           display:"flex", alignItems:"center", padding:"0 12px", gap:16, flexShrink:0,
         }}>
-          {/* Hints */}
           <div style={{ display:"flex", gap:10, fontSize:9, color:C.dim, fontFamily:"JetBrains Mono" }}>
             {["Drag=Move","Scroll=Resize","Arrows=Nudge","Ctrl+Z=Undo"].map(h => (
               <span key={h}>{h}</span>
             ))}
           </div>
 
-          {/* Pipeline breadcrumb */}
           <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:4 }}>
             {[
               { lbl:"Upscale", done:true },
@@ -822,7 +816,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
             ))}
           </div>
 
-          {/* Zoom */}
           <div style={{ display:"flex", alignItems:"center", gap:2, borderLeft:`1px solid ${C.border}`, paddingLeft:10 }}>
             {zoomPresets.map(({ label, value }) => (
               <button key={label} className="ed-btn" onClick={() => setZoom(value)} style={{
@@ -842,7 +835,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         width:262, background:C.panel, borderLeft:`1px solid ${C.border}`,
         display:"flex", flexDirection:"column", flexShrink:0, minHeight:0,
       }}>
-        {/* Sidebar header: queue + back */}
+        {/* Sidebar header */}
         <div style={{
           padding:"0 10px", height:36, borderBottom:`1px solid ${C.border}`,
           display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0,
@@ -932,7 +925,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
             padding:"5px 7px", fontSize:11, width:"100%", marginBottom:3,
             fontFamily:"inherit", colorScheme:"dark light",
           }}>
-            {/* Filter out "— none —" from the map since we pin it first */}
             <option value="— none —" style={{ background:"var(--panel2)", color:"var(--text)" }}>— none —</option>
             {Object.keys(templates).filter(k => k !== "— none —").map(k => (
               <option key={k} value={k} style={{ background:"var(--panel2)", color:"var(--text)" }}>{k}</option>
@@ -946,7 +938,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
           {templates[template]?.ref_image && (
             <RefImage
               key={template}
-                           src={templateRefSrc}
+              src={templateRefSrc}
             />
           )}
           {!!templates[template]?.ref_image && (
@@ -972,7 +964,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
             </div>
           )}
 
-          {/* ── Snap & Align (collapsible) ── */}
+          {/* ── Snap & Align ── */}
           <CollSection label="Snap & Align" accent="color-mix(in srgb,var(--accent) 70%,var(--green))" defaultOpen>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, marginBottom:5 }}>
               {snapBtns.map(({ lbl, zone, col }) => (
@@ -987,7 +979,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
               ))}
             </div>
             <div style={{ display:"flex", gap:3 }}>
-              {/* Fit */}
               <button className="ed-btn" onClick={snapToFull} style={{
                 flex:2, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
                 borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
@@ -999,7 +990,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
                 </svg>
                 Fit
               </button>
-              {/* H Center */}
               <button className="ed-btn" onClick={()=>doAlign("h")} style={{
                 flex:1, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
                 borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
@@ -1012,7 +1002,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
                 </svg>
                 H
               </button>
-              {/* V Center */}
               <button className="ed-btn" onClick={()=>doAlign("v")} style={{
                 flex:1, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
                 borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
@@ -1057,7 +1046,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
             ))}
           </div>
 
-          {/* ── Canvas Settings (collapsible) ── */}
+          {/* ── Canvas Settings ── */}
           <CollSection label="Canvas" accent="var(--magenta)" defaultOpen={false}>
             <div style={{ marginBottom:6 }}>
               <div style={{ fontSize:9, color:C.dim, marginBottom:3 }}>Size (px) — square canvas</div>
@@ -1110,7 +1099,9 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
 
           {/* ── Output ── */}
           <Divider label="Output" color="var(--green)" />
-          <Btn className="ed-btn" onClick={() => openFolder()} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
+          {/* BUG-03 FIX: was openFolder() with no arg — opened OUTPUT_ROOT on server.
+              Now passes srcFolder so Explorer opens the actual session source folder. */}
+          <Btn className="ed-btn" onClick={() => openFolder(srcFolder)} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
             📁 Open Output Folder
           </Btn>
 

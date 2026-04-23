@@ -32,6 +32,32 @@ export function Root() {
   const [removedImages, setRemovedImages] = useState(new Set());
   const [editorSettings, setEditorSettings] = useState({ outputDir:"", canvasSize:1440, thumbnail:true });
 
+  // BUG-11 FIX: theme toggle was sending only { appearance: { theme } } to POST /settings,
+  // which replaced the entire settings.json with that partial object — silently wiping
+  // rembg model, canvas size, crop padding, and all other settings.
+  // Fix: read current settings first, patch only appearance.theme, then save the full object.
+  const handleThemeToggle = async () => {
+    const newTheme = theme === "dark" ? "light" : "dark";
+    setTheme(newTheme); // Optimistic update — UI responds immediately
+    try {
+      const r = await fetch("/api/settings");
+      const data = r.ok ? await r.json() : { settings: {} };
+      const current = data?.settings ?? {};
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: {
+            ...current,
+            appearance: { ...(current.appearance ?? {}), theme: newTheme },
+          },
+        }),
+      });
+    } catch {
+      void 0; // Non-fatal: theme is set in local state regardless
+    }
+  };
+
   return (
     <div data-theme={theme} style={{
       display:"flex", flexDirection:"column", height:"100vh",
@@ -78,17 +104,9 @@ export function Root() {
           })}
         </div>
 
-        {/* Theme toggle */}
+        {/* Theme toggle — BUG-11 FIX: uses handleThemeToggle which does read-patch-write */}
         <button
-          onClick={() => {
-            const newTheme = theme === "dark" ? "light" : "dark";
-            setTheme(newTheme);
-            fetch("/api/settings", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ settings: { appearance: { theme: newTheme } } }),
-            }).catch(() => {});
-          }}
+          onClick={handleThemeToggle}
           style={{
             width:28, height:28, borderRadius:8, border:"1px solid var(--border)",
             background:"var(--panel2)", color:"var(--dim)", display:"flex",
@@ -111,6 +129,8 @@ export function Root() {
       </div>
 
       <div style={{ flex:1, minHeight:0, display:screen==="pipeline"  ? "flex" : "none", flexDirection:"column" }}>
+        {/* BUG-18 FIX: onGoToTemplates was passed here but Pipeline's prop signature
+            didn't include it, so it was silently ignored. Now Pipeline receives it. */}
         <Pipeline
           inputDir={inputDir}       setInputDir={setInputDir}
           outputDir={outputDir}     setOutputDir={setOutputDir}

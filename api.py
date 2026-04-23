@@ -81,26 +81,13 @@ def _g(key, fallback):
 
 GUIDES = {
     "red":     {"top": _g("red_top",140),     "bottom": _g("red_bottom",1300),
-                "left": _g("red_left",140),   "right": _g("red_right",1300),   "color": "#ff2020"},
+                "left": _g("red_left",140),   "right": _g("red_right",1300),   "color": "#FF0000"},
     "green":   {"top": _g("green_top",224),   "bottom": _g("green_bottom",1216),
-                "left": _g("green_left",224), "right": _g("green_right",1216), "color": "#00cc00"},
+                "left": _g("green_left",224), "right": _g("green_right",1216), "color": "#00FF00"},
     "blue":    {"top": _g("blue_top",284),    "bottom": _g("blue_bottom",1156),
-                "left": _g("blue_left",284),  "right": _g("blue_right",1156),  "color": "#0088ff"},
+                "left": _g("blue_left",284),  "right": _g("blue_right",1156),  "color": "#0000FF"},
     "magenta": {"top": _g("magenta_top",434), "bottom": _g("magenta_bottom",1006),
-                "left": _g("magenta_left",434),"right": _g("magenta_right",1006),"color": "#ff00ff"},
-}
-
-BUILTIN_TEMPLATES = {
-    "— none —":           {"zone": None,      "hint": "",                                   "ref_image": ""},
-    "Machine":            {"zone": "green",   "hint": "Top + bottom touch green lines",     "ref_image": "ref_machine.png"},
-    "Bottle 1–1.5L":      {"zone": "green",   "hint": "Top + bottom touch green lines",     "ref_image": "ref_bottle_1l.png"},
-    "Bottle 0.5L":        {"zone": "blue",    "hint": "Top + bottom touch blue lines",      "ref_image": "ref_bottle_05l.png"},
-    "Coffee bag large":   {"zone": "blue",    "hint": "Fill blue zone",                     "ref_image": "ref_coffee.png"},
-    "Coffee bag small":   {"zone": "blue",    "hint": "Fill blue zone",                     "ref_image": "ref_coffee.png"},
-    "Box large":          {"zone": "green",   "hint": "Fill green zone",                    "ref_image": "ref_box.png"},
-    "Box small":          {"zone": "magenta", "hint": "Fill magenta zone",                  "ref_image": "ref_box.png"},
-    "Capsules / small":   {"zone": "magenta", "hint": "Fill magenta zone",                  "ref_image": "ref_capsules.png"},
-    "Combo / multipack":  {"zone": "green",   "hint": "Group fills green zone",             "ref_image": "ref_combo.png"},
+                "left": _g("magenta_left",434),"right": _g("magenta_right",1006),"color": "#FF00FF"},
 }
 
 # ── Terminal output cleaning ──────────────────────────────────────────────────
@@ -141,12 +128,22 @@ def detect_source_folder(output_root: Path | None = None) -> tuple[Path, str]:
             return folder, label
     return BASE_DIR / "input", "input"
 
+# BUG-13 FIX: derive output base from src_root instead of using hardcoded OUTPUT_ROOT.
+# If src_root ends with a known pipeline output stage name (processed/upscaled/bg_removed),
+# go up one level to get the actual output folder. This means a custom output dir set by
+# the user (e.g. D:/project/output/processed) correctly resolves to D:/project/output/editor.
+# Default case (src_root = ./output/processed) is unchanged: parent = ./output = OUTPUT_ROOT.
+def _output_base_from_src_root(src_root: Path) -> Path:
+    if src_root.name in ("processed", "upscaled", "bg_removed"):
+        return src_root.parent
+    return OUTPUT_ROOT
+
 def mirror_save_path(src: Path, src_root: Path) -> Path:
     try:
         rel = src.relative_to(src_root)
     except ValueError:
         rel = Path(src.name)
-    return OUTPUT_ROOT / "editor" / rel
+    return _output_base_from_src_root(src_root) / "editor" / rel
 
 # Allow any path on any local drive — this is a local-only app with no remote access.
 # On Windows: add every mounted drive root (C:\, D:\, ...).
@@ -240,6 +237,7 @@ class SaveRequest(BaseModel):
 
 class SkipRequest(BaseModel):
     image_path: str
+    src_root:   str = ""   # BUG-13 FIX: pass src_root so skip goes to the right output folder
 
 class SessionData(BaseModel):
     src_root:    str
@@ -558,7 +556,13 @@ def skip_image(req: SkipRequest):
     src = Path(req.image_path)
     if not src.exists():
         raise HTTPException(status_code=404, detail=f"Not found: {req.image_path}")
-    dst = OUTPUT_ROOT / "skipped" / src.name
+    # BUG-13 FIX: derive skip destination from src_root when provided,
+    # so custom output dirs land in the right place.
+    if req.src_root:
+        output_base = _output_base_from_src_root(Path(req.src_root))
+    else:
+        output_base = OUTPUT_ROOT
+    dst = output_base / "skipped" / src.name
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return {"skipped": str(dst)}
@@ -716,6 +720,12 @@ async def run_pipeline(cfg: PipelineConfig):
             else ("__ok_upscale__:", "__skip_upscale__:", "__err_upscale__:")
         )
 
+        # BUG-14 FIX: the pipeline session tracks which image to resume from.
+        # The `template` field stores the editor's active template (e.g. "Machine"),
+        # NOT the pipeline's folder_mode. Storing folder_mode here caused the
+        # editor's template restore condition to always fail silently because
+        # "bulk"/"clean" are never valid template names.
+        # We store "" here — the editor will set its own template in its session saves.
         def _update_session_progress(line: str):
             nonlocal progress_index
             if not line.startswith(done_prefixes):
@@ -726,7 +736,7 @@ async def run_pipeline(cfg: PipelineConfig):
                     SessionData(
                         src_root=cfg.input_dir.strip() or str(BASE_DIR / "input"),
                         queue_index=progress_index,
-                        template=cfg.folder_mode,
+                        template="",  # BUG-14 FIX: was cfg.folder_mode — wrong field
                     ).model_dump()
                 ))
             except Exception:
@@ -745,7 +755,7 @@ async def run_pipeline(cfg: PipelineConfig):
                     SessionData(
                         src_root=cfg.input_dir.strip() or str(BASE_DIR / "input"),
                         queue_index=0,
-                        template=cfg.folder_mode,
+                        template="",  # BUG-14 FIX: was cfg.folder_mode — wrong field
                     ).model_dump()
                 ))
             except Exception:

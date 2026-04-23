@@ -31,8 +31,8 @@ function Row({ label, children }) {
 }
 
 function Btn({ label, active, color, onClick, style = {} }) {
-  const bg = active ? (color ? color + "22" : "color-mix(in srgb, var(--accent) 12%, transparent)") : "transparent";
-  const fg = active ? (color || C.text) : C.dim;
+  const bg  = active ? (color ? color + "22" : "color-mix(in srgb, var(--accent) 12%, transparent)") : "transparent";
+  const fg  = active ? (color || C.text) : C.dim;
   const bdr = active ? (color ? color + "55" : "color-mix(in srgb, var(--accent) 35%, transparent)") : "transparent";
   return (
     <button onClick={onClick} style={{
@@ -44,7 +44,6 @@ function Btn({ label, active, color, onClick, style = {} }) {
   );
 }
 
-// Sliding pill toggle — replaces On/Off Btn pairs. CSS-only, no library.
 function PillToggle({ value, onChange }) {
   return (
     <div onClick={() => onChange(!value)} style={{
@@ -71,9 +70,7 @@ function FolderInput({ value, onChange, placeholder }) {
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(value)}`);
       const { path } = await r.json();
       if (path) onChange(path);
-    } catch {
-      void 0;
-    }
+    } catch { void 0; }
   }, [value, onChange]);
 
   return (
@@ -131,7 +128,7 @@ function usePipeline() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
   const [log, setLog] = useState([]);
-  const [errors, setErrors] = useState([]);   // each: { raw, kind, context: string[] }
+  const [errors, setErrors] = useState([]);
   const [imageDone, setImageDone] = useState(0);
   const [imageSkipped, setImageSkipped] = useState(0);
   const [imageError, setImageError] = useState(0);
@@ -144,17 +141,17 @@ function usePipeline() {
   const [bgStats, setBgStats] = useState({ done: 0, skip: 0, err: 0 });
   const [imageProgress, setImageProgress] = useState({});
 
-  const abortRef   = useRef(null);
-  const logRef     = useRef(null);
-  const errorRef   = useRef(null);
-  const timerRef   = useRef(null);
-  const startRef   = useRef(null);
-  const doneSet    = useRef(new Set());
-  const skipSet    = useRef(new Set());
-  const errSet     = useRef(new Set());
-  const sentinelSet = useRef(new Set()); // tracks which filenames already have a progress log entry
-  const stageRef   = useRef("upscale");
-  const recentLog  = useRef([]);   // last 5 human-readable lines for error context
+  const abortRef    = useRef(null);
+  const logRef      = useRef(null);
+  const errorRef    = useRef(null);
+  const timerRef    = useRef(null);
+  const startRef    = useRef(null);
+  const doneSet     = useRef(new Set());
+  const skipSet     = useRef(new Set());
+  const errSet      = useRef(new Set());
+  const sentinelSet = useRef(new Set());
+  const stageRef    = useRef("upscale");
+  const recentLog   = useRef([]);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -184,9 +181,7 @@ function usePipeline() {
   }, []);
 
   const appendLine = useCallback((raw) => {
-    // ── Structured machine-readable tokens (emitted by pipeline.py print()) ──
-    // These are NOT displayed in the log — they only drive stats.
-    // Using tokens avoids the "Rich console wraps long folder paths → regex breaks" bug.
+    // ── Structured machine-readable tokens ──────────────────────────────────
     if (raw.startsWith("__total__:")) {
       const n = parseInt(raw.slice(10), 10);
       if (!isNaN(n)) setTotalImages(n);
@@ -247,12 +242,10 @@ function usePipeline() {
       const fullPath = raw.slice(15);
       const fileName = fullPath.replace(/.*[/\\]/, "");
       if (!sentinelSet.current.has(fileName)) {
-        // First time seeing this file — insert an inline progress entry at this position in the log
         sentinelSet.current.add(fileName);
         setLog(prev => [...prev.slice(-800), { raw: "", kind: "progress", filename: fileName }]);
         setImageProgress(prev => ({ ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } }));
       } else {
-        // Second stage (rembg) — update status to running, no new log entry
         setImageProgress(prev => ({ ...prev, [fileName]: { ...prev[fileName], status: "running" } }));
       }
       return;
@@ -263,7 +256,6 @@ function usePipeline() {
     const entry = { raw, kind };
     setLog(prev => [...prev.slice(-800), entry]);
 
-    // Keep a rolling window of the last 5 human lines for error context
     recentLog.current = [...recentLog.current.slice(-4), raw];
 
     if (/Stage 1|Upscaling/.test(raw)) {
@@ -374,12 +366,11 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
     if (!files.length) return;
     const names = files.map(f => f.name);
     setDroppedFiles(names);
-    const p = files[0].path;   // only available in Electron
+    const p = files[0].path;
     if (p) {
       const folder = p.replace(/[/\\][^/\\]+$/, "");
       setInputDir(folder);
     } else {
-      // Browser context — path not available; open native folder picker instead
       browseInput();
     }
   };
@@ -390,9 +381,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(inputDir)}`);
       const { path } = await r.json();
       if (path) { setInputDir(path); setDroppedFiles([]); }
-    } catch {
-      void 0;
-    }
+    } catch { void 0; }
     setBrowseLoading(false);
   };
 
@@ -446,19 +435,14 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
                 fontSize: 11, cursor: "pointer", fontFamily: "inherit"
               }}>clear ×</button>
           </div>
-          <div style={{
-            display: "flex", flexWrap: "wrap", gap: 5,
-            overflowY: "auto", alignContent: "flex-start"
-          }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, overflowY: "auto", alignContent: "flex-start" }}>
             {droppedFiles.map((f, i) => (
               <div key={i} style={{
                 background: C.panel2, border: `1px solid ${C.border}`,
                 borderRadius: 3, padding: "3px 8px", fontSize: 10,
                 fontFamily: "JetBrains Mono", color: C.text,
                 maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
-              }}>
-                {f}
-              </div>
+              }}>{f}</div>
             ))}
           </div>
         </div>
@@ -498,7 +482,6 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
         @keyframes slideIn   { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
       `}</style>
 
-      {/* Stage header labels */}
       <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         {stages.map(s => (
           <div key={s.id} style={{
@@ -509,7 +492,6 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
         ))}
       </div>
 
-      {/* Stage cards — fill full width */}
       <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px", gap: 0, minHeight: 0 }}>
         {stages.map((s, i) => {
           const cardBg   = s.done ? "var(--green-bg)" : s.active ? "color-mix(in srgb, var(--accent) 10%, transparent)" : C.panel2;
@@ -583,16 +565,11 @@ function SmStat({ label, value, color }) {
   );
 }
 
-// ── LivePreview — full-area image preview during run ─────────────────────────
+// ── LivePreview ───────────────────────────────────────────────────────────────
 
 function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
   const [loadedSrc, setLoadedSrc] = useState("");
-
-  // Track source changes to show loading state
-  const src = previewPath
-    ? `${BASE}/image?path=${encodeURIComponent(previewPath)}`
-    : "";
-
+  const src = previewPath ? `${BASE}/image?path=${encodeURIComponent(previewPath)}` : "";
   const loaded = Boolean(src) && loadedSrc === src;
 
   if (done && !running) return (
@@ -614,10 +591,7 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
         </div>
       </div>
       {previewPath && (
-        <img src={src} alt="" style={{
-          maxHeight: 180, maxWidth: "80%", objectFit: "contain",
-          borderRadius: 4, opacity: 0.5,
-        }} />
+        <img src={src} alt="" style={{ maxHeight: 180, maxWidth: "80%", objectFit: "contain", borderRadius: 4, opacity: 0.5 }} />
       )}
     </div>
   );
@@ -631,49 +605,36 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
         @keyframes previewFadeIn { from{opacity:0} to{opacity:1} }
         @keyframes loadingPulse  { 0%,100%{opacity:0.4} 50%{opacity:0.8} }
       `}</style>
-
       {src ? (
         <>
-          {/* Loading shimmer shown while new image loads */}
           {!loaded && (
             <div style={{
-              position: "absolute", inset: 0,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              animation: "loadingPulse 1.2s ease-in-out infinite",
+              position: "absolute", inset: 0, display: "flex", alignItems: "center",
+              justifyContent: "center", animation: "loadingPulse 1.2s ease-in-out infinite",
             }}>
               <Spinner color={C.dim} size={18} />
             </div>
           )}
           <img
-            key={src}
-            src={src}
-            alt=""
-            onLoad={() => setLoadedSrc(src)}
-            onError={() => setLoadedSrc(src)}
-            style={{
-              width: "100%", height: "100%", objectFit: "contain", display: "block",
-              opacity: loaded ? 1 : 0,
-              transition: "opacity 0.3s ease",
-            }}
+            key={src} src={src} alt=""
+            onLoad={() => setLoadedSrc(src)} onError={() => setLoadedSrc(src)}
+            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block",
+              opacity: loaded ? 1 : 0, transition: "opacity 0.3s ease" }}
           />
-          {/* Filename label */}
           <div style={{
             position: "absolute", bottom: 0, left: 0, right: 0,
             padding: "16px 10px 6px",
             background: "linear-gradient(transparent, rgba(0,0,0,0.6))",
-            fontSize: 9, color: "rgba(255,255,255,0.55)",
-            fontFamily: "JetBrains Mono", pointerEvents: "none",
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            textAlign: "center",
+            fontSize: 9, color: "rgba(255,255,255,0.55)", fontFamily: "JetBrains Mono",
+            pointerEvents: "none", overflow: "hidden", textOverflow: "ellipsis",
+            whiteSpace: "nowrap", textAlign: "center",
           }}>
             {previewPath.replace(/.*[/\\]/, "")}
           </div>
         </>
       ) : (
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          height: "100%", gap: 8, color: C.dim2, fontSize: 11,
-        }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+          height: "100%", gap: 8, color: C.dim2, fontSize: 11 }}>
           <Spinner color={C.dim2} size={13} />
           <span style={{ fontFamily: "JetBrains Mono" }}>waiting…</span>
         </div>
@@ -762,7 +723,7 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
   );
 }
 
-// ── Tag chip input for exclude list ──────────────────────────────────────────
+// ── Tag chip input ────────────────────────────────────────────────────────────
 
 function TagInput({ tags, onChange }) {
   const [input, setInput] = useState("");
@@ -808,7 +769,22 @@ function TagInput({ tags, onChange }) {
   );
 }
 
-// ── LogPanel — collapsible output log ────────────────────────────────────────
+// ── LogPanel ──────────────────────────────────────────────────────────────────
+
+// BUG-05 FIX: progress bar was a CSS div that only received 3 discrete values (0→50→100),
+// making it appear choppy. Replaced with an ASCII-style bar: [████████░░] 80%
+// which renders the same discrete steps but looks intentional rather than broken.
+function AsciiProgressBar({ percent, color, width = 20 }) {
+  const filled = Math.round((percent / 100) * width);
+  const empty  = width - filled;
+  return (
+    <span style={{ fontFamily: "JetBrains Mono", fontSize: 10, color, letterSpacing: 0 }}>
+      [<span style={{ color }}>{`█`.repeat(filled)}</span>
+      <span style={{ color: "var(--dim2)", opacity: 0.5 }}>{`░`.repeat(empty)}</span>]
+      {` ${String(percent).padStart(3)}%`}
+    </span>
+  );
+}
 
 function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) {
   const progressColor = (status) => {
@@ -846,33 +822,21 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
           {log.length === 0 && !running ? (
             <div style={{ color: C.dim, fontSize: 12 }}>Configure and press Run Pipeline.</div>
           ) : log.map((e, i) => {
-            // Inline progress bar — inserted into the log stream by __processing__ token
+            // BUG-05 FIX: inline ASCII progress bar instead of CSS width-transition div
             if (e.kind === "progress") {
               const meta = imageProgress[e.filename];
               if (!meta) return null;
               const color = progressColor(meta.status);
-              const pct = Math.max(meta.percent, meta.status === "running" ? 2 : 0);
+              const pct   = meta.percent;
+              const statusIcon = meta.status === "ok" ? "✓" : meta.status === "error" ? "✗" : meta.status === "skip" ? "↷" : "…";
               return (
-                <div key={i} style={{ marginBottom: 2 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        color: meta.status === "ok" ? C.green : meta.status === "error" ? C.red : C.dim,
-                        fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      }}>
-                        {e.filename}
-                      </div>
-                      <div style={{ marginTop: 3, height: 4, borderRadius: 999, background: "color-mix(in srgb, var(--border) 55%, transparent)" }}>
-                        <div style={{
-                          width: `${pct}%`, height: "100%", borderRadius: 999,
-                          background: color, transition: "width 0.18s ease",
-                        }} />
-                      </div>
-                    </div>
-                    <div style={{ color, fontWeight: 600, fontSize: 10, flexShrink: 0, minWidth: 32, textAlign: "right" }}>
-                      {meta.percent}%
-                    </div>
-                  </div>
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ color, fontSize: 11, flexShrink: 0 }}>{statusIcon}</span>
+                  <span style={{
+                    flex: 1, color: meta.status === "ok" ? C.green : meta.status === "error" ? C.red : C.dim,
+                    fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>{e.filename}</span>
+                  <AsciiProgressBar percent={pct} color={color} width={16} />
                 </div>
               );
             }
@@ -882,11 +846,7 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
                 <div key={i} style={{ marginBottom: 3 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{ flex: 1, borderTop: `1px solid ${C.dim2}`, opacity: 0.7 }} />
-                    {label && (
-                      <span style={{ color: KIND_COLOR.section, whiteSpace: "nowrap" }}>
-                        {label}
-                      </span>
-                    )}
+                    {label && <span style={{ color: KIND_COLOR.section, whiteSpace: "nowrap" }}>{label}</span>}
                     <div style={{ flex: 1, borderTop: `1px solid ${C.dim2}`, opacity: 0.7 }} />
                   </div>
                 </div>
@@ -911,7 +871,7 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
   );
 }
 
-// ── ErrorPanel — collapsible with context lines ───────────────────────────────
+// ── ErrorPanel ────────────────────────────────────────────────────────────────
 
 function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
   const [expanded, setExpanded] = useState({});
@@ -951,12 +911,7 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
               paddingBottom: 8, marginBottom: 8,
               borderBottom: i < errors.length - 1 ? `1px solid var(--red-bdr)` : "none"
             }}>
-              {/* Main error line */}
-              <div style={{
-                color: C.red, whiteSpace: "pre-wrap", wordBreak: "break-word", fontWeight: 600,
-              }}>{e.raw}</div>
-
-              {/* Context toggle */}
+              <div style={{ color: C.red, whiteSpace: "pre-wrap", wordBreak: "break-word", fontWeight: 600 }}>{e.raw}</div>
               {e.context?.length > 0 && (
                 <>
                   <button
@@ -976,10 +931,7 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
                       border: `1px solid var(--red-bdr)`,
                     }}>
                       {e.context.map((line, j) => (
-                        <div key={j} style={{
-                          color: C.dim, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                          fontSize: 9,
-                        }}>{line}</div>
+                        <div key={j} style={{ color: C.dim, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 9 }}>{line}</div>
                       ))}
                     </div>
                   )}
@@ -995,7 +947,9 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
+// BUG-18 FIX (receiver side): added onGoToTemplates to prop signature.
+// main.jsx passes this prop but the old signature omitted it, so it was silently ignored.
+export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
   const [folderMode, setFolderMode] = useState("bulk");
   const [doUpscale, setDoUpscale] = useState(true);
   const [scale, setScale] = useState("4");
@@ -1009,13 +963,17 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
   const [resumeSession, setResumeSession] = useState(null);
   const [showResume, setShowResume] = useState(false);
 
+  // BUG-15 FIX: split settings loading into two concerns:
+  // 1. loadSettings — reloads non-path settings (model, flags, sizes).
+  //    Called on mount AND on window focus. Safe to re-run because it
+  //    never touches inputDir/outputDir, so user-typed paths are preserved.
+  // 2. A mount-only effect restores saved paths from settings.json once.
+  //    Never runs again, so switching windows can't overwrite what the user typed.
   const loadSettings = useCallback(() => {
     fetch(`${BASE}/models/rembg`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (Array.isArray(data?.models) && data.models.length) {
-          setRembgModels(data.models);
-        }
+        if (Array.isArray(data?.models) && data.models.length) setRembgModels(data.models);
       })
       .catch(() => {});
 
@@ -1024,18 +982,33 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
       .then(data => {
         if (!data?.settings) return;
         const s = data.settings;
+        // BUG-15 FIX: only non-path settings here — no setInputDir / setOutputDir
         if (s.output?.folder_mode) setFolderMode(s.output.folder_mode);
-        if (s.output?.output_dir)  setOutputDir(s.output.output_dir);
         if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
         if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
         if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
       })
-      .catch(() => {
-        void 0;
-      });
-  }, [setOutputDir]);
+      .catch(() => {});
+  }, []);
 
-// Load persisted settings on mount and when window regains focus.
+  // BUG-07 FIX: restore saved paths on mount only — never on focus.
+  // Previously loadSettings (called on focus) also called setOutputDir, so
+  // switching windows reset whatever the user had typed.
+  useEffect(() => {
+    fetch(`${BASE}/settings`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.settings) return;
+        const s = data.settings;
+        // BUG-20 consequence fixed here: inputDir now populates on load,
+        // so handleStart won't send an empty input_dir to the pipeline.
+        if (s.output?.input_dir && !inputDir)  setInputDir(s.output.input_dir);
+        if (s.output?.output_dir && !outputDir) setOutputDir(s.output.output_dir);
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally mount-only
+
+  // Non-path settings reload on mount + focus
   useEffect(() => {
     loadSettings();
     window.addEventListener("focus", loadSettings);
@@ -1046,10 +1019,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
     fetch(`${BASE}/session`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.exists) {
-          setResumeSession(data);
-          setShowResume(true);
-        }
+        if (data?.exists) { setResumeSession(data); setShowResume(true); }
       })
       .catch(() => {});
   }, []);
@@ -1070,9 +1040,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
         } else {
           fetch(`${BASE}/pipeline/stop`, { method: "POST", keepalive: true }).catch(() => {});
         }
-      } catch {
-        void 0;
-      }
+      } catch { void 0; }
     };
     window.addEventListener("beforeunload", stopOnUnload);
     window.addEventListener("pagehide", stopOnUnload);
@@ -1083,9 +1051,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
   }, [running]);
 
   const handleStart = useCallback(() => {
-    // removedImages is a Set of filenames — convert to array for the API
-    const skipList    = removedImages ? [...removedImages] : [];
-    // also strip any excludeTags that are in removedImages (shouldn't happen, but safety)
+    const skipList     = removedImages ? [...removedImages] : [];
     const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
     start({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
@@ -1102,11 +1068,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
     start({
       folderMode, doUpscale, scale, doRembg,
       inputDir: resumeSession.src_root,
-      outputDir,
-      excludeList: activeExclude,
-      skipList,
-      rembgModel,
-      resume: true,
+      outputDir, excludeList: activeExclude, skipList, rembgModel, resume: true,
     });
     setShowResume(false);
   }, [resumeSession, setInputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel]);
@@ -1117,12 +1079,13 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
     setResumeSession(null);
   }, []);
 
+  // BUG-02/09 FIX: previously appended "/output" here, then api.py's get_source
+  // also appended "/output", resulting in a double-nested path like:
+  //   C:/project/output/output/processed  →  not found → blank editor
+  // Fix: pass trimmed directly. api.py's GET /source already adds /output internally.
   const handleGoToEditor = useCallback(() => {
     const trimmed = outputDir.trim();
-    // When a custom output dir is set, the pipeline wrote into <dir>/output.
-    // Pass that resolved path so the editor opens the right source folder.
-    const editorOutputDir = trimmed ? trimmed + "/output" : trimmed;
-    onGoToEditor({ outputDir: editorOutputDir, canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
+    onGoToEditor({ outputDir: trimmed, canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
   }, [onGoToEditor, outputDir, canvasSize, thumbnail]);
 
   const nothingSelected = !doUpscale && !doRembg;
@@ -1153,8 +1116,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
               marginBottom: 12,
               background: "color-mix(in srgb, var(--accent) 10%, transparent)",
               border: `1px solid color-mix(in srgb, var(--accent) 35%, transparent)`,
-              borderRadius: 6,
-              padding: "10px 10px 8px",
+              borderRadius: 6, padding: "10px 10px 8px",
             }}>
               <div style={{ fontSize: 11, color: C.text, fontWeight: 600, marginBottom: 4 }}>
                 Resume previous session?
@@ -1217,8 +1179,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
             <>
               <Row label="BG model">
                 <select
-                  value={rembgModel}
-                  onChange={e => setRembgModel(e.target.value)}
+                  value={rembgModel} onChange={e => setRembgModel(e.target.value)}
                   style={{
                     background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
                     borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
@@ -1272,8 +1233,8 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
               : <>
                 {doUpscale && <div style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
                 {doRembg && (() => {
-                  const skipCount    = removedImages?.size ?? 0;
-                  const exclCount    = excludeTags.filter(n => !removedImages?.has(n)).length;
+                  const skipCount = removedImages?.size ?? 0;
+                  const exclCount = excludeTags.filter(n => !removedImages?.has(n)).length;
                   return (
                     <div style={{ fontSize: 12, color: C.green }}>
                       ✓ Remove BG ({rembgModel || "birefnet-general"})
@@ -1286,7 +1247,7 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
             }
           </div>
 
-          {/* Action buttons — always visible */}
+          {/* Action buttons */}
           <div style={{ marginTop: "auto", paddingTop: 16 }}>
             {!running ? (
               <button onClick={handleStart} disabled={nothingSelected} style={{
@@ -1312,6 +1273,15 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
               borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
             }}>Open Editor →</button>
 
+            {/* BUG-18 FIX (usage): onGoToTemplates now wired to the button */}
+            {onGoToTemplates && (
+              <button onClick={onGoToTemplates} style={{
+                width: "100%", marginTop: 6, padding: "10px 0",
+                background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
+                borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+              }}>Manage Templates</button>
+            )}
+
             <button
               onClick={() => openFolder(outputDir.trim())}
               style={{
@@ -1325,11 +1295,10 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
           </div>
         </div>
 
-        {/* Right zone: Zone1 top + Zone2 stats + Log/Error full width */}
+        {/* Right zone */}
         <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px" }}>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
 
-            {/* Top: drop zone / running animation / done */}
             <div style={{ flex: "0 0 56%", minHeight: 0, display: "flex", flexDirection: "column" }}>
               <Zone1
                 running={running} done={done}
@@ -1351,22 +1320,15 @@ export default function Pipeline({ onGoToEditor, inputDir, setInputDir, outputDi
               )}
             </div>
 
-            {/* Bottom: Error + Log panels, full width */}
             <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 6 }}>
               <ErrorPanel
-                errorRef={errorRef}
-                errors={errors}
-                imageError={imageError}
-                open={errOpen}
-                setOpen={setErrOpen}
+                errorRef={errorRef} errors={errors} imageError={imageError}
+                open={errOpen} setOpen={setErrOpen}
                 flex={logOpen && errOpen ? 1 : (errOpen ? 9 : 1)}
               />
               <LogPanel
-                logRef={logRef}
-                log={log}
-                running={running}
-                open={logOpen}
-                setOpen={setLogOpen}
+                logRef={logRef} log={log} running={running}
+                open={logOpen} setOpen={setLogOpen}
                 flex={logOpen && errOpen ? 1 : (logOpen ? 9 : 1)}
                 imageProgress={imageProgress}
               />

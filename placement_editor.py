@@ -33,13 +33,13 @@ def _g(key, fallback):
 
 GUIDES = {
     "red":     {"top": _g("red_top",140),     "bottom": _g("red_bottom",1300),
-                "left": _g("red_left",140),   "right": _g("red_right",1300),   "color": "#ff5555"},
+                "left": _g("red_left",140),   "right": _g("red_right",1300),   "color": "#FF0000"},
     "green":   {"top": _g("green_top",224),   "bottom": _g("green_bottom",1216),
-                "left": _g("green_left",224), "right": _g("green_right",1216), "color": "#44dd44"},
+                "left": _g("green_left",224), "right": _g("green_right",1216), "color": "#00FF00"},
     "blue":    {"top": _g("blue_top",284),    "bottom": _g("blue_bottom",1156),
-                "left": _g("blue_left",284),  "right": _g("blue_right",1156),  "color": "#4499ff"},
+                "left": _g("blue_left",284),  "right": _g("blue_right",1156),  "color": "#0000FF"},
     "magenta": {"top": _g("magenta_top",434), "bottom": _g("magenta_bottom",1006),
-                "left": _g("magenta_left",434),"right": _g("magenta_right",1006),"color": "#ff44ff"},
+                "left": _g("magenta_left",434),"right": _g("magenta_right",1006),"color": "#FF00FF"},
 }
 
 TEMPLATES = {

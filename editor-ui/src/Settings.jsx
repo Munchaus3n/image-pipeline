@@ -266,7 +266,7 @@ export default function Settings({ onThemeChange }) {
               <Slider
                 value={s.appearance.guide_opacity}
                 onChange={v => set("appearance", "guide_opacity", v)}
-                format={v => `${Math.round(v * 100)}%`}
+                format={v => `${Math.round(v)}%`}
               />
             </Row>
             <Row label="Reference image opacity">
