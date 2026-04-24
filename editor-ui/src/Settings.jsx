@@ -135,7 +135,7 @@ const DEFAULT = {
   processing:   { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false },
   rembg_api:    { provider: "local", url: "", key: "" },
   upscaler_api: { provider: "local", url: "", key: "", model: "" },
-  output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", output_dir: "" },
+  output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "" },
   appearance:   { guide_opacity: 1.0, ref_img_opacity: 0.05, canvas_bg_color: "#ffffff", theme: "dark" },
   guides:       { use_custom: false, custom: {} },
 };
@@ -278,7 +278,19 @@ export default function Settings({ onThemeChange }) {
             </Row>
           </Section>
 
-          <Section title="Output Defaults">
+          <Section title="Input / Output Defaults">
+            <Row label="Default input folder" hint="Leave blank for ./input">
+              <input
+                value={s.output.input_dir || ""}
+                placeholder="blank = ./input"
+                onChange={e => set("output", "input_dir", e.target.value)}
+                style={{
+                  width:240, background:"var(--panel2)", color:"var(--text)",
+                  border:"1px solid var(--border)", borderRadius:6,
+                  padding:"6px 10px", fontSize:12, fontFamily:"JetBrains Mono",
+                }}
+              />
+            </Row>
             <Row label="Default output folder" hint="Leave blank for ./output">
               <input
                 value={s.output.output_dir}

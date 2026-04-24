@@ -143,7 +143,7 @@ def mirror_save_path(src: Path, src_root: Path) -> Path:
         rel = src.relative_to(src_root)
     except ValueError:
         rel = Path(src.name)
-    return _output_base_from_src_root(src_root) / "editor" / rel
+    return _output_base_from_src_root(src_root) / "Editor" / "Final" / rel
 
 # Allow any path on any local drive — this is a local-only app with no remote access.
 # On Windows: add every mounted drive root (C:\, D:\, ...).
@@ -234,10 +234,12 @@ class SaveRequest(BaseModel):
     is_combo:    bool       = False
     thumbnail:   bool       = True
     canvas_size: int | None = Field(default=None, ge=1, le=8192)
+    output_dir:  str = ""
 
 class SkipRequest(BaseModel):
     image_path: str
     src_root:   str = ""   # BUG-13 FIX: pass src_root so skip goes to the right output folder
+    output_dir: str = ""
 
 class SessionData(BaseModel):
     src_root:    str
@@ -394,8 +396,7 @@ def save_templates(payload: TemplatesPayload):
 
 @app.get("/source")
 def get_source(output_dir: str = ""):
-    # Custom output: pipeline wrote into <chosen>/output, so resolve to that subfolder.
-    base = (_resolve_safe_path(output_dir, must_exist=True, allow_file=False, allow_dir=True) / "output") if output_dir.strip() else OUTPUT_ROOT
+    base = _resolve_safe_path(output_dir, must_exist=True, allow_file=False, allow_dir=True) if output_dir.strip() else OUTPUT_ROOT
     folder, label = detect_source_folder(base)
     images = images_in_folder(folder)
     return {"folder": str(folder), "label": label, "count": len(images)}
@@ -490,6 +491,8 @@ def save_composition(req: SaveRequest):
         except Exception:
             pass
     cs = int(cs) if cs else CANVAS_SIZE
+    source_used = "request" if req.canvas_size else ("settings" if cs != CANVAS_SIZE else "config")
+    print(f"__save_canvas_size__:{cs}:{source_used}", flush=True)
 
     # thumbnail_size: settings.json > 400
     thumb_size = 400
@@ -516,7 +519,15 @@ def save_composition(req: SaveRequest):
 
     ref_path  = Path(req.items[0].image_path)
     src_root  = Path(req.src_root)
-    save_path = mirror_save_path(ref_path, src_root).with_suffix(".png")
+    if req.output_dir.strip():
+        output_base = _resolve_safe_path(req.output_dir, must_exist=False, allow_file=False, allow_dir=True)
+        try:
+            rel = ref_path.relative_to(src_root)
+        except ValueError:
+            rel = Path(ref_path.name)
+        save_path = (output_base / "Editor" / "Final" / rel).with_suffix(".png")
+    else:
+        save_path = mirror_save_path(ref_path, src_root).with_suffix(".png")
     if req.is_combo:
         save_path = save_path.with_name(save_path.stem + "_combo.png")
 
@@ -558,11 +569,13 @@ def skip_image(req: SkipRequest):
         raise HTTPException(status_code=404, detail=f"Not found: {req.image_path}")
     # BUG-13 FIX: derive skip destination from src_root when provided,
     # so custom output dirs land in the right place.
-    if req.src_root:
+    if req.output_dir.strip():
+        output_base = _resolve_safe_path(req.output_dir, must_exist=False, allow_file=False, allow_dir=True)
+    elif req.src_root:
         output_base = _output_base_from_src_root(Path(req.src_root))
     else:
         output_base = OUTPUT_ROOT
-    dst = output_base / "skipped" / src.name
+    dst = output_base / "Editor" / "skipped" / src.name
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return {"skipped": str(dst)}
@@ -609,7 +622,7 @@ _DEFAULT_SETTINGS = {
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
-                     "thumbnail_size": 400, "folder_mode": "bulk", "output_dir": ""},
+                     "thumbnail_size": 400, "folder_mode": "bulk", "input_dir": "", "output_dir": ""},
     "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#ffffff", "theme": "dark"},
     "guides":       {"use_custom": False, "custom": {}},
 }
@@ -681,11 +694,7 @@ async def run_pipeline(cfg: PipelineConfig):
     if not cfg.do_rembg:    cmd.append("--no-rembg")
     if cfg.input_dir.strip():   cmd += ["--input-dir",  cfg.input_dir.strip()]
     if cfg.output_dir.strip():
-        # Custom output: write into <chosen_dir>/output so the user folder is
-        # never wiped. Default (empty) keeps the existing ./output behaviour.
-        from pathlib import Path as _P
-        custom_out = str(_P(cfg.output_dir.strip()) / "output")
-        cmd += ["--output-dir", custom_out]
+        cmd += ["--output-dir", cfg.output_dir.strip()]
     if cfg.exclude_rembg:
         cmd += ["--exclude-rembg", ",".join(f.strip() for f in cfg.exclude_rembg if f.strip())]
     if cfg.skip_files:
@@ -708,6 +717,13 @@ async def run_pipeline(cfg: PipelineConfig):
             cmd.append("--force-cpu")
     except Exception:
         pass
+
+    pipeline_output_root = Path(cfg.output_dir.strip()) if cfg.output_dir.strip() else OUTPUT_ROOT
+    session_src_root = (
+        pipeline_output_root / "processed"
+        if cfg.do_rembg
+        else (pipeline_output_root / "upscaled" if cfg.do_upscale else (Path(cfg.input_dir.strip()) if cfg.input_dir.strip() else (BASE_DIR / "input")))
+    )
 
     async def event_stream():
         global _pipeline_running, _pipeline_proc
@@ -734,7 +750,7 @@ async def run_pipeline(cfg: PipelineConfig):
             try:
                 SESSION_FILE.write_text(json.dumps(
                     SessionData(
-                        src_root=cfg.input_dir.strip() or str(BASE_DIR / "input"),
+                        src_root=str(session_src_root),
                         queue_index=progress_index,
                         template="",  # BUG-14 FIX: was cfg.folder_mode — wrong field
                     ).model_dump()
@@ -753,7 +769,7 @@ async def run_pipeline(cfg: PipelineConfig):
             try:
                 SESSION_FILE.write_text(json.dumps(
                     SessionData(
-                        src_root=cfg.input_dir.strip() or str(BASE_DIR / "input"),
+                        src_root=str(session_src_root),
                         queue_index=0,
                         template="",  # BUG-14 FIX: was cfg.folder_mode — wrong field
                     ).model_dump()

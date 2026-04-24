@@ -25,6 +25,7 @@ export default function Input({
   const [previewLoadError, setPreviewLoadError] = useState(false);
   const [browseLoading,    setBrowseLoading]    = useState(false);
   const lastSelectedRef = useRef(null);  // for shift-click range
+  const loadedDirRef = useRef("");
 
   // Auto-load images whenever inputDir changes — also resets all session state
   useEffect(() => {
@@ -32,16 +33,10 @@ export default function Input({
       setThumbs([]); setSelected(new Set());
       setExcludeTags([]); setRemovedImages(new Set());
       setLoadError(null);
+      loadedDirRef.current = "";
       return;
     }
-    setSelected(new Set());
-    setExcludeTags([]);
-    setRemovedImages(new Set());
-    setPreviewPath(null);
-    setPreviewLoadError(false);
-    setLoadError(null);
-    lastSelectedRef.current = null;
-    ;(async () => {
+    const t = setTimeout(async () => {
       setLoading(true);
       try {
         const r = await fetch(`${BASE}/images?folder=${encodeURIComponent(inputDir.trim())}`);
@@ -51,6 +46,17 @@ export default function Input({
           setThumbs([]);
         } else {
           const data = await r.json();
+          const loadedDir = inputDir.trim();
+          if (loadedDirRef.current !== loadedDir) {
+            setSelected(new Set());
+            setExcludeTags([]);
+            setRemovedImages(new Set());
+            setPreviewPath(null);
+            setPreviewLoadError(false);
+            setLoadError(null);
+            lastSelectedRef.current = null;
+            loadedDirRef.current = loadedDir;
+          }
           if (Array.isArray(data?.images)) setThumbs(data.images.slice(0, 500));
           else setThumbs([]);
         }
@@ -59,7 +65,8 @@ export default function Input({
         setThumbs([]);
       }
       finally { setLoading(false); }
-    })();
+    }, 300);
+    return () => clearTimeout(t);
   }, [inputDir, setExcludeTags, setRemovedImages, setThumbs]);
 
   const browse = useCallback(async () => {
@@ -346,7 +353,7 @@ export default function Input({
 
                     {/* Thumbnail */}
                     <img
-                      src={`${BASE}/image?path=${encodeURIComponent(absPath)}`}
+                      src={`${BASE}/preview?path=${encodeURIComponent(absPath)}&size=200`}
                       alt={name}
                       loading="lazy"
                       style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }}

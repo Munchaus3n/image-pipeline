@@ -1,3 +1,9 @@
+/*
+KNOWN LIMITATIONS (web build):
+- Some settings changes do not hot-apply to an already-open editor session; reopening the Editor tab re-initializes state.
+- If pipeline completion happens while already on Editor, use the new reload controls to refresh queue/source.
+- /api/browse uses tkinter; desktop Electron should replace this with native dialog APIs.
+*/
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ConfirmModal from "./ConfirmModal.jsx";
 import {
@@ -114,21 +120,6 @@ function CollSection({ label, accent, defaultOpen = true, children }) {
   );
 }
 
-function Divider({ label, color }) {
-  return (
-    <div style={{ margin:"12px 0 6px", display:"flex", alignItems:"center", gap:6 }}>
-      <div style={{
-        width:3, height:10, borderRadius:2,
-        background: color || "var(--accent)",
-        flexShrink:0,
-      }}/>
-      <span style={{ fontSize:9, fontWeight:700, letterSpacing:"0.1em", color:C.dim, textTransform:"uppercase" }}>
-        {label}
-      </span>
-    </div>
-  );
-}
-
 function Btn({ children, onClick, style={} }) {
   return (
     <button onClick={onClick} style={{
@@ -141,7 +132,7 @@ function Btn({ children, onClick, style={} }) {
   );
 }
 
-export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true }) {
+export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true }) {
   const canvasRef    = useRef(null);
   const containerRef = useRef(null);
   const dragRef      = useRef(null);
@@ -171,7 +162,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const [saved,      setSaved]      = useState(false);
   const [guideOpacity, setGuideOpacity] = useState(1.0);  // loaded from settings
   const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
-  const [canvasSizeState, setCanvasSizeState] = useState(1440); // editable canvas size
+  const [canvasSizeState, setCanvasSizeState] = useState(1440);
   const [activeSnapZone, setActiveSnapZone] = useState(null); // tracks last snapped guide zone
   const [showRefOnCanvas, setShowRefOnCanvas] = useState(true);
   const [refOpacity, setRefOpacity] = useState(0.22);
@@ -331,13 +322,13 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
   const initFromFolder = useCallback(async (folder, startIdx, guidesOverride) => {
     const result = await getImages(folder);
     setSrcFolder(folder);
-    setSrcLabel(folder.split(/[\\/]/).pop());
+    setSrcLabel(folder);
     setQueue(result.images);
     setQueueIdx(startIdx);
     setItems([]);
     setSelId(null);
     await loadImageRef.current(result.images, startIdx, false, guidesOverride);
-    setStatus("drag=move  scroll=resize  arrows=nudge  ctrl+z=undo");
+    setStatus("");
   }, []); // getImages is a stable import; all setters are stable; uses ref for loadImage
 
   // ── Init effect ───────────────────────────────────────────────────────────
@@ -424,6 +415,11 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       }
     })();
   }, [askConfirm, canvasSizeProp, outputDir, initFromFolder]);
+
+  useEffect(() => {
+    if (!outputDir || queue.length > 0 || !srcFolder) return;
+    initFromFolder(srcFolder, 0).catch(() => {});
+  }, [outputDir, queue.length, srcFolder, initFromFolder]);
 
   // ── BUG-17 FIX: advance was a plain function — converted to useCallback ──
   // Uses loadImageRef so loadImage doesn't need to be in deps (avoids stale closure).
@@ -592,6 +588,15 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     setStatus("undone.");
   }, []);
 
+  const outputRoot = useMemo(() => {
+    if (!srcFolder) return "";
+    const normalized = srcFolder.replace(/\\/g, "/");
+    if (normalized.endsWith("/processed") || normalized.endsWith("/upscaled")) {
+      return srcFolder.replace(/[\\/](processed|upscaled)$/i, "");
+    }
+    return srcFolder;
+  }, [srcFolder]);
+
   const doSave = useCallback(async () => {
     if (!items.length) return;
     try {
@@ -606,7 +611,8 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       const result = await saveComposition(
         payload, srcFolder, queueIdx, comboMode,
         thumbnailProp,
-        canvasSizeProp,
+        canvasSizeProp ?? canvasSizeState,
+        outputRoot,
       );
       setSaved(true);
       setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}`);
@@ -617,16 +623,16 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
       prefetchRef.current = null;
       setStatus(`save failed: ${e.message}`);
     }
-  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, template, advance, prefetchNextImage]);
+  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, canvasSizeState, template, advance, prefetchNextImage, outputRoot]);
 
   const doSkip = useCallback(async () => {
     prefetchNextImage(queue, queueIdx + 1);
     if (queueIdx < queue.length) {
-      try { await skipImage(queue[queueIdx]); } catch { void 0; }
+      try { await skipImage(queue[queueIdx], srcFolder, outputRoot); } catch { void 0; }
     }
     setStatus("skipped.");
     advance();
-  }, [queue, queueIdx, advance, prefetchNextImage]);
+  }, [queue, queueIdx, advance, prefetchNextImage, srcFolder, outputRoot]);
 
   const onKeyDown = useCallback((e) => {
     const n = e.shiftKey ? 10 : 1;
@@ -647,12 +653,6 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
     if (!selId) return;
     setItems(prev => prev.filter(it => it.id!==selId));
     setSelId(null);
-  }
-
-  function updateCanvasSize(newSize) {
-    const s = Math.max(256, Math.min(8192, parseInt(newSize, 10) || CANVAS_SIZE));
-    CANVAS_SIZE = s;
-    setCanvasSizeState(s);
   }
 
   function snapTo(zone) {
@@ -853,7 +853,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
           <div style={{
             fontSize:9, color:"var(--green)", fontFamily:"JetBrains Mono",
             maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-            direction:"rtl", textAlign:"left",
+            textAlign:"right",
           }}>
             {srcLabel || "…"}
           </div>
@@ -862,26 +862,32 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
         {/* Scrollable content */}
         <div style={{ flex:1, overflowY:"auto", padding:"8px 10px 12px" }}>
 
-          {/* ── Source ── */}
-          <Divider label="Source" color="var(--green)" />
-          <Btn className="ed-btn" onClick={async () => {
-            try {
-              const { path } = await browseFolder(srcFolder);
-              if (!path) return;
-              await initFromFolder(path, 0);
-            } catch {
-              setStatus("folder picker unavailable\ncheck that api.py is running");
-            }
-          }} style={{ fontSize:10, color:C.dim, textAlign:"center", marginBottom:2 }}>
-            📂 Change Source Folder
-          </Btn>
-          <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer", marginBottom:2 }}>
-            <input type="checkbox" checked={comboMode} onChange={e=>setComboMode(e.target.checked)} />
-            Combo mode
-          </label>
+          <CollSection label="Source" accent="var(--green)" defaultOpen>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:4, marginBottom:4 }}>
+              <Btn className="ed-btn" onClick={async () => {
+                try {
+                  const { path } = await browseFolder(srcFolder);
+                  if (!path) return;
+                  await initFromFolder(path, 0);
+                } catch {
+                  setStatus("folder picker unavailable\ncheck that api.py is running");
+                }
+              }} style={{ fontSize:10, color:C.dim, textAlign:"center", marginBottom:0 }}>
+                📂 Change Source Folder
+              </Btn>
+              <button className="ed-btn" onClick={() => initFromFolder(srcFolder, 0)} style={{
+                border:`1px solid ${C.border}`, background:C.panel2, color:C.dim, borderRadius:5,
+                padding:"0 8px", fontSize:10, cursor:"pointer", fontFamily:"inherit"
+              }}>↺ Reload</button>
+            </div>
+            <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer", marginBottom:2 }}>
+              <input type="checkbox" checked={comboMode} onChange={e=>setComboMode(e.target.checked)} />
+              Combo mode
+            </label>
+          </CollSection>
 
           {/* ── Actions ── */}
-          <Divider label="Queue" color="var(--accent)" />
+          <CollSection label="Queue" accent="var(--accent)" defaultOpen>
           <button className="ed-btn" onClick={doSave} style={{
             width:"100%", padding:"7px 10px", marginBottom:4,
             background: saved ? "var(--green)" : "var(--green-bg)",
@@ -899,7 +905,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
               borderRadius:3, padding:"1px 5px", color:"inherit",
             }}>↵</kbd>
           </button>
-          <div style={{ display:"flex", gap:4, marginBottom:4 }}>
+          <div style={{ display:"flex", gap:4, marginBottom:0 }}>
             <button className="ed-btn" onClick={doSkip} style={{
               flex:1, padding:"5px 0", background:"var(--yellow-bg)",
               color:"var(--yellow)", border:`1px solid var(--yellow-bdr)`,
@@ -917,9 +923,10 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
               Remove <kbd style={{ fontSize:8, fontFamily:"JetBrains Mono", background:"color-mix(in srgb,var(--red) 15%,transparent)", border:`1px solid var(--red-bdr)`, borderRadius:3, padding:"0 4px" }}>Del</kbd>
             </button>
           </div>
+          </CollSection>
 
           {/* ── Template ── */}
-          <Divider label="Template" color="var(--accent)" />
+          <CollSection label="Template" accent="var(--accent)" defaultOpen>
           <select value={template} onChange={e => onTemplateChange(e.target.value)} style={{
             background:C.panel2, color:C.text, border:`1px solid ${C.border}`, borderRadius:5,
             padding:"5px 7px", fontSize:11, width:"100%", marginBottom:3,
@@ -963,6 +970,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
               />
             </div>
           )}
+          </CollSection>
 
           {/* ── Snap & Align ── */}
           <CollSection label="Snap & Align" accent="color-mix(in srgb,var(--accent) 70%,var(--green))" defaultOpen>
@@ -978,7 +986,7 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
                 }}>{lbl}</button>
               ))}
             </div>
-            <div style={{ display:"flex", gap:3 }}>
+            <div style={{ display:"flex", gap:3, marginBottom:6 }}>
               <button className="ed-btn" onClick={snapToFull} style={{
                 flex:2, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
                 borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
@@ -1015,53 +1023,36 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
                 V
               </button>
             </div>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
+              <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer" }}>
+                <input type="checkbox" checked={scaleLocked} onChange={e=>setScaleLocked(e.target.checked)} style={{ accentColor:"var(--red)" }} />
+                Lock
+              </label>
+              {sel && (
+                <span style={{
+                  fontSize:10, fontFamily:"JetBrains Mono", color:C.text,
+                  background:C.panel2, border:`1px solid ${C.border}`, borderRadius:4, padding:"1px 6px",
+                }}>{sel.scale.toFixed(3)}</span>
+              )}
+            </div>
+            <input type="range" min={0.05} max={3.0} step={0.005}
+              value={sel?.scale ?? 1.0}
+              onChange={e => { if (scaleLocked||!selId) return; setItems(prev => prev.map(it => it.id===selId ? {...it,scale:parseFloat(e.target.value)} : it)); }}
+              disabled={scaleLocked||!sel}
+              style={{ width:"100%", marginBottom:4 }}
+            />
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, marginBottom:2 }}>
+              {[["−5%",-0.05],["−1%",-0.01],["+1%",0.01],["+5%",0.05]].map(([l,d]) => (
+                <button key={l} className="ed-btn" onClick={()=>nudgeScale(d)} style={{
+                  background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
+                  borderRadius:4, padding:"4px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit", textAlign:"center",
+                }}>{l}</button>
+              ))}
+            </div>
           </CollSection>
-
-          {/* ── Scale ── */}
-          <Divider label="Scale" color="var(--yellow)" />
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
-            <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer" }}>
-              <input type="checkbox" checked={scaleLocked} onChange={e=>setScaleLocked(e.target.checked)} style={{ accentColor:"var(--red)" }} />
-              Lock
-            </label>
-            {sel && (
-              <span style={{
-                fontSize:10, fontFamily:"JetBrains Mono", color:C.text,
-                background:C.panel2, border:`1px solid ${C.border}`, borderRadius:4, padding:"1px 6px",
-              }}>{sel.scale.toFixed(3)}</span>
-            )}
-          </div>
-          <input type="range" min={0.05} max={3.0} step={0.005}
-            value={sel?.scale ?? 1.0}
-            onChange={e => { if (scaleLocked||!selId) return; setItems(prev => prev.map(it => it.id===selId ? {...it,scale:parseFloat(e.target.value)} : it)); }}
-            disabled={scaleLocked||!sel}
-            style={{ width:"100%", marginBottom:4 }}
-          />
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, marginBottom:2 }}>
-            {[["−5%",-0.05],["−1%",-0.01],["+1%",0.01],["+5%",0.05]].map(([l,d]) => (
-              <button key={l} className="ed-btn" onClick={()=>nudgeScale(d)} style={{
-                background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-                borderRadius:4, padding:"4px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit", textAlign:"center",
-              }}>{l}</button>
-            ))}
-          </div>
 
           {/* ── Canvas Settings ── */}
           <CollSection label="Canvas" accent="var(--magenta)" defaultOpen={false}>
-            <div style={{ marginBottom:6 }}>
-              <div style={{ fontSize:9, color:C.dim, marginBottom:3 }}>Size (px) — square canvas</div>
-              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                <input type="number" value={canvasSizeState}
-                  onChange={e => updateCanvasSize(e.target.value)}
-                  min={256} max={8192}
-                  style={{ flex:1, background:C.panel2, color:C.text, border:`1px solid ${C.border}`, borderRadius:4, padding:"4px 6px", fontSize:11, fontFamily:"JetBrains Mono", textAlign:"center" }}
-                />
-                <span style={{ fontSize:10, color:C.dim, flexShrink:0 }}>× {canvasSizeState}</span>
-              </div>
-              <div style={{ fontSize:9, color:C.dim, marginTop:3, opacity:0.7 }}>
-                Changes apply to next image load. Use Settings tab to persist.
-              </div>
-            </div>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <span style={{ fontSize:10, color:C.dim }}>Background</span>
               <div style={{ display:"flex", alignItems:"center", gap:5 }}>
@@ -1078,9 +1069,8 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
 
           {/* ── Canvas Items ── */}
           {items.length > 0 && (
-            <>
-              <Divider label="Items" color="var(--accent)" />
-              <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+            <CollSection label="Items" accent="var(--accent)" defaultOpen>
+              <div style={{ display:"flex", flexDirection:"column", gap:2, marginBottom:2 }}>
                 {items.map(item => (
                   <button key={item.id} className="ed-btn" onClick={() => setSelId(item.id)} style={{
                     background: item.id===selId ? "color-mix(in srgb,var(--accent) 12%,var(--panel2))" : C.panel2,
@@ -1094,16 +1084,17 @@ export default function App({ onGoPipeline, outputDir = "", canvasSize: canvasSi
                   </button>
                 ))}
               </div>
-            </>
+            </CollSection>
           )}
 
           {/* ── Output ── */}
-          <Divider label="Output" color="var(--green)" />
+          <CollSection label="Output" accent="var(--green)" defaultOpen>
           {/* BUG-03 FIX: was openFolder() with no arg — opened OUTPUT_ROOT on server.
               Now passes srcFolder so Explorer opens the actual session source folder. */}
-          <Btn className="ed-btn" onClick={() => openFolder(srcFolder)} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
+          <Btn className="ed-btn" onClick={() => openFolder(outputRoot || srcFolder)} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
             📁 Open Output Folder
           </Btn>
+          </CollSection>
 
           {/* Status */}
           {status && status !== "loading…" && (

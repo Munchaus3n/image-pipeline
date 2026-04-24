@@ -72,10 +72,10 @@ export const getImages  = (folder)     => get(`/images?folder=${encodeURICompone
 export const imageUrl   = (absPath)    => `${BASE}/image?path=${encodeURIComponent(absPath)}`;
 
 // items: [{ image_path, canvas_x, canvas_y, scale }]
-export const saveComposition = (items, srcRoot, queueIndex, isCombo, thumbnail = true, canvasSize = null) =>
-  post("/save", { items, src_root: srcRoot, queue_index: queueIndex, is_combo: isCombo, thumbnail, canvas_size: canvasSize });
+export const saveComposition = (items, srcRoot, queueIndex, isCombo, thumbnail = true, canvasSize = null, outputDir = "") =>
+  post("/save", { items, src_root: srcRoot, queue_index: queueIndex, is_combo: isCombo, thumbnail, canvas_size: canvasSize, output_dir: outputDir });
 
-export const skipImage  = (imagePath)  => post("/skip",    { image_path: imagePath });
+export const skipImage  = (imagePath, srcRoot = "", outputDir = "")  => post("/skip", { image_path: imagePath, src_root: srcRoot, output_dir: outputDir });
 
 export const getSession = ()           => get("/session");
 export const saveSession = (data)      => post("/session", data);
