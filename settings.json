@@ -20,7 +20,7 @@
     "key": ""
   },
   "output": {
-    "canvas_size": 1440,
+    "canvas_size": 1000,
     "thumbnail": true,
     "thumbnail_size": 400,
     "folder_mode": "bulk",
@@ -30,7 +30,7 @@
     "guide_opacity": 100,
     "ref_img_opacity": 0.05,
     "canvas_bg_color": "#f5f5f1",
-    "theme": "dark"
+    "theme": "light"
   },
   "guides": {
     "use_custom": false,

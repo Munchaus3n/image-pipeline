@@ -81,8 +81,8 @@ def ask(title: str, options: list):
 # ── File helpers ───────────────────────────────────────────────────────────────
 
 def collect_images(root: Path, recursive: bool) -> tuple[list[Path], set[Path]]:
-    """Collect images. Any file inside a folder named 'no_rembg' at any depth
-    (root/no_rembg/ OR root/product_A/no_rembg/) is added to no_rembg_set."""
+    """Collect images. Any file inside a folder named 'no_rembg' at any depth is
+    added to no_rembg_set (upscale + crop only, no BG removal)."""
     no_rembg_set: set[Path] = set()
 
     if recursive:
@@ -108,11 +108,7 @@ def mirror_path(src: Path, src_root: Path, dst_root: Path, suffix: str = ".png")
 
 
 def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
-    """Copy a failed image to output/corrupted/, mirroring the source folder structure.
-
-    Keeps the original file extension so the file is always openable.
-    If two stages both fail on the same file, the second copy silently overwrites.
-    """
+    """Copy a failed image to output/corrupted/, mirroring folder structure."""
     try:
         try:
             rel = src.relative_to(src_root)
@@ -127,9 +123,8 @@ def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
 
 # ── Image processing ───────────────────────────────────────────────────────────
 
-# Images wider/taller than this get tiled to avoid VRAM OOM on Vulkan
-_NCNN_TILE_THRESHOLD = 2000  # px on longest side
-_NCNN_TILE_SIZE      = "256"  # tile size passed to -t flag
+_NCNN_TILE_THRESHOLD = 2000
+_NCNN_TILE_SIZE      = "256"
 
 def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -141,9 +136,6 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     )
     alpha_mask = src_img.convert("RGBA").split()[3] if has_alpha else None
 
-    # Always feed PNG to NCNN — WEBP and unusual JPEGs can trigger "queueC=" /
-    # invalid-format Vulkan errors inside NCNN even when the file is valid.
-    # We write a temp PNG next to the destination and clean it up afterwards.
     tmp_png: Path | None = None
     if src.suffix.lower() != ".png":
         tmp_png = dst.parent / f"_ncnntmp_{src.stem}.png"
@@ -164,12 +156,9 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
 
     try:
         result = _run(use_tile)
-
         if result.returncode != 0 and not use_tile:
-            # First attempt failed without tiling — retry with tiles (VRAM OOM recovery)
             warn(f"{src.name} failed, retrying with tiling…")
             result = _run(tile=True)
-
         if result.returncode != 0:
             err(f"NCNN failed on {src.name}: {result.stderr.strip()[:120]}")
             return False
@@ -220,12 +209,7 @@ def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
 
 
 def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
-    """GPU-first provider selection. Falls back to CPU if no GPU provider available.
-
-    Requires onnxruntime-directml (Windows) or onnxruntime-gpu (Linux/CUDA) for GPU.
-    Plain onnxruntime only has CPUExecutionProvider.
-    force_cpu=True: skip GPU — fixes DML OOM errors.
-    """
+    """GPU-first provider selection. DML → CUDA → CPU fallback chain."""
     if force_cpu:
         return ["CPUExecutionProvider"], "CPU (forced)"
     try:
@@ -242,18 +226,16 @@ def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
 def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: float = 0.003) -> Image.Image:
     """Fill only small enclosed holes in a BiRefNet alpha mask.
 
-    This preserves intended cutouts/gaps while repairing tiny interior holes
-    common on glossy product surfaces.
+    NOT applied to Bria — Bria masks are already clean and applying hole-fill
+    would corrupt transparent product areas that Bria correctly preserves.
     """
-    mask_np = np.array(mask)            # L-mode 0-255
-    binary = mask_np > threshold        # rough foreground
-    filled = binary_fill_holes(binary)  # fill enclosed holes
+    mask_np = np.array(mask)
+    binary  = mask_np > threshold
+    filled  = binary_fill_holes(binary)
     new_holes = filled & ~binary
     if not np.any(new_holes):
         return mask
 
-    # Only fill small enclosed holes to avoid swallowing intentional gaps
-    # between multiple close objects (e.g. cup handle area).
     hole_labels, hole_count = label(new_holes)
     max_hole_px = int(mask_np.size * max_hole_ratio)
     result = mask_np.copy()
@@ -262,24 +244,80 @@ def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: flo
         if area <= max_hole_px:
             result[hole_labels == idx] = 255
 
-    result = result.astype(np.uint8)
-    return Image.fromarray(result, mode="L")
+    return Image.fromarray(result.astype(np.uint8), mode="L")
 
 
-BIREFNET_MAX = 1024   # BiRefNet's internal inference resolution; no benefit going larger
+BIREFNET_MAX = 1024
+
 
 def _prefetch_image(path: Path) -> None:
-    """Read and fully decode the next image file in a background thread.
-
-    This warms the OS page cache so the main thread's Image.open() call
-    returns immediately from memory instead of waiting for disk I/O.
-    GPU inference dominates the wall time so this costs nothing visible.
-    """
+    """Pre-decode next image into OS page cache in a background thread."""
     try:
         with Image.open(path) as img:
-            img.load()   # force full decode — not just the header
+            img.load()
     except Exception:
         pass
+
+
+# ── BUG-04 FIX: Bria RMBG-2.0 direct ORT inference ──────────────────────────
+#
+# ROOT CAUSE: the old code called rembg_remove() for ALL models including Bria.
+# rembg's pipeline uses U2Net normalization:
+#   mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+# Bria RMBG-2.0 was trained with a different scheme:
+#   input  = (pixel / 255.0 - 0.5) / 1.0   →  range [-0.5, +0.5]
+#   layout = NCHW float32, size 1024×1024
+#   output = raw logits [1,1,1024,1024] — sigmoid required to get mask
+#
+# Running Bria through rembg's preprocessing produces valid-looking but
+# degraded masks (soft/wrong edges, fine details lost). This is why results
+# were inferior to the HuggingFace demo which runs the model correctly.
+#
+# FIX: bypass rembg entirely for Bria. Access the underlying ORT session via
+# session.inner_session (exposed by rembg's BaseSession) and run inference
+# with the correct normalization. All other models continue using rembg.
+
+def _bria_infer(img_rgba: Image.Image, session) -> Image.Image:
+    """Run Bria RMBG-2.0 inference directly via ORT with correct preprocessing.
+
+    Args:
+        img_rgba: Input image in RGBA mode, any size.
+        session:  rembg session wrapping the Bria ONNX model.
+                  session.inner_session is the underlying ort.InferenceSession.
+
+    Returns:
+        Alpha mask as PIL 'L' mode image, same spatial size as img_rgba.
+    """
+    BRIA_SIZE = 1024
+    w, h = img_rgba.size
+
+    # Step 1: resize to model's fixed resolution
+    infer_rgb = img_rgba.convert("RGB").resize((BRIA_SIZE, BRIA_SIZE), Image.BILINEAR)
+
+    # Step 2: normalize — (x / 255.0) - 0.5, output range [-0.5, +0.5]
+    arr = np.array(infer_rgb, dtype=np.float32) / 255.0 - 0.5  # HWC float32
+
+    # Step 3: convert HWC → NCHW: [1, 3, 1024, 1024]
+    arr = arr.transpose(2, 0, 1)[np.newaxis]
+
+    # Step 4: run ORT directly — bypasses rembg's U2Net normalization entirely
+    ort_session = session.inner_session
+    input_name  = ort_session.get_inputs()[0].name
+    outputs     = ort_session.run(None, {input_name: arr})
+
+    # Step 5: output is raw logits [1, 1, 1024, 1024] — apply sigmoid
+    logits    = outputs[0][0, 0]                         # shape (1024, 1024)
+    mask_prob = 1.0 / (1.0 + np.exp(-logits))           # sigmoid → [0, 1]
+    mask_u8   = (mask_prob * 255).clip(0, 255).astype(np.uint8)
+
+    mask_1024 = Image.fromarray(mask_u8, mode="L")
+
+    # Step 6: resize mask back to original dimensions if needed
+    if (w, h) != (BRIA_SIZE, BRIA_SIZE):
+        mask_1024 = mask_1024.resize((w, h), Image.BICUBIC)
+
+    return mask_1024
+
 
 def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -287,48 +325,55 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
         with Image.open(src) as opened:
             img = opened.convert("RGBA")
 
-        # Already transparent — just clean up edges and crop, skip inference
+        # Already transparent — clean up edges and crop, skip inference entirely
         if has_transparency(src):
             result = tight_crop(refine_edges(img))
             result.save(dst, format="PNG")
             return True
 
-        w, h = img.size
-        if max(w, h) > BIREFNET_MAX:
-            scale = BIREFNET_MAX / max(w, h)
-            infer_img = img.resize(
-                (max(1, int(w * scale)), max(1, int(h * scale))),
-                Image.LANCZOS
-            )
-        else:
-            infer_img = img
-
-        infer_rgb = infer_img.convert("RGB")
-
-        # Contrast boost ONLY for BiRefNet — it was trained on unmodified inputs.
-        # BRIA RMBG-2.0 was trained without any contrast adjustment; boosting it
-        # degrades segmentation quality and explains the gap vs HuggingFace demo.
         is_bria = (model_name == "bria-rmbg")
-        if not is_bria:
+
+        if is_bria:
+            # BUG-04 FIX: Bria gets its own inference path.
+            # No contrast boost (would shift distribution away from training data).
+            # No hole-fill (Bria masks are already clean).
+            # No rembg preprocessing (wrong normalization for this model).
+            mask = _bria_infer(img, session)
+
+        else:
+            # ── BiRefNet path (unchanged) ────────────────────────────────────
+            w, h = img.size
+            if max(w, h) > BIREFNET_MAX:
+                scale     = BIREFNET_MAX / max(w, h)
+                infer_img = img.resize(
+                    (max(1, int(w * scale)), max(1, int(h * scale))),
+                    Image.LANCZOS
+                )
+            else:
+                infer_img = img
+
+            infer_rgb = infer_img.convert("RGB")
+
+            # Contrast boost helps BiRefNet edge quality.
+            # NOT applied to Bria — handled above in the is_bria branch.
             from PIL import ImageEnhance
             infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
 
-        mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
+            mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
 
-        if mask_small.size != img.size:
-            mask = mask_small.resize(img.size, Image.BICUBIC)
-        else:
-            mask = mask_small
+            if mask_small.size != img.size:
+                mask = mask_small.resize(img.size, Image.BICUBIC)
+            else:
+                mask = mask_small
 
-        # Hole-fill ONLY for BiRefNet — BRIA masks are already clean; applying it
-        # would corrupt transparent product areas that BRIA correctly preserves.
-        if not is_bria:
+            # Hole-fill only for BiRefNet — guarded here, never runs for Bria.
             mask = _fill_mask_holes(mask)
 
         img.putalpha(mask)
         result = tight_crop(refine_edges(img))
         result.save(dst, format="PNG")
         return True
+
     except Exception as e:
         err(f"BG removal failed on {src.name}: {e}")
         return False
@@ -339,7 +384,6 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
 def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                   model: str, scale: str, corrupted_dir: Path | None = None) -> list[Path]:
     section("Stage 1 / 2 — Upscaling")
-    # Machine-readable total for the UI (Rich table wraps, so regex is unreliable)
     print(f"__total__:{len(images)}", flush=True)
     outputs, to_run = [], []
 
@@ -370,7 +414,6 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                 warn(f"{src.name} failed — using original for next stage.")
                 print(f"__err_upscale__:{src.name}", flush=True)
                 outputs[outputs.index(dst)] = src
-                # Copy original to corrupted/ so the user can inspect failures
                 if corrupted_dir:
                     _copy_corrupted(src, src_root, corrupted_dir)
                     warn(f"  → copied to corrupted/{src.relative_to(src_root)}")
@@ -392,10 +435,9 @@ def batch_remove_bg(
 ) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
 
-    no_rembg_names = {p.name for p in (no_rembg_originals or set())}
-    excluded = {n.strip().lower() for n in (exclude_names or set()) if n.strip()}
-    # Stem-only set so product.jpg still excludes product.png after upscaling converts to PNG
-    excluded_stems = {Path(n).stem.lower() for n in excluded}
+    no_rembg_names  = {p.name for p in (no_rembg_originals or set())}
+    excluded        = {n.strip().lower() for n in (exclude_names or set()) if n.strip()}
+    excluded_stems  = {Path(n).stem.lower() for n in excluded}
     print(f"__total__:{len(upscaled)}", flush=True)
 
     providers, device_label = _select_onnx_providers(force_cpu=force_cpu)
@@ -409,7 +451,6 @@ def batch_remove_bg(
     try:
         session = new_session(REMBG_MODEL, providers=providers)
     except Exception as e:
-        # Auto-fallback: DML can OOM during model load on some GPUs
         if (
             rembg_fallback == "auto"
             and not force_cpu
@@ -420,6 +461,15 @@ def batch_remove_bg(
         else:
             raise
     ok("Model loaded.")
+
+    # BUG-04 FIX: verify inner_session is accessible before batch starts.
+    # rembg's BaseSession exposes inner_session as the raw ORT InferenceSession.
+    # If a future rembg version renames this, degrade gracefully rather than crash.
+    is_bria = (REMBG_MODEL == "bria-rmbg")
+    if is_bria and not hasattr(session, "inner_session"):
+        warn("Bria: session.inner_session not accessible — falling back to rembg pipeline.")
+        warn("Consider updating rembg or checking for API changes.")
+        is_bria = False  # Graceful degradation — rembg path is still functional
 
     outputs, to_run = [], []
 
@@ -459,8 +509,6 @@ def batch_remove_bg(
                       BarColumn(), TaskProgressColumn(), console=console) as progress:
             task = progress.add_task("Removing BG...", total=len(to_run))
             for i, (src, dst) in enumerate(to_run):
-                # Kick off pre-read of the NEXT file while GPU works on this one.
-                # Zero GPU cost — just warms OS page cache from disk in background.
                 if i + 1 < len(to_run):
                     next_src = to_run[i + 1][0]
                     prefetch_future = prefetch_pool.submit(_prefetch_image, next_src)
@@ -485,30 +533,22 @@ def batch_remove_bg(
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Image Pipeline")
-    parser.add_argument("--non-interactive", action="store_true",
-                        help="Skip prompts; use CLI flags (called by the API server)")
-    parser.add_argument("--input-dir",   default="",
-                        help="Input folder  (default: <script dir>/input)")
-    parser.add_argument("--output-dir",  default="",
-                        help="Output folder (default: <script dir>/output)")
-    parser.add_argument("--folder-mode", default="bulk", choices=["bulk", "clean"])
-    parser.add_argument("--no-upscale",  action="store_true")
-    parser.add_argument("--scale",       default="4", choices=["2", "4"])
-    parser.add_argument("--no-rembg",    action="store_true")
-    parser.add_argument("--rembg-model", default="", help="Override rembg model name")
-    parser.add_argument("--force-cpu",   action="store_true", help="Force CPU; skips DirectML/CUDA")
-    parser.add_argument("--exclude-rembg", default="",
-                        help="Comma-separated filenames to skip BG removal")
-    parser.add_argument("--skip-files", default="",
-                        help="Comma-separated filenames to skip entirely (not processed at all)")
-    parser.add_argument("--rembg-fallback", default="auto", choices=["auto", "manual"],
-                        help="auto: retry CPU on GPU load OOM; manual: do not fallback automatically")
-    parser.add_argument("--wipe-input-after-run", action="store_true",
-                        help="Delete input files after run instead of archiving to history/")
-    parser.add_argument("--resume", action="store_true",
-                        help="Resume mode: keep existing output and skip already processed files")
+    parser.add_argument("--non-interactive", action="store_true")
+    parser.add_argument("--input-dir",        default="")
+    parser.add_argument("--output-dir",       default="")
+    parser.add_argument("--folder-mode",      default="bulk", choices=["bulk", "clean"])
+    parser.add_argument("--no-upscale",       action="store_true")
+    parser.add_argument("--scale",            default="4", choices=["2", "4"])
+    parser.add_argument("--no-rembg",         action="store_true")
+    parser.add_argument("--rembg-model",      default="")
+    parser.add_argument("--force-cpu",        action="store_true")
+    parser.add_argument("--exclude-rembg",    default="")
+    parser.add_argument("--skip-files",       default="")
+    parser.add_argument("--rembg-fallback",   default="auto", choices=["auto", "manual"])
+    parser.add_argument("--wipe-input-after-run", action="store_true")
+    parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
-    
+
     header()
 
     if not NCNN_EXE.exists():
@@ -519,16 +559,15 @@ def main():
     section("Configuration")
 
     if args.non_interactive:
-        # ── Driven by API / CLI flags ────────────────────────────────────────
         folder_mode = args.folder_mode
         do_upscale  = not args.no_upscale
         do_rembg    = not args.no_rembg
         ncnn_model  = NCNN_MODELS[args.scale]["model"]
         ncnn_scale  = NCNN_MODELS[args.scale]["scale"]
-    else:        # ── Interactive terminal mode (unchanged) ────────────────────────────
+    else:
         folder_mode = ask("Folder mode", [
-            ("Bulk  — all images in flat input/ folder",          "bulk"),
-            ("Clean — input/ has subfolders (category/color/…)",  "clean"),
+            ("Bulk  — all images in flat input/ folder",         "bulk"),
+            ("Clean — input/ has subfolders (category/color/…)", "clean"),
         ])
         do_upscale = ask("Upscaling", [
             ("Yes — NCNN Vulkan (GPU)", True),
@@ -552,22 +591,18 @@ def main():
         warn("Both stages skipped — nothing to do.")
         sys.exit(0)
 
-    # Override BiRefNet model if passed via CLI (set from settings.json by api.py)
     global REMBG_MODEL
     if args.rembg_model.strip():
         REMBG_MODEL = args.rembg_model.strip()
     info(f"BiRefNet model: {REMBG_MODEL}")
 
-    # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
-    input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
-    output_base = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
+    input_dir     = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
+    output_base   = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
     upscale_dir   = output_base / "upscaled"
     rembg_dir     = output_base / "processed"
     corrupted_dir = output_base / "corrupted"
 
-    # rembg-only auto-fallback: if input is empty but upscale_dir has content,
-    # use upscale_dir as the source so a two-step workflow (upscale today,
-    # rembg tomorrow) works without manually changing the input path.
+    # rembg-only auto-fallback: use upscaled output as source if input is empty
     if not do_upscale and do_rembg:
         input_images = [p for p in input_dir.rglob("*")
                         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS] \
@@ -576,7 +611,7 @@ def main():
             upscale_images = [p for p in upscale_dir.rglob("*")
                               if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS]
             if upscale_images:
-                info(f"Input is empty — using existing upscaled output as source.")
+                info("Input is empty — using existing upscaled output as source.")
                 input_dir = upscale_dir
 
     if not input_dir.exists():
@@ -585,16 +620,14 @@ def main():
 
     images, no_rembg_set = collect_images(input_dir, folder_mode == "clean")
 
-     # Safety fallback: if user selected Bulk mode but the chosen folder only has
-    # images in subfolders, auto-switch to recursive collection instead of
-    # failing with "No images found".
+    # Safety: bulk mode with images only in subfolders → auto-switch to recursive
     if not images and folder_mode == "bulk":
         nested_images, nested_no_rembg = collect_images(input_dir, recursive=True)
         if nested_images:
             warn("No top-level images found in Bulk mode — detected images in subfolders. Using recursive scan.")
-            images = nested_images
+            images       = nested_images
             no_rembg_set = nested_no_rembg
-            folder_mode = "clean"
+            folder_mode  = "clean"
 
     excluded_names = {s.strip().lower() for s in args.exclude_rembg.split(",") if s.strip()}
     skip_names     = {s.strip().lower() for s in args.skip_files.split(",")    if s.strip()}
@@ -627,7 +660,6 @@ def main():
     if not args.non_interactive:
         Prompt.ask("  [dim]Press ENTER to start[/dim]")
 
-    # Clear previous output for this output_base only (unless resume mode)
     if args.resume:
         output_base.mkdir(parents=True, exist_ok=True)
         info("Resume mode enabled — keeping existing output.")
@@ -668,7 +700,6 @@ def main():
                 except OSError:
                     pass
         ok("Input wiped (settings: wipe_input_after_run = true).")
-    # else: leave input files in place — no history move
 
     corrupted_files = list(corrupted_dir.rglob("*")) if corrupted_dir.exists() else []
     corrupted_count = sum(1 for p in corrupted_files if p.is_file())

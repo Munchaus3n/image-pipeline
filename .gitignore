@@ -1,21 +1,31 @@
 # Environment
 .env
 
-# Inputs/outputs (may contain company images)
+# Inputs / outputs (may contain company images)
 input/
 output/
+history/
+corrupted/
+templates/
 
-# Virtual environment
+# Virtual environments
 venv311/
+venv*/
 
 # Python cache
 __pycache__/
 *.pyc
 
 # Large binaries - users download these themselves
-realesrgan-ncnn-vulkan/
-weights/
+# realesrgan-ncnn-vulkan/
+# weights/
 
-# OS
+# Logs / temp
+*.log
+*.tmp
+
+# Editor / OS
+.vscode/
+.idea/
 Thumbs.db
 desktop.ini
