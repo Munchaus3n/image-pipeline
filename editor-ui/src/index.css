@@ -40,22 +40,22 @@
   --bg:        hsl(247, 12%, 14%);
   --panel:     hsl(247, 18%, 10%);
   --panel2:    hsl(222, 20%, 16%);
-  --border:    hsl(222, 20%, 18%);
-  --text:      hsl(0, 0%, 100%);
-  --dim:       hsl(0, 0%, 100%);
+  --border:    hsl(228, 8%, 12%);
+  --text:      hsl(0, 0%, 95%);
+  --dim:       hsl(0, 0%, 90%);
   --dim2:      hsl(223, 9%, 48%);
   
   /* Accent colors */
   --accent:    hsl(224, 100%, 65%);
   --accent-fg: hsl(0, 0%, 100%);
-  --green:     hsl(142, 71%, 45%);
+  --green:     hsl(142, 98%, 41%);
   --green-bg:  hsl(142, 71%, 12%);
   --green-bdr: hsl(142, 71%, 25%);
   --red:       hsl(0, 84%, 60%);
   --red-bg:    hsl(0, 84%, 12%);
-  --red-bdr:   hsl(0, 84%, 25%);
+  --red-bdr:   hsl(0, 100%, 68%);
   --yellow:    hsl(51, 97%, 56%);
-  --yellow-bg: hsla(56, 97%, 72%, 0.315);
+  --yellow-bg: hsl(56, 100%, 12%);
   --yellow-bdr: hsl(49, 72%, 52%);
   --magenta:   hsl(290, 75%, 60%);
   

@@ -90,19 +90,31 @@ function RefImage({ src }) {
 function CollSection({ label, accent, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{ marginBottom:2 }}>
+    <section style={{
+       marginBottom: 10,
+      border: `1px solid ${C.border}`,
+      borderRadius: 10,
+      background: "color-mix(in srgb,var(--panel2) 30%,var(--panel))",
+      overflow: "hidden",
+    }}>
       <button
         className="ed-btn"
         onClick={() => setOpen(v => !v)}
         style={{
           width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between",
-          background:"transparent", border:"none", padding:"5px 0", cursor:"pointer",
+          background:"transparent", border:"none", padding:"9px 10px", cursor:"pointer",
           fontFamily:"inherit",
         }}
       >
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-          <div style={{ width:3, height:10, borderRadius:2, background: accent || "var(--accent)", flexShrink:0 }}/>
-          <span style={{ fontSize:9, fontWeight:700, letterSpacing:"0.1em", color:"var(--dim)", textTransform:"uppercase" }}>{label}</span>
+          <div style={{
+            width: 3,
+            height: 12,
+            borderRadius: 999,
+            background: accent || "var(--accent)",
+            flexShrink: 0,
+          }}/>
+          <span style={{ fontSize:10, fontWeight:700, letterSpacing:"0.08em", color:"var(--dim)", textTransform:"uppercase" }}>{label}</span>
         </div>
         <svg
           width="10" height="10" viewBox="0 0 10 10" fill="none"
@@ -112,11 +124,11 @@ function CollSection({ label, accent, defaultOpen = true, children }) {
         </svg>
       </button>
       {open && (
-        <div style={{ paddingBottom:6 }}>
+        <div style={{ padding:"0 10px 10px" }}>
           {children}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -124,7 +136,7 @@ function Btn({ children, onClick, style={} }) {
   return (
     <button onClick={onClick} style={{
       background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-      borderRadius:5, padding:"5px 8px", fontSize:11, cursor:"pointer",
+      borderRadius:8, padding:"7px 8px", fontSize:11, cursor:"pointer",
       width:"100%", textAlign:"left", fontFamily:"inherit",
       transition:"background 0.12s, color 0.12s",
       ...style,
@@ -837,18 +849,21 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
       }}>
         {/* Sidebar header */}
         <div style={{
-          padding:"0 10px", height:36, borderBottom:`1px solid ${C.border}`,
+          padding:"0 10px", height:40, borderBottom:`1px solid ${C.border}`,
           display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0,
+          background: "color-mix(in srgb,var(--panel2) 45%,var(--panel))",
         }}>
           <div style={{ display:"flex", alignItems:"center", gap:6 }}>
             <button className="ed-btn" onClick={onGoPipeline} style={{
               background:"transparent", color:C.dim, border:`1px solid ${C.border}`,
-              borderRadius:4, padding:"2px 8px", fontSize:10, cursor:"pointer", fontFamily:"inherit",
+              borderRadius:999, padding:"4px 10px", fontSize:10, cursor:"pointer", fontFamily:"inherit",
             }}>← Back</button>
-            <span style={{ fontSize:11, fontWeight:600, color:C.text }}>
-              {Math.min(queueIdx+1, queue.length||1)}
+            <span style={{
+              fontSize:10, color:C.text, fontWeight:600, border:`1px solid ${C.border}`,
+              background:"var(--panel)", borderRadius:999, padding:"1px 8px",
+            }}>
+              {Math.min(queueIdx+1, queue.length||1)} / {queue.length||"—"}
             </span>
-            <span style={{ fontSize:10, color:C.dim }}>/ {queue.length||"—"}</span>
           </div>
           <div style={{
             fontSize:9, color:"var(--green)", fontFamily:"JetBrains Mono",
@@ -860,7 +875,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
         </div>
 
         {/* Scrollable content */}
-        <div style={{ flex:1, overflowY:"auto", padding:"8px 10px 12px" }}>
+        <div style={{ flex:1, overflowY:"auto", padding:"10px" }}>
 
           <CollSection label="Source" accent="var(--green)" defaultOpen>
             <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:4, marginBottom:4 }}>
@@ -887,7 +902,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
           </CollSection>
 
           {/* ── Actions ── */}
-          <CollSection label="Queue" accent="var(--accent)" defaultOpen>
+          <CollSection label="Queue" accent="hsl(217 95% 60%)" defaultOpen>
           <button className="ed-btn" onClick={doSave} style={{
             width:"100%", padding:"7px 10px", marginBottom:4,
             background: saved ? "var(--green)" : "var(--green-bg)",
@@ -926,7 +941,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
           </CollSection>
 
           {/* ── Template ── */}
-          <CollSection label="Template" accent="var(--accent)" defaultOpen>
+          <CollSection label="Template" accent="var(--magenta)" defaultOpen>
           <select value={template} onChange={e => onTemplateChange(e.target.value)} style={{
             background:C.panel2, color:C.text, border:`1px solid ${C.border}`, borderRadius:5,
             padding:"5px 7px", fontSize:11, width:"100%", marginBottom:3,
@@ -973,7 +988,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
           </CollSection>
 
           {/* ── Snap & Align ── */}
-          <CollSection label="Snap & Align" accent="color-mix(in srgb,var(--accent) 70%,var(--green))" defaultOpen>
+          <CollSection label="Snap & Align" accent="hsl(191 85% 52%)" defaultOpen>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, marginBottom:5 }}>
               {snapBtns.map(({ lbl, zone, col }) => (
                 <button key={zone} className="ed-btn" onClick={() => { snapTo(zone); }} style={{
@@ -1052,7 +1067,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
           </CollSection>
 
           {/* ── Canvas Settings ── */}
-          <CollSection label="Canvas" accent="var(--magenta)" defaultOpen={false}>
+          <CollSection label="Canvas" accent="hsl(32 90% 54%)" defaultOpen={false}>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <span style={{ fontSize:10, color:C.dim }}>Background</span>
               <div style={{ display:"flex", alignItems:"center", gap:5 }}>
@@ -1069,7 +1084,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
 
           {/* ── Canvas Items ── */}
           {items.length > 0 && (
-            <CollSection label="Items" accent="var(--accent)" defaultOpen>
+             <CollSection label="Items" accent="hsl(246 82% 66%)" defaultOpen>
               <div style={{ display:"flex", flexDirection:"column", gap:2, marginBottom:2 }}>
                 {items.map(item => (
                   <button key={item.id} className="ed-btn" onClick={() => setSelId(item.id)} style={{
