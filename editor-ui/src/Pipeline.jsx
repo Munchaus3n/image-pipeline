@@ -1,4 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+/*
+KNOWN LIMITATIONS (web build):
+- Focus-based settings reload is a temporary sync workaround; desktop Electron should use explicit app events.
+- /api/browse relies on tkinter; Electron should use native dialog APIs.
+- Editor refresh still depends on UI state transitions rather than native IPC events.
+*/
 
 const BASE = "/api";
 
@@ -139,6 +145,7 @@ function usePipeline() {
   const [stagesDone, setStagesDone] = useState({ upscale: false, rembg: false });
   const [upStats, setUpStats] = useState({ done: 0, skip: 0, err: 0 });
   const [bgStats, setBgStats] = useState({ done: 0, skip: 0, err: 0 });
+  const [oomGpuCount, setOomGpuCount] = useState(0);
   const [imageProgress, setImageProgress] = useState({});
 
   const abortRef    = useRef(null);
@@ -237,6 +244,13 @@ function usePipeline() {
       setBgStats(s => ({ ...s, err: s.err + 1 }));
       return;
     }
+    if (raw.startsWith("__err_oom_gpu__:")) {
+      const fname = raw.slice(16);
+      setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "oom" } }));
+      setOomGpuCount(c => c + 1);
+      setLog(prev => [...prev.slice(-800), { raw: `GPU OOM fallback → CPU retry: ${fname}`, kind: "warn" }]);
+      return;
+    }
 
     if (raw.startsWith("__processing__:")) {
       const fullPath = raw.slice(15);
@@ -286,6 +300,7 @@ function usePipeline() {
     setStage(null); setStagesDone({ upscale: false, rembg: false });
     setUpStats({ done: 0, skip: 0, err: 0 });
     setBgStats({ done: 0, skip: 0, err: 0 });
+    setOomGpuCount(0);
     setImageProgress({});
     stageRef.current = "upscale";
     recentLog.current = [];
@@ -345,7 +360,7 @@ function usePipeline() {
   return {
     running, done, log, errors, imageDone, imageSkipped, imageError,
     totalImages, recentDone, elapsed, stage, stagesDone,
-    upStats, bgStats, imageProgress,
+    upStats, bgStats, imageProgress, oomGpuCount,
     logRef, errorRef, start, stop
   };
 }
@@ -677,7 +692,7 @@ function StageRow({ label, stats, total, active, stageDone, color }) {
   );
 }
 
-function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, doUpscale, doRembg, stagesDone = {} }) {
+function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, doUpscale, doRembg, stagesDone = {}, oomGpuCount = 0 }) {
   const fmt  = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   const n    = totalImages || 0;
   const errs = upStats.err + bgStats.err;
@@ -715,6 +730,11 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
           {done && !running && (
             <span style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: errs > 0 ? C.yellow : C.green }}>
               {errs > 0 ? `⚠ done — ${errs} error${errs > 1 ? "s" : ""}` : "✓ complete"}
+            </span>
+          )}
+          {oomGpuCount > 0 && (
+            <span style={{ fontSize: 11, color: C.yellow, fontFamily: "JetBrains Mono" }}>
+              OOM fallback: {oomGpuCount}
             </span>
           )}
         </div>
@@ -771,26 +791,12 @@ function TagInput({ tags, onChange }) {
 
 // ── LogPanel ──────────────────────────────────────────────────────────────────
 
-// BUG-05 FIX: progress bar was a CSS div that only received 3 discrete values (0→50→100),
-// making it appear choppy. Replaced with an ASCII-style bar: [████████░░] 80%
-// which renders the same discrete steps but looks intentional rather than broken.
-function AsciiProgressBar({ percent, color, width = 20 }) {
-  const filled = Math.round((percent / 100) * width);
-  const empty  = width - filled;
-  return (
-    <span style={{ fontFamily: "JetBrains Mono", fontSize: 10, color, letterSpacing: 0 }}>
-      [<span style={{ color }}>{`█`.repeat(filled)}</span>
-      <span style={{ color: "var(--dim2)", opacity: 0.5 }}>{`░`.repeat(empty)}</span>]
-      {` ${String(percent).padStart(3)}%`}
-    </span>
-  );
-}
-
 function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) {
   const progressColor = (status) => {
     if (status === "error") return C.red;
     if (status === "skip") return C.dim2;
     if (status === "ok") return C.green;
+    if (status === "oom") return C.yellow;
     return C.yellow;
   };
   const isRuleLike = (raw) => /[─═]{4,}/.test(raw);
@@ -828,15 +834,11 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
               if (!meta) return null;
               const color = progressColor(meta.status);
               const pct   = meta.percent;
-              const statusIcon = meta.status === "ok" ? "✓" : meta.status === "error" ? "✗" : meta.status === "skip" ? "↷" : "…";
+              const filled = Math.round(pct / 10);
+              const bar = `${"#".repeat(filled)}${"-".repeat(10 - filled)}`;
               return (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ color, fontSize: 11, flexShrink: 0 }}>{statusIcon}</span>
-                  <span style={{
-                    flex: 1, color: meta.status === "ok" ? C.green : meta.status === "error" ? C.red : C.dim,
-                    fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>{e.filename}</span>
-                  <AsciiProgressBar percent={pct} color={color} width={16} />
+                <div key={i} style={{ fontFamily: "JetBrains Mono", color, fontSize: 11 }}>
+                  [{bar}]  {String(pct).padStart(3)}%  {e.filename}
                 </div>
               );
             }
@@ -1006,7 +1008,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
         if (s.output?.output_dir && !outputDir) setOutputDir(s.output.output_dir);
       })
       .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally mount-only
+  }, [inputDir, outputDir, setInputDir, setOutputDir]);
 
   // Non-path settings reload on mount + focus
   useEffect(() => {
@@ -1027,7 +1029,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
   const {
     running, done, log, errors, imageDone, imageError,
     totalImages, recentDone, elapsed, stage, stagesDone,
-    upStats, bgStats, imageProgress,
+    upStats, bgStats, imageProgress, oomGpuCount,
     logRef, errorRef, start, stop,
   } = usePipeline();
 
@@ -1079,10 +1081,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
     setResumeSession(null);
   }, []);
 
-  // BUG-02/09 FIX: previously appended "/output" here, then api.py's get_source
-  // also appended "/output", resulting in a double-nested path like:
-  //   C:/project/output/output/processed  →  not found → blank editor
-  // Fix: pass trimmed directly. api.py's GET /source already adds /output internally.
+  // BUG-02 FIX: pass output root directly (no extra "/output" append).
   const handleGoToEditor = useCallback(() => {
     const trimmed = outputDir.trim();
     onGoToEditor({ outputDir: trimmed, canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
@@ -1316,6 +1315,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
                   running={running} done={done} stage={stage}
                   doUpscale={doUpscale} doRembg={doRembg}
                   stagesDone={stagesDone}
+                  oomGpuCount={oomGpuCount}
                 />
               )}
             </div>

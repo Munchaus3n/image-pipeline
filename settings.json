@@ -2,7 +2,7 @@
   "processing": {
     "crop_padding": 0,
     "edge_blur": 1.2,
-    "rembg_model": "bria-rmbg",
+    "rembg_model": "birefnet-general",
     "rembg_fallback": "auto",
     "history_keep": 30,
     "force_cpu": true,
@@ -20,10 +20,11 @@
     "key": ""
   },
   "output": {
-    "canvas_size": 1000,
+    "canvas_size": 1440,
     "thumbnail": true,
     "thumbnail_size": 400,
-    "folder_mode": "bulk",
+    "folder_mode": "clean",
+    "input_dir": "",
     "output_dir": ""
   },
   "appearance": {

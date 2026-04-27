@@ -1,6 +1,6 @@
 import { StrictMode, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App.jsx";
+import Editor from "./Editor.jsx";
 import Input from "./Input.jsx";
 import Pipeline from "./Pipeline.jsx";
 import Templates from "./Templates.jsx";
@@ -31,6 +31,7 @@ export function Root() {
   const [thumbs,        setThumbs]        = useState([]);
   const [removedImages, setRemovedImages] = useState(new Set());
   const [editorSettings, setEditorSettings] = useState({ outputDir:"", canvasSize:1440, thumbnail:true });
+  const [editorKey, setEditorKey] = useState(0);
 
   // BUG-11 FIX: theme toggle was sending only { appearance: { theme } } to POST /settings,
   // which replaced the entire settings.json with that partial object — silently wiping
@@ -136,7 +137,7 @@ export function Root() {
           outputDir={outputDir}     setOutputDir={setOutputDir}
           excludeTags={excludeTags}
           removedImages={removedImages}
-          onGoToEditor={(s) => { setEditorSettings(s); setScreen("editor"); }}
+          onGoToEditor={(s) => { setEditorSettings(s); setEditorKey(k => k + 1); setScreen("editor"); }}
           onGoToTemplates={() => setScreen("templates")}
         />
       </div>
@@ -146,7 +147,8 @@ export function Root() {
       </div>
 
       <div style={{ flex:1, minHeight:0, display:screen==="editor"    ? "flex" : "none", flexDirection:"column" }}>
-        <App
+        <Editor
+          key={editorKey}
           onGoPipeline={() => setScreen("pipeline")}
           outputDir={editorSettings.outputDir}
           canvasSize={editorSettings.canvasSize}

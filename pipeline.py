@@ -123,9 +123,9 @@ def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
 
 # ── Image processing ───────────────────────────────────────────────────────────
 
-_NCNN_TILE_THRESHOLD = 2000
-_NCNN_TILE_SIZE      = "256"
-
+# Images wider/taller than this get tiled to avoid VRAM OOM on Vulkan
+_NCNN_TILE_THRESHOLD = 2000  # px on longest side
+_NCNN_TILE_SIZE      = "256"  # tile size passed to -t flag
 def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -258,67 +258,6 @@ def _prefetch_image(path: Path) -> None:
     except Exception:
         pass
 
-
-# ── BUG-04 FIX: Bria RMBG-2.0 direct ORT inference ──────────────────────────
-#
-# ROOT CAUSE: the old code called rembg_remove() for ALL models including Bria.
-# rembg's pipeline uses U2Net normalization:
-#   mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-# Bria RMBG-2.0 was trained with a different scheme:
-#   input  = (pixel / 255.0 - 0.5) / 1.0   →  range [-0.5, +0.5]
-#   layout = NCHW float32, size 1024×1024
-#   output = raw logits [1,1,1024,1024] — sigmoid required to get mask
-#
-# Running Bria through rembg's preprocessing produces valid-looking but
-# degraded masks (soft/wrong edges, fine details lost). This is why results
-# were inferior to the HuggingFace demo which runs the model correctly.
-#
-# FIX: bypass rembg entirely for Bria. Access the underlying ORT session via
-# session.inner_session (exposed by rembg's BaseSession) and run inference
-# with the correct normalization. All other models continue using rembg.
-
-def _bria_infer(img_rgba: Image.Image, session) -> Image.Image:
-    """Run Bria RMBG-2.0 inference directly via ORT with correct preprocessing.
-
-    Args:
-        img_rgba: Input image in RGBA mode, any size.
-        session:  rembg session wrapping the Bria ONNX model.
-                  session.inner_session is the underlying ort.InferenceSession.
-
-    Returns:
-        Alpha mask as PIL 'L' mode image, same spatial size as img_rgba.
-    """
-    BRIA_SIZE = 1024
-    w, h = img_rgba.size
-
-    # Step 1: resize to model's fixed resolution
-    infer_rgb = img_rgba.convert("RGB").resize((BRIA_SIZE, BRIA_SIZE), Image.BILINEAR)
-
-    # Step 2: normalize — (x / 255.0) - 0.5, output range [-0.5, +0.5]
-    arr = np.array(infer_rgb, dtype=np.float32) / 255.0 - 0.5  # HWC float32
-
-    # Step 3: convert HWC → NCHW: [1, 3, 1024, 1024]
-    arr = arr.transpose(2, 0, 1)[np.newaxis]
-
-    # Step 4: run ORT directly — bypasses rembg's U2Net normalization entirely
-    ort_session = session.inner_session
-    input_name  = ort_session.get_inputs()[0].name
-    outputs     = ort_session.run(None, {input_name: arr})
-
-    # Step 5: output is raw logits [1, 1, 1024, 1024] — apply sigmoid
-    logits    = outputs[0][0, 0]                         # shape (1024, 1024)
-    mask_prob = 1.0 / (1.0 + np.exp(-logits))           # sigmoid → [0, 1]
-    mask_u8   = (mask_prob * 255).clip(0, 255).astype(np.uint8)
-
-    mask_1024 = Image.fromarray(mask_u8, mode="L")
-
-    # Step 6: resize mask back to original dimensions if needed
-    if (w, h) != (BRIA_SIZE, BRIA_SIZE):
-        mask_1024 = mask_1024.resize((w, h), Image.BICUBIC)
-
-    return mask_1024
-
-
 def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -331,26 +270,16 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
             result.save(dst, format="PNG")
             return True
 
-        is_bria = (model_name == "bria-rmbg")
-
-        if is_bria:
-            # BUG-04 FIX: Bria gets its own inference path.
-            # No contrast boost (would shift distribution away from training data).
-            # No hole-fill (Bria masks are already clean).
-            # No rembg preprocessing (wrong normalization for this model).
-            mask = _bria_infer(img, session)
-
+        w, h = img.size
+        if max(w, h) > BIREFNET_MAX:
+            scale = BIREFNET_MAX / max(w, h)
+            infer_img = img.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))),
+                Image.LANCZOS
+            )
         else:
-            # ── BiRefNet path (unchanged) ────────────────────────────────────
-            w, h = img.size
-            if max(w, h) > BIREFNET_MAX:
-                scale     = BIREFNET_MAX / max(w, h)
-                infer_img = img.resize(
-                    (max(1, int(w * scale)), max(1, int(h * scale))),
-                    Image.LANCZOS
-                )
-            else:
-                infer_img = img
+            infer_img = img
+
 
             infer_rgb = infer_img.convert("RGB")
 
@@ -462,15 +391,6 @@ def batch_remove_bg(
             raise
     ok("Model loaded.")
 
-    # BUG-04 FIX: verify inner_session is accessible before batch starts.
-    # rembg's BaseSession exposes inner_session as the raw ORT InferenceSession.
-    # If a future rembg version renames this, degrade gracefully rather than crash.
-    is_bria = (REMBG_MODEL == "bria-rmbg")
-    if is_bria and not hasattr(session, "inner_session"):
-        warn("Bria: session.inner_session not accessible — falling back to rembg pipeline.")
-        warn("Consider updating rembg or checking for API changes.")
-        is_bria = False  # Graceful degradation — rembg path is still functional
-
     outputs, to_run = [], []
 
     for src in upscaled:
@@ -559,6 +479,7 @@ def main():
     section("Configuration")
 
     if args.non_interactive:
+        # ── Driven by API / CLI flags ────────────────────────────────────────
         folder_mode = args.folder_mode
         do_upscale  = not args.no_upscale
         do_rembg    = not args.no_rembg
@@ -596,8 +517,9 @@ def main():
         REMBG_MODEL = args.rembg_model.strip()
     info(f"BiRefNet model: {REMBG_MODEL}")
 
-    input_dir     = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
-    output_base   = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
+    # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
+    input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
+    output_base = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
     upscale_dir   = output_base / "upscaled"
     rembg_dir     = output_base / "processed"
     corrupted_dir = output_base / "corrupted"
