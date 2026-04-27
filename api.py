@@ -143,7 +143,7 @@ def mirror_save_path(src: Path, src_root: Path) -> Path:
         rel = src.relative_to(src_root)
     except ValueError:
         rel = Path(src.name)
-    return _output_base_from_src_root(src_root) / "Editor" / "Final" / rel
+    return _output_base_from_src_root(src_root) / "Editor" / "final" / rel
 
 # Allow any path on any local drive — this is a local-only app with no remote access.
 # On Windows: add every mounted drive root (C:\, D:\, ...).
@@ -525,7 +525,7 @@ def save_composition(req: SaveRequest):
             rel = ref_path.relative_to(src_root)
         except ValueError:
             rel = Path(ref_path.name)
-        save_path = (output_base / "Editor" / "Final" / rel).with_suffix(".png")
+        save_path = (output_base / "Editor" / "final" / rel).with_suffix(".png")
     else:
         save_path = mirror_save_path(ref_path, src_root).with_suffix(".png")    
     if req.is_combo:

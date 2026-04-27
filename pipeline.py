@@ -223,6 +223,19 @@ def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
     return ["CPUExecutionProvider"], "CPU"
 
 
+def _is_oom_error(msg: str) -> bool:
+    m = (msg or "").lower()
+    return any(token in m for token in (
+        "out of memory",
+        "not enough memory",
+        "insufficient memory",
+        "8007000e",
+        "cuda_error_out_of_memory",
+        "failed to allocate memory",
+        "bad alloc",
+    ))
+
+
 def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: float = 0.003) -> Image.Image:
     """Fill only small enclosed holes in a BiRefNet alpha mask.
 
@@ -258,7 +271,7 @@ def _prefetch_image(path: Path) -> None:
     except Exception:
         pass
 
-def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
+def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> tuple[bool, str | None]:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         with Image.open(src) as opened:
@@ -268,7 +281,7 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
         if has_transparency(src):
             result = tight_crop(refine_edges(img))
             result.save(dst, format="PNG")
-            return True
+            return True, None
 
         w, h = img.size
         if max(w, h) > BIREFNET_MAX:
@@ -280,32 +293,35 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
         else:
             infer_img = img
 
+        mask = None
+        infer_rgb = infer_img.convert("RGB")
 
-            infer_rgb = infer_img.convert("RGB")
+        # Contrast boost helps BiRefNet edge quality.
+        # NOT applied to Bria — handled above in the is_bria branch.
+        from PIL import ImageEnhance
+        infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
 
-            # Contrast boost helps BiRefNet edge quality.
-            # NOT applied to Bria — handled above in the is_bria branch.
-            from PIL import ImageEnhance
-            infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
+        mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
 
-            mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
+        if mask_small.size != img.size:
+            mask = mask_small.resize(img.size, Image.BICUBIC)
+        else:
+            mask = mask_small
 
-            if mask_small.size != img.size:
-                mask = mask_small.resize(img.size, Image.BICUBIC)
-            else:
-                mask = mask_small
+        # Hole-fill only for BiRefNet — guarded here, never runs for Bria.
+        mask = _fill_mask_holes(mask)
 
-            # Hole-fill only for BiRefNet — guarded here, never runs for Bria.
-            mask = _fill_mask_holes(mask)
+        if mask is None:
+            raise RuntimeError("Background mask generation failed (mask is unset).")
 
         img.putalpha(mask)
         result = tight_crop(refine_edges(img))
         result.save(dst, format="PNG")
-        return True
+        return True, None
 
     except Exception as e:
         err(f"BG removal failed on {src.name}: {e}")
-        return False
+        return False, str(e)
 
 
 # ── Batch stages ───────────────────────────────────────────────────────────────
@@ -383,7 +399,7 @@ def batch_remove_bg(
         if (
             rembg_fallback == "auto"
             and not force_cpu
-            and ("8007000E" in str(e) or "not enough memory" in str(e).lower())
+            and _is_oom_error(str(e))
         ):
             warn("DirectML OOM during load — retrying on CPU...")
             session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
@@ -421,6 +437,8 @@ def batch_remove_bg(
         ok("All images already processed.")
         return outputs
 
+    cpu_session = session if force_cpu else None
+
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch") as prefetch_pool:
         prefetch_future: Future | None = None
 
@@ -435,7 +453,16 @@ def batch_remove_bg(
 
                 progress.update(task, description=src.name)
                 print(f"__processing__:{src}", flush=True)
-                if remove_bg(src, dst, session, model_name=REMBG_MODEL):
+                success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL)
+
+                if (not success) and (not force_cpu) and _is_oom_error(error_msg or ""):
+                    print(f"__err_oom_gpu__:{src.name}", flush=True)
+                    warn(f"GPU OOM on {src.name} — retrying on CPU.")
+                    if cpu_session is None:
+                        cpu_session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
+                    success, error_msg = remove_bg(src, dst, cpu_session, model_name=REMBG_MODEL)
+
+                if success:
                     ok(f"{src.name} → processed/{dst.relative_to(dst_root)}")
                     print(f"__ok_rembg__:{src.name}", flush=True)
                 else:
@@ -518,6 +545,11 @@ def main():
     info(f"BiRefNet model: {REMBG_MODEL}")
 
     # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
+    using_default_input  = not bool(args.input_dir)
+    using_default_output = not bool(args.output_dir)
+    using_default_paths  = using_default_input and using_default_output
+    preserve_custom_data = (not using_default_paths) and (not args.wipe_input_after_run)
+
     input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
     output_base = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
     upscale_dir   = output_base / "upscaled"
@@ -576,21 +608,34 @@ def main():
     table.add_row("Remove BG", REMBG_MODEL if do_rembg else "skip")
     table.add_row("Input →",   str(input_dir))
     table.add_row("Output →",  str(rembg_dir))
+    if args.resume:
+        wipe_policy = "resume (preserve existing output)"
+    elif preserve_custom_data:
+        wipe_policy = "custom paths + wipe off (preserve input/output)"
+    elif using_default_paths:
+        wipe_policy = "default paths workflow (auto-clear output; optional input wipe)"
+    else:
+        wipe_policy = "custom paths with wipe enabled (clear output + wipe input)"
+    table.add_row("Wipe policy", wipe_policy)
     console.print(table)
     console.print()
 
     if not args.non_interactive:
         Prompt.ask("  [dim]Press ENTER to start[/dim]")
 
+    clear_previous_output = (not args.resume) and (not preserve_custom_data)
+
     if args.resume:
         output_base.mkdir(parents=True, exist_ok=True)
         info("Resume mode enabled — keeping existing output.")
-    else:
+    elif clear_previous_output:
         if output_base.exists():
             shutil.rmtree(output_base)
         output_base.mkdir(parents=True)
         ok("Previous output cleared.")
-
+    else:
+        output_base.mkdir(parents=True, exist_ok=True)
+        info("Custom paths + wipe off — preserving existing input/output.")
     current = images
 
     if do_upscale:

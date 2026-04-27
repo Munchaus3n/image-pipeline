@@ -10,7 +10,7 @@
   --panel:     hsl(0, 0%, 100%);
   --panel2:    hsl(220, 14%, 94%);
   --border:    hsl(220, 13%, 90%);
-  --text:      hsl(224, 20%, 15%);
+  --text:      hsl(226, 12%, 22%);
   --dim:       hsl(220, 10%, 46%);
   --dim2:      hsl(224, 16%, 64%);
   
@@ -37,12 +37,12 @@
 
 [data-theme="dark"] {
   /* Base colors - Dark theme */
-  --bg:        hsl(225, 22%, 11%);
-  --panel:     hsl(225, 22%, 11%);
+  --bg:        hsl(247, 12%, 14%);
+  --panel:     hsl(247, 18%, 10%);
   --panel2:    hsl(222, 20%, 16%);
   --border:    hsl(222, 20%, 18%);
-  --text:      hsl(210, 40%, 95%);
-  --dim:       hsl(0, 0%, 76%);
+  --text:      hsl(0, 0%, 100%);
+  --dim:       hsl(0, 0%, 100%);
   --dim2:      hsl(223, 9%, 48%);
   
   /* Accent colors */

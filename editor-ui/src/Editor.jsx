@@ -234,14 +234,23 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     setConfirmState(null);
   }, []);
 
+  const outputRoot = useMemo(() => {
+    if (!srcFolder) return "";
+    const normalized = srcFolder.replace(/\\/g, "/");
+    if (normalized.endsWith("/processed") || normalized.endsWith("/upscaled")) {
+      return srcFolder.replace(/[\\/](processed|upscaled)$/i, "");
+    }
+    return srcFolder;
+  }, [srcFolder]);
+
   // ── BUG-06 FIX: convert plain functions to useCallback for stable references ──
 
   // allDone has no state/callback deps — clearSession is a stable import
   const allDone = useCallback(async () => {
     setItems([]); setSelId(null);
-    setStatus("all images processed.\noutput → output/final/");
+    setStatus(`all images processed.\noutput → ${outputRoot}/Editor/final/`);
     await clearSession().catch(() => {});
-  }, []);
+  }, [outputRoot]);
 
   // prefetchNextImage: reads template/guides to pre-size the placement
   const prefetchNextImage = useCallback((q, nextIdx) => {
@@ -502,7 +511,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
       const g = guides[snapZone];
       const t=g.top*S, b=g.bottom*S, l=g.left*S, r=g.right*S;
       ctx.setLineDash([]);
-      ctx.fillStyle = g.color + "14";
+      ctx.fillStyle = g.color + "08";
       ctx.fillRect(l, t, r-l, b-t);
       ctx.strokeStyle = g.color + "ee";
       ctx.lineWidth = 2.5;
@@ -587,15 +596,6 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     undoRef.current = null;
     setStatus("undone.");
   }, []);
-
-    const outputRoot = useMemo(() => {
-    if (!srcFolder) return "";
-    const normalized = srcFolder.replace(/\\/g, "/");
-    if (normalized.endsWith("/processed") || normalized.endsWith("/upscaled")) {
-      return srcFolder.replace(/[\\/](processed|upscaled)$/i, "");
-    }
-    return srcFolder;
-  }, [srcFolder]);
 
   const doSave = useCallback(async () => {
     if (!items.length) return;
