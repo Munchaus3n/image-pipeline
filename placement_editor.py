@@ -60,7 +60,7 @@ TEMPLATES = {
 
 def detect_source_folder() -> tuple[Path, str]:
     for folder, label in [
-        (OUTPUT_ROOT / "bg_removed", "output/bg_removed"),
+        (OUTPUT_ROOT / "processed", "output/processed"),
         (OUTPUT_ROOT / "upscaled",   "output/upscaled"),
         (BASE_DIR    / "input",      "input"),
     ]:
@@ -84,7 +84,13 @@ def mirror_save_path(src: Path, src_root: Path) -> Path:
         rel = src.relative_to(src_root)
     except ValueError:
         rel = Path(src.name)
-    return OUTPUT_ROOT / "final" / rel
+    return _output_base_from_src_root(src_root) / "Editor" / "final" / rel
+
+
+def _output_base_from_src_root(src_root: Path) -> Path:
+    if src_root.name in ("processed", "upscaled", "bg_removed"):
+        return src_root.parent
+    return OUTPUT_ROOT
 
 
 # ── Product item ───────────────────────────────────────────────────────────────
@@ -421,7 +427,7 @@ class PlacementEditor:
         if self._queue_index < len(self._queue):
             src = self._queue[self._queue_index]
             try:
-                dst = OUTPUT_ROOT / "skipped" / src.name
+                dst = _output_base_from_src_root(self._src_root) / "Editor" / "skipped" / src.name
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
             except Exception:
@@ -443,10 +449,11 @@ class PlacementEditor:
         self._update_layers()
         self._update_queue_label()
         self.root.title("Placement Editor  |  Done")
-        self._status.config(text="All images processed.\nOutput → output/final/")
+        final_dir = _output_base_from_src_root(self._src_root) / "Editor" / "final"
+        self._status.config(text=f"All images processed.\nOutput → {final_dir}/")
         SESSION_FILE.unlink(missing_ok=True)
-        messagebox.showinfo("Done", "All images processed.\nSaved to output/final/")
-
+        messagebox.showinfo("Done", f"All images processed.\nSaved to {final_dir}/")
+        
     def _toggle_combo(self):
         self._combo_mode = self._combo_var.get()
 

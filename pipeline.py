@@ -123,9 +123,9 @@ def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
 
 # ── Image processing ───────────────────────────────────────────────────────────
 
-_NCNN_TILE_THRESHOLD = 2000
-_NCNN_TILE_SIZE      = "256"
-
+# Images wider/taller than this get tiled to avoid VRAM OOM on Vulkan
+_NCNN_TILE_THRESHOLD = 2000  # px on longest side
+_NCNN_TILE_SIZE      = "256"  # tile size passed to -t flag
 def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -223,6 +223,19 @@ def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
     return ["CPUExecutionProvider"], "CPU"
 
 
+def _is_oom_error(msg: str) -> bool:
+    m = (msg or "").lower()
+    return any(token in m for token in (
+        "out of memory",
+        "not enough memory",
+        "insufficient memory",
+        "8007000e",
+        "cuda_error_out_of_memory",
+        "failed to allocate memory",
+        "bad alloc",
+    ))
+
+
 def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: float = 0.003) -> Image.Image:
     """Fill only small enclosed holes in a BiRefNet alpha mask.
 
@@ -258,68 +271,7 @@ def _prefetch_image(path: Path) -> None:
     except Exception:
         pass
 
-
-# ── BUG-04 FIX: Bria RMBG-2.0 direct ORT inference ──────────────────────────
-#
-# ROOT CAUSE: the old code called rembg_remove() for ALL models including Bria.
-# rembg's pipeline uses U2Net normalization:
-#   mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-# Bria RMBG-2.0 was trained with a different scheme:
-#   input  = (pixel / 255.0 - 0.5) / 1.0   →  range [-0.5, +0.5]
-#   layout = NCHW float32, size 1024×1024
-#   output = raw logits [1,1,1024,1024] — sigmoid required to get mask
-#
-# Running Bria through rembg's preprocessing produces valid-looking but
-# degraded masks (soft/wrong edges, fine details lost). This is why results
-# were inferior to the HuggingFace demo which runs the model correctly.
-#
-# FIX: bypass rembg entirely for Bria. Access the underlying ORT session via
-# session.inner_session (exposed by rembg's BaseSession) and run inference
-# with the correct normalization. All other models continue using rembg.
-
-def _bria_infer(img_rgba: Image.Image, session) -> Image.Image:
-    """Run Bria RMBG-2.0 inference directly via ORT with correct preprocessing.
-
-    Args:
-        img_rgba: Input image in RGBA mode, any size.
-        session:  rembg session wrapping the Bria ONNX model.
-                  session.inner_session is the underlying ort.InferenceSession.
-
-    Returns:
-        Alpha mask as PIL 'L' mode image, same spatial size as img_rgba.
-    """
-    BRIA_SIZE = 1024
-    w, h = img_rgba.size
-
-    # Step 1: resize to model's fixed resolution
-    infer_rgb = img_rgba.convert("RGB").resize((BRIA_SIZE, BRIA_SIZE), Image.BILINEAR)
-
-    # Step 2: normalize — (x / 255.0) - 0.5, output range [-0.5, +0.5]
-    arr = np.array(infer_rgb, dtype=np.float32) / 255.0 - 0.5  # HWC float32
-
-    # Step 3: convert HWC → NCHW: [1, 3, 1024, 1024]
-    arr = arr.transpose(2, 0, 1)[np.newaxis]
-
-    # Step 4: run ORT directly — bypasses rembg's U2Net normalization entirely
-    ort_session = session.inner_session
-    input_name  = ort_session.get_inputs()[0].name
-    outputs     = ort_session.run(None, {input_name: arr})
-
-    # Step 5: output is raw logits [1, 1, 1024, 1024] — apply sigmoid
-    logits    = outputs[0][0, 0]                         # shape (1024, 1024)
-    mask_prob = 1.0 / (1.0 + np.exp(-logits))           # sigmoid → [0, 1]
-    mask_u8   = (mask_prob * 255).clip(0, 255).astype(np.uint8)
-
-    mask_1024 = Image.fromarray(mask_u8, mode="L")
-
-    # Step 6: resize mask back to original dimensions if needed
-    if (w, h) != (BRIA_SIZE, BRIA_SIZE):
-        mask_1024 = mask_1024.resize((w, h), Image.BICUBIC)
-
-    return mask_1024
-
-
-def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
+def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> tuple[bool, str | None]:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         with Image.open(src) as opened:
@@ -329,54 +281,47 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> bool:
         if has_transparency(src):
             result = tight_crop(refine_edges(img))
             result.save(dst, format="PNG")
-            return True
+            return True, None
 
-        is_bria = (model_name == "bria-rmbg")
-
-        if is_bria:
-            # BUG-04 FIX: Bria gets its own inference path.
-            # No contrast boost (would shift distribution away from training data).
-            # No hole-fill (Bria masks are already clean).
-            # No rembg preprocessing (wrong normalization for this model).
-            mask = _bria_infer(img, session)
-
+        w, h = img.size
+        if max(w, h) > BIREFNET_MAX:
+            scale = BIREFNET_MAX / max(w, h)
+            infer_img = img.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))),
+                Image.LANCZOS
+            )
         else:
-            # ── BiRefNet path (unchanged) ────────────────────────────────────
-            w, h = img.size
-            if max(w, h) > BIREFNET_MAX:
-                scale     = BIREFNET_MAX / max(w, h)
-                infer_img = img.resize(
-                    (max(1, int(w * scale)), max(1, int(h * scale))),
-                    Image.LANCZOS
-                )
-            else:
-                infer_img = img
+            infer_img = img
 
-            infer_rgb = infer_img.convert("RGB")
+        mask = None
+        infer_rgb = infer_img.convert("RGB")
 
-            # Contrast boost helps BiRefNet edge quality.
-            # NOT applied to Bria — handled above in the is_bria branch.
-            from PIL import ImageEnhance
-            infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
+        # Contrast boost helps BiRefNet edge quality.
+        # NOT applied to Bria — handled above in the is_bria branch.
+        from PIL import ImageEnhance
+        infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
 
-            mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
+        mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
 
-            if mask_small.size != img.size:
-                mask = mask_small.resize(img.size, Image.BICUBIC)
-            else:
-                mask = mask_small
+        if mask_small.size != img.size:
+            mask = mask_small.resize(img.size, Image.BICUBIC)
+        else:
+            mask = mask_small
 
-            # Hole-fill only for BiRefNet — guarded here, never runs for Bria.
-            mask = _fill_mask_holes(mask)
+        # Hole-fill only for BiRefNet — guarded here, never runs for Bria.
+        mask = _fill_mask_holes(mask)
+
+        if mask is None:
+            raise RuntimeError("Background mask generation failed (mask is unset).")
 
         img.putalpha(mask)
         result = tight_crop(refine_edges(img))
         result.save(dst, format="PNG")
-        return True
+        return True, None
 
     except Exception as e:
         err(f"BG removal failed on {src.name}: {e}")
-        return False
+        return False, str(e)
 
 
 # ── Batch stages ───────────────────────────────────────────────────────────────
@@ -454,22 +399,13 @@ def batch_remove_bg(
         if (
             rembg_fallback == "auto"
             and not force_cpu
-            and ("8007000E" in str(e) or "not enough memory" in str(e).lower())
+            and _is_oom_error(str(e))
         ):
             warn("DirectML OOM during load — retrying on CPU...")
             session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
         else:
             raise
     ok("Model loaded.")
-
-    # BUG-04 FIX: verify inner_session is accessible before batch starts.
-    # rembg's BaseSession exposes inner_session as the raw ORT InferenceSession.
-    # If a future rembg version renames this, degrade gracefully rather than crash.
-    is_bria = (REMBG_MODEL == "bria-rmbg")
-    if is_bria and not hasattr(session, "inner_session"):
-        warn("Bria: session.inner_session not accessible — falling back to rembg pipeline.")
-        warn("Consider updating rembg or checking for API changes.")
-        is_bria = False  # Graceful degradation — rembg path is still functional
 
     outputs, to_run = [], []
 
@@ -501,6 +437,8 @@ def batch_remove_bg(
         ok("All images already processed.")
         return outputs
 
+    cpu_session = session if force_cpu else None
+
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch") as prefetch_pool:
         prefetch_future: Future | None = None
 
@@ -515,7 +453,16 @@ def batch_remove_bg(
 
                 progress.update(task, description=src.name)
                 print(f"__processing__:{src}", flush=True)
-                if remove_bg(src, dst, session, model_name=REMBG_MODEL):
+                success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL)
+
+                if (not success) and (not force_cpu) and _is_oom_error(error_msg or ""):
+                    print(f"__err_oom_gpu__:{src.name}", flush=True)
+                    warn(f"GPU OOM on {src.name} — retrying on CPU.")
+                    if cpu_session is None:
+                        cpu_session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
+                    success, error_msg = remove_bg(src, dst, cpu_session, model_name=REMBG_MODEL)
+
+                if success:
                     ok(f"{src.name} → processed/{dst.relative_to(dst_root)}")
                     print(f"__ok_rembg__:{src.name}", flush=True)
                 else:
@@ -559,6 +506,7 @@ def main():
     section("Configuration")
 
     if args.non_interactive:
+        # ── Driven by API / CLI flags ────────────────────────────────────────
         folder_mode = args.folder_mode
         do_upscale  = not args.no_upscale
         do_rembg    = not args.no_rembg
@@ -596,8 +544,14 @@ def main():
         REMBG_MODEL = args.rembg_model.strip()
     info(f"BiRefNet model: {REMBG_MODEL}")
 
-    input_dir     = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
-    output_base   = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
+    # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
+    using_default_input  = not bool(args.input_dir)
+    using_default_output = not bool(args.output_dir)
+    using_default_paths  = using_default_input and using_default_output
+    preserve_custom_data = (not using_default_paths) and (not args.wipe_input_after_run)
+
+    input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
+    output_base = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
     upscale_dir   = output_base / "upscaled"
     rembg_dir     = output_base / "processed"
     corrupted_dir = output_base / "corrupted"
@@ -654,21 +608,34 @@ def main():
     table.add_row("Remove BG", REMBG_MODEL if do_rembg else "skip")
     table.add_row("Input →",   str(input_dir))
     table.add_row("Output →",  str(rembg_dir))
+    if args.resume:
+        wipe_policy = "resume (preserve existing output)"
+    elif preserve_custom_data:
+        wipe_policy = "custom paths + wipe off (preserve input/output)"
+    elif using_default_paths:
+        wipe_policy = "default paths workflow (auto-clear output; optional input wipe)"
+    else:
+        wipe_policy = "custom paths with wipe enabled (clear output + wipe input)"
+    table.add_row("Wipe policy", wipe_policy)
     console.print(table)
     console.print()
 
     if not args.non_interactive:
         Prompt.ask("  [dim]Press ENTER to start[/dim]")
 
+    clear_previous_output = (not args.resume) and (not preserve_custom_data)
+
     if args.resume:
         output_base.mkdir(parents=True, exist_ok=True)
         info("Resume mode enabled — keeping existing output.")
-    else:
+    elif clear_previous_output:
         if output_base.exists():
             shutil.rmtree(output_base)
         output_base.mkdir(parents=True)
         ok("Previous output cleared.")
-
+    else:
+        output_base.mkdir(parents=True, exist_ok=True)
+        info("Custom paths + wipe off — preserving existing input/output.")
     current = images
 
     if do_upscale:
