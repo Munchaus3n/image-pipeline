@@ -327,7 +327,10 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> tuple[bool
 # ── Batch stages ───────────────────────────────────────────────────────────────
 
 def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
-                  model: str, scale: str, corrupted_dir: Path | None = None) -> list[Path]:
+                  model: str, scale: str,
+                  upscale_max_px: int = 1440,
+                  upscale_min_px: int = 800,
+                  corrupted_dir: Path | None = None) -> list[Path]:
     section("Stage 1 / 2 — Upscaling")
     print(f"__total__:{len(images)}", flush=True)
     outputs, to_run = [], []
@@ -338,8 +341,22 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
         if dst.exists():
             skip(f"{src.name} (already upscaled)")
             print(f"__skip_upscale__:{src.name}", flush=True)
-        else:
-            to_run.append((src, dst))
+        continue
+
+        try:
+            with Image.open(src) as img:
+                w, h = img.size
+            max_side = max(w, h)
+            min_side = min(w, h)
+            if max_side >= upscale_max_px and min_side < upscale_min_px:
+                skip(f"{src.name} ({w}×{h} — longest side ≥ {upscale_max_px}px)")
+                print(f"__skip_upscale__:{src.name}", flush=True)
+                outputs[outputs.index(dst)] = src
+                continue
+        except Exception as e:
+            warn(f"Could not read {src.name} dimensions: {e}")
+
+        to_run.append((src, dst))
 
     if not to_run:
         ok("All images already upscaled.")
@@ -493,6 +510,8 @@ def main():
     parser.add_argument("--skip-files",       default="")
     parser.add_argument("--rembg-fallback",   default="auto", choices=["auto", "manual"])
     parser.add_argument("--wipe-input-after-run", action="store_true")
+    parser.add_argument("--upscale-max-px",   type=int, default=1440)
+    parser.add_argument("--upscale-min-px",   type=int, default=800)
     parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
 
@@ -605,6 +624,8 @@ def main():
     if excluded_names:
         table.add_row("Skip list", f"{len(excluded_names)} file(s)")
     table.add_row("Upscale",   f"NCNN {ncnn_model} ×{ncnn_scale}" if do_upscale else "skip")
+    if do_upscale:
+        table.add_row("Upscale rules", f"skip if max(W,H) ≥ {args.upscale_max_px}px")
     table.add_row("Remove BG", REMBG_MODEL if do_rembg else "skip")
     table.add_row("Input →",   str(input_dir))
     table.add_row("Output →",  str(rembg_dir))
@@ -640,6 +661,8 @@ def main():
 
     if do_upscale:
         current = batch_upscale(current, input_dir, upscale_dir, ncnn_model, ncnn_scale,
+                                upscale_max_px=args.upscale_max_px,
+                                upscale_min_px=args.upscale_min_px,
                                 corrupted_dir=corrupted_dir)
     else:
         skip("upscaling")

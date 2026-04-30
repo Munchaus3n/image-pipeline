@@ -24,6 +24,9 @@ export default function Input({
   const [previewPath,      setPreviewPath]      = useState(null);
   const [previewLoadError, setPreviewLoadError] = useState(false);
   const [browseLoading,    setBrowseLoading]    = useState(false);
+  const [showUpscaleRules, setShowUpscaleRules] = useState(false);
+  const [upscaleMaxOverride, setUpscaleMaxOverride] = useState("");
+  const [upscaleMinOverride, setUpscaleMinOverride] = useState("");
   const lastSelectedRef = useRef(null);  // for shift-click range
   const loadedDirRef = useRef("");
 
@@ -219,7 +222,10 @@ export default function Input({
         }}>None</button>
 
         {/* Go to Process */}
-        <button className="inp-btn" onClick={onGoToProcess} disabled={!inputDir.trim()} style={{
+        <button className="inp-btn" onClick={() => onGoToProcess({
+          upscaleMaxPxOverride: upscaleMaxOverride.trim(),
+          upscaleMinPxOverride: upscaleMinOverride.trim(),
+        })} disabled={!inputDir.trim()} style={{
           background: inputDir.trim() ? "var(--green-bg)" : C.dim2,
           color: inputDir.trim() ? C.green : C.dim,
           border: `1px solid ${inputDir.trim() ? "var(--green-bdr)" : C.border}`,
@@ -228,6 +234,22 @@ export default function Input({
           fontFamily: "inherit", flexShrink: 0,
         }}>▶  Go to Process</button>
       </div>
+
+{inputDir && (
+        <div style={{ margin:"8px 14px 0", border:`1px solid ${C.border}`, borderRadius:6, background:C.panel }}>
+          <button onClick={() => setShowUpscaleRules(v => !v)} style={{ width:"100%", textAlign:"left", padding:"8px 10px", background:"transparent", border:"none", color:C.dim, fontSize:11 }}>
+            ⚙ Upscale rules (override) {showUpscaleRules ? "▼" : "›"}
+          </button>
+          {showUpscaleRules && (
+            <div style={{ display:"flex", gap:8, padding:"0 10px 10px" }}>
+              <input placeholder="Max px (blank = settings)" value={upscaleMaxOverride} onChange={e => setUpscaleMaxOverride(e.target.value)}
+                style={{ flex:1, background:C.panel2, color:C.text, border:`1px solid ${C.border}`, borderRadius:4, padding:"5px 8px", fontSize:11 }} />
+              <input placeholder="Min px (blank = settings)" value={upscaleMinOverride} onChange={e => setUpscaleMinOverride(e.target.value)}
+                style={{ flex:1, background:C.panel2, color:C.text, border:`1px solid ${C.border}`, borderRadius:4, padding:"5px 8px", fontSize:11 }} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Selection action bar ── */}
       {selected.size > 0 && (

@@ -2,11 +2,12 @@
   "processing": {
     "crop_padding": 0,
     "edge_blur": 1.2,
-    "rembg_model": "birefnet-general",
+    "rembg_model": "bria-rmbg",
     "rembg_fallback": "auto",
     "history_keep": 30,
     "force_cpu": true,
-    "wipe_input_after_run": false
+    "wipe_input_after_run": false,
+    "upscale_min_px": 1000
   },
   "upscaler_api": {
     "provider": "local",
@@ -35,6 +36,31 @@
   },
   "guides": {
     "use_custom": false,
-    "custom": {}
+    "custom": {
+      "green": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "blue": {
+        "right": 0,
+        "top": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "magenta": {
+        "right": 0,
+        "left": 0,
+        "bottom": 0,
+        "top": 0
+      },
+      "red": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    }
   }
 }

@@ -289,7 +289,7 @@ function usePipeline() {
     }
   }, [classify]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false }) => {
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false, upscaleMaxPx = 1440, upscaleMinPx = 800 }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -313,6 +313,7 @@ function usePipeline() {
           folder_mode: folderMode, do_upscale: doUpscale, scale,
           do_rembg: doRembg, input_dir: inputDir.trim(), output_dir: outputDir.trim(),
           exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel, resume,
+          upscale_max_px: upscaleMaxPx, upscale_min_px: upscaleMinPx,
         }),
         signal: ctrl.signal,
       });
@@ -951,7 +952,7 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
 
 // BUG-18 FIX (receiver side): added onGoToTemplates to prop signature.
 // main.jsx passes this prop but the old signature omitted it, so it was silently ignored.
-export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
+export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages, upscaleMaxPxOverride = "", upscaleMinPxOverride = "" }) {
   const [folderMode, setFolderMode] = useState("bulk");
   const [doUpscale, setDoUpscale] = useState(true);
   const [scale, setScale] = useState("4");
@@ -964,6 +965,8 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
   const [errOpen, setErrOpen] = useState(true);
   const [resumeSession, setResumeSession] = useState(null);
   const [showResume, setShowResume] = useState(false);
+  const [upscaleMaxPx, setUpscaleMaxPx] = useState(1440);
+  const [upscaleMinPx, setUpscaleMinPx] = useState(800);
 
   // BUG-15 FIX: split settings loading into two concerns:
   // 1. loadSettings — reloads non-path settings (model, flags, sizes).
@@ -989,9 +992,16 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
         if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
         if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
         if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
+        if (s.processing?.upscale_max_px) setUpscaleMaxPx(Number(s.processing.upscale_max_px));
+        if (s.processing?.upscale_min_px) setUpscaleMinPx(Number(s.processing.upscale_min_px));
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (upscaleMaxPxOverride?.trim()) setUpscaleMaxPx(Number(upscaleMaxPxOverride));
+    if (upscaleMinPxOverride?.trim()) setUpscaleMinPx(Number(upscaleMinPxOverride));
+  }, [upscaleMaxPxOverride, upscaleMinPxOverride]);
 
   // BUG-07 FIX: restore saved paths on mount only — never on focus.
   // Previously loadSettings (called on focus) also called setOutputDir, so
@@ -1058,9 +1068,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
     start({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
       excludeList: activeExclude, skipList, rembgModel, resume: false,
+      upscaleMaxPx, upscaleMinPx,
     });
     setShowResume(false);
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel]);
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx, upscaleMinPx]);
 
   const handleResume = useCallback(() => {
     if (!resumeSession?.src_root) return;
@@ -1071,9 +1082,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
       folderMode, doUpscale, scale, doRembg,
       inputDir: resumeSession.src_root,
       outputDir, excludeList: activeExclude, skipList, rembgModel, resume: true,
+      upscaleMaxPx, upscaleMinPx,
     });
     setShowResume(false);
-  }, [resumeSession, setInputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel]);
+  }, [resumeSession, setInputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx, upscaleMinPx]);
 
   const handleStartFresh = useCallback(async () => {
     try { await fetch(`${BASE}/session`, { method: "DELETE" }); } catch { void 0; }

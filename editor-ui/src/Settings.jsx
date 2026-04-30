@@ -132,7 +132,7 @@ function Select({ value, onChange, options, wide }) {
 }
 
 const DEFAULT = {
-  processing:   { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false },
+  processing:   { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false, upscale_max_px: 1440, upscale_min_px: 800  },
   rembg_api:    { provider: "local", url: "", key: "" },
   upscaler_api: { provider: "local", url: "", key: "", model: "" },
   output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "" },
@@ -363,6 +363,19 @@ export default function Settings({ onThemeChange }) {
             </Row>
           </Section>
 
+          <Section title="Upscaling Rules">
+            <Row label="Skip if longest side ≥" hint="Skip upscaling when max(W,H) reaches this">
+              <NumInput value={s.processing.upscale_max_px || 1440} min={512} max={8192}
+                onChange={v => set("processing", "upscale_max_px", v)} />
+              <span style={{ fontSize:10, color:"var(--dim)" }}>px</span>
+            </Row>
+            <Row label="Always upscale if both sides <" hint="Force upscale tiny images">
+              <NumInput value={s.processing.upscale_min_px || 800} min={256} max={2048}
+                onChange={v => set("processing", "upscale_min_px", v)} />
+              <span style={{ fontSize:10, color:"var(--dim)" }}>px</span>
+            </Row>
+          </Section>
+          
           <Section title="Guides">
             <Row label="Use custom guides" hint="Override config.ini">
               <Toggle value={!!s.guides?.use_custom} onChange={v => set("guides", "use_custom", v)} />
