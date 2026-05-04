@@ -111,6 +111,29 @@ function NumInput({ value, onChange, min, max, width = 80 }) {
   );
 }
 
+function OptionalNumInput({ value, onChange, min, max, width = 80, placeholder = "" }) {
+  const shown = Number(value) > 0 ? String(value) : "";
+  return (
+    <input
+      type="number"
+      value={shown}
+      min={min}
+      max={max}
+      placeholder={placeholder}
+      onChange={e => {
+        const raw = e.target.value.trim();
+        onChange(raw === "" ? 0 : Number(raw));
+      }}
+      style={{
+        width, background:"var(--panel2)", color:"var(--text)",
+        border:"1px solid var(--border)", borderRadius:6,
+        padding:"6px 5px", fontSize:12, fontFamily:"JetBrains Mono",
+        textAlign:"center",
+      }}
+    />
+  );
+}
+
 function Select({ value, onChange, options, wide }) {
   return (
     <select
@@ -132,10 +155,10 @@ function Select({ value, onChange, options, wide }) {
 }
 
 const DEFAULT = {
-  processing:   { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false, upscale_max_px: 1440, upscale_min_px: 800  },
+  processing:   { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false, upscale_max_px: 0  },
   rembg_api:    { provider: "local", url: "", key: "" },
   upscaler_api: { provider: "local", url: "", key: "", model: "" },
-  output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "" },
+  output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, upscale_scale: "2" },
   appearance:   { guide_opacity: 1.0, ref_img_opacity: 0.05, canvas_bg_color: "#ffffff", theme: "dark" },
   guides:       { use_custom: false, custom: {} },
 };
@@ -323,6 +346,18 @@ export default function Settings({ onThemeChange }) {
                 options={[["bulk", "Bulk — flat folder"], ["clean", "Clean — subfolders"]]}
               />
             </Row>
+            <Row label="Default upscale">
+              <Toggle value={s.output.do_upscale ?? true} onChange={v => set("output", "do_upscale", v)} />
+            </Row>
+            {(s.output.do_upscale ?? true) && (
+              <Row label="Default upscale factor">
+                <Select
+                  value={s.output.upscale_scale || "2"}
+                  onChange={v => set("output", "upscale_scale", v)}
+                  options={[["2", "2×"], ["4", "4×"]]}
+                />
+              </Row>
+            )}
           </Section>
 
           <Section title="Background Removal">
@@ -364,14 +399,9 @@ export default function Settings({ onThemeChange }) {
           </Section>
 
           <Section title="Upscaling Rules">
-            <Row label="Skip if longest side ≥" hint="Skip upscaling when max(W,H) reaches this">
-              <NumInput value={s.processing.upscale_max_px || 1440} min={512} max={8192}
+            <Row label="Skip upscale if any side ≥" hint="Empty means no quality skip rule">
+              <OptionalNumInput value={s.processing.upscale_max_px} min={512} max={8192} placeholder="no skip"
                 onChange={v => set("processing", "upscale_max_px", v)} />
-              <span style={{ fontSize:10, color:"var(--dim)" }}>px</span>
-            </Row>
-            <Row label="Always upscale if both sides <" hint="Force upscale tiny images">
-              <NumInput value={s.processing.upscale_min_px || 800} min={256} max={2048}
-                onChange={v => set("processing", "upscale_min_px", v)} />
               <span style={{ fontSize:10, color:"var(--dim)" }}>px</span>
             </Row>
           </Section>

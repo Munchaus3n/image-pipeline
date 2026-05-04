@@ -5,9 +5,9 @@
     "rembg_model": "bria-rmbg",
     "rembg_fallback": "auto",
     "history_keep": 30,
-    "force_cpu": true,
+    "force_cpu": false,
     "wipe_input_after_run": false,
-    "upscale_min_px": 1000
+    "upscale_max_px": 0
   },
   "upscaler_api": {
     "provider": "local",
@@ -24,43 +24,20 @@
     "canvas_size": 1440,
     "thumbnail": true,
     "thumbnail_size": 400,
-    "folder_mode": "clean",
+    "folder_mode": "bulk",
+    "do_upscale": true,
+    "upscale_scale": "2",
     "input_dir": "",
     "output_dir": ""
   },
   "appearance": {
-    "guide_opacity": 30,
+    "guide_opacity": 70,
     "ref_img_opacity": 0.05,
     "canvas_bg_color": "#f5f5f1",
     "theme": "light"
   },
   "guides": {
     "use_custom": false,
-    "custom": {
-      "green": {
-        "top": 0,
-        "bottom": 0,
-        "left": 0,
-        "right": 0
-      },
-      "blue": {
-        "right": 0,
-        "top": 0,
-        "bottom": 0,
-        "left": 0
-      },
-      "magenta": {
-        "right": 0,
-        "left": 0,
-        "bottom": 0,
-        "top": 0
-      },
-      "red": {
-        "top": 0,
-        "bottom": 0,
-        "left": 0,
-        "right": 0
-      }
-    }
+    "custom": {}
   }
 }

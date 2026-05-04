@@ -116,6 +116,9 @@ def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
             rel = Path(src.name)
         dst = corrupted_dir / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
+        if not src.exists():
+            warn(f"Source file missing, cannot copy to corrupted/: {src.name}")
+            return
         shutil.copy2(src, dst)
     except Exception as e:
         warn(f"Could not copy {src.name} to corrupted/: {e}")
@@ -126,6 +129,7 @@ def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
 # Images wider/taller than this get tiled to avoid VRAM OOM on Vulkan
 _NCNN_TILE_THRESHOLD = 2000  # px on longest side
 _NCNN_TILE_SIZE      = "256"  # tile size passed to -t flag
+
 def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -236,6 +240,28 @@ def _is_oom_error(msg: str) -> bool:
     ))
 
 
+_GPU_MEM_FRACTION = 0.80
+
+def _ort_session_options() -> ort.SessionOptions:
+    opts = ort.SessionOptions()
+    opts.enable_mem_pattern = False
+    return opts
+
+def _cuda_mem_limit_bytes() -> int | None:
+    try:
+        import subprocess as _sp
+        r = _sp.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            mb = int(r.stdout.strip().split("\n")[0])
+            return int(mb * _GPU_MEM_FRACTION * 1_048_576)
+    except Exception:
+        pass
+    return None
+
+
 def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: float = 0.003) -> Image.Image:
     """Fill only small enclosed holes in a BiRefNet alpha mask.
 
@@ -271,6 +297,7 @@ def _prefetch_image(path: Path) -> None:
     except Exception:
         pass
 
+
 def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> tuple[bool, str | None]:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -297,7 +324,6 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> tuple[bool
         infer_rgb = infer_img.convert("RGB")
 
         # Contrast boost helps BiRefNet edge quality.
-        # NOT applied to Bria — handled above in the is_bria branch.
         from PIL import ImageEnhance
         infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
 
@@ -328,8 +354,7 @@ def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> tuple[bool
 
 def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                   model: str, scale: str,
-                  upscale_max_px: int = 1440,
-                  upscale_min_px: int = 800,
+                  upscale_max_px: int = 0,
                   corrupted_dir: Path | None = None) -> list[Path]:
     section("Stage 1 / 2 — Upscaling")
     print(f"__total__:{len(images)}", flush=True)
@@ -338,24 +363,36 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
     for src in images:
         dst = mirror_path(src, src_root, dst_root)
         outputs.append(dst)
+
+        # 1. Valid file already exists → skip
+        already_done = False
         if dst.exists():
+            try:
+                if dst.stat().st_size > 0:
+                    with Image.open(dst) as _chk:
+                        _chk.verify()
+                    already_done = True
+            except Exception:
+                dst.unlink(missing_ok=True)  # corrupted — delete, re-run
+
+        if already_done:
             skip(f"{src.name} (already upscaled)")
             print(f"__skip_upscale__:{src.name}", flush=True)
-        continue
+            continue
 
+        # 2. Image already large enough → skip upscale, use original
         try:
             with Image.open(src) as img:
                 w, h = img.size
-            max_side = max(w, h)
-            min_side = min(w, h)
-            if max_side >= upscale_max_px and min_side < upscale_min_px:
-                skip(f"{src.name} ({w}×{h} — longest side ≥ {upscale_max_px}px)")
+            if upscale_max_px > 0 and max(w, h) >= upscale_max_px:
+                skip(f"{src.name} ({w}×{h} — already ≥ {upscale_max_px}px)")
                 print(f"__skip_upscale__:{src.name}", flush=True)
-                outputs[outputs.index(dst)] = src
+                outputs[-1] = src
                 continue
         except Exception as e:
             warn(f"Could not read {src.name} dimensions: {e}")
 
+        # 3. Needs upscaling
         to_run.append((src, dst))
 
     if not to_run:
@@ -410,16 +447,31 @@ def batch_remove_bg(
     info(f"Loading {REMBG_MODEL} — first run downloads model weights...")
     console.print()
 
+    sess_opts = _ort_session_options()
+
+    provider_options = None
+    if any("CUDA" in p for p in providers):
+        limit = _cuda_mem_limit_bytes()
+        if limit:
+            provider_options = [{"device_id": 0,
+                                 "gpu_mem_limit": limit,
+                                 "arena_extend_strategy": "kSameAsRequested"}]
+            info(f"CUDA VRAM cap: {limit // 1_048_576} MB ({int(_GPU_MEM_FRACTION * 100)}%)")
+
     try:
-        session = new_session(REMBG_MODEL, providers=providers)
+        session = new_session(REMBG_MODEL, providers=providers,
+                              sess_options=sess_opts,
+                              provider_options=provider_options)
     except Exception as e:
         if (
             rembg_fallback == "auto"
             and not force_cpu
             and _is_oom_error(str(e))
         ):
-            warn("DirectML OOM during load — retrying on CPU...")
-            session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
+            warn("GPU OOM during model load — falling back to CPU for entire batch.")
+            session = new_session(REMBG_MODEL,
+                                  providers=["CPUExecutionProvider"],
+                                  sess_options=sess_opts)
         else:
             raise
     ok("Model loaded.")
@@ -470,14 +522,25 @@ def batch_remove_bg(
 
                 progress.update(task, description=src.name)
                 print(f"__processing__:{src}", flush=True)
+
+                if not src.exists():
+                    warn(f"{src.name} source missing — skipping.")
+                    print(f"__err_rembg__:{src.name}", flush=True)
+                    progress.advance(task)
+                    continue
+
                 success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL)
 
                 if (not success) and (not force_cpu) and _is_oom_error(error_msg or ""):
                     print(f"__err_oom_gpu__:{src.name}", flush=True)
-                    warn(f"GPU OOM on {src.name} — retrying on CPU.")
+                    warn(f"GPU OOM on {src.name} — switching to CPU for remainder of batch.")
                     if cpu_session is None:
-                        cpu_session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
-                    success, error_msg = remove_bg(src, dst, cpu_session, model_name=REMBG_MODEL)
+                        cpu_session = new_session(
+                            REMBG_MODEL,
+                            providers=["CPUExecutionProvider"],
+                        )
+                    session = cpu_session  # permanent switch for all remaining images
+                    success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL)
 
                 if success:
                     ok(f"{src.name} → processed/{dst.relative_to(dst_root)}")
@@ -502,7 +565,7 @@ def main():
     parser.add_argument("--output-dir",       default="")
     parser.add_argument("--folder-mode",      default="bulk", choices=["bulk", "clean"])
     parser.add_argument("--no-upscale",       action="store_true")
-    parser.add_argument("--scale",            default="4", choices=["2", "4"])
+    parser.add_argument("--scale",            default="2", choices=["2", "4"])
     parser.add_argument("--no-rembg",         action="store_true")
     parser.add_argument("--rembg-model",      default="")
     parser.add_argument("--force-cpu",        action="store_true")
@@ -510,8 +573,7 @@ def main():
     parser.add_argument("--skip-files",       default="")
     parser.add_argument("--rembg-fallback",   default="auto", choices=["auto", "manual"])
     parser.add_argument("--wipe-input-after-run", action="store_true")
-    parser.add_argument("--upscale-max-px",   type=int, default=1440)
-    parser.add_argument("--upscale-min-px",   type=int, default=800)
+    parser.add_argument("--upscale-max-px",   type=int, default=0)
     parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
 
@@ -525,7 +587,6 @@ def main():
     section("Configuration")
 
     if args.non_interactive:
-        # ── Driven by API / CLI flags ────────────────────────────────────────
         folder_mode = args.folder_mode
         do_upscale  = not args.no_upscale
         do_rembg    = not args.no_rembg
@@ -563,7 +624,7 @@ def main():
         REMBG_MODEL = args.rembg_model.strip()
     info(f"BiRefNet model: {REMBG_MODEL}")
 
-    # ── Resolve paths (CLI overrides > defaults) ─────────────────────────────
+    # ── Resolve paths ────────────────────────────────────────────────────────
     using_default_input  = not bool(args.input_dir)
     using_default_output = not bool(args.output_dir)
     using_default_paths  = using_default_input and using_default_output
@@ -624,8 +685,8 @@ def main():
     if excluded_names:
         table.add_row("Skip list", f"{len(excluded_names)} file(s)")
     table.add_row("Upscale",   f"NCNN {ncnn_model} ×{ncnn_scale}" if do_upscale else "skip")
-    if do_upscale:
-        table.add_row("Upscale rules", f"skip if max(W,H) ≥ {args.upscale_max_px}px")
+    if do_upscale and args.upscale_max_px > 0:
+        table.add_row("Upscale skip", f"images already ≥ {args.upscale_max_px}px")
     table.add_row("Remove BG", REMBG_MODEL if do_rembg else "skip")
     table.add_row("Input →",   str(input_dir))
     table.add_row("Output →",  str(rembg_dir))
@@ -657,13 +718,15 @@ def main():
     else:
         output_base.mkdir(parents=True, exist_ok=True)
         info("Custom paths + wipe off — preserving existing input/output.")
+
     current = images
 
     if do_upscale:
-        current = batch_upscale(current, input_dir, upscale_dir, ncnn_model, ncnn_scale,
-                                upscale_max_px=args.upscale_max_px,
-                                upscale_min_px=args.upscale_min_px,
-                                corrupted_dir=corrupted_dir)
+        current = batch_upscale(
+            current, input_dir, upscale_dir, ncnn_model, ncnn_scale,
+            upscale_max_px=args.upscale_max_px,
+            corrupted_dir=corrupted_dir,
+        )
     else:
         skip("upscaling")
 

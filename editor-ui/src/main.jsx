@@ -32,7 +32,6 @@ export function Root() {
   const [removedImages, setRemovedImages] = useState(new Set());
   const [editorSettings, setEditorSettings] = useState({ outputDir:"", canvasSize:1440, thumbnail:true });
   const [editorKey, setEditorKey] = useState(0);
-  const [pipelineOverrides, setPipelineOverrides] = useState({ upscaleMaxPxOverride: "", upscaleMinPxOverride: "" });
 
   // BUG-11 FIX: theme toggle was sending only { appearance: { theme } } to POST /settings,
   // which replaced the entire settings.json with that partial object — silently wiping
@@ -126,10 +125,7 @@ export function Root() {
           thumbs={thumbs}             setThumbs={setThumbs}
           excludeTags={excludeTags}   setExcludeTags={setExcludeTags}
           removedImages={removedImages} setRemovedImages={setRemovedImages}
-          onGoToProcess={(overrides) => {
-            setPipelineOverrides(overrides || { upscaleMaxPxOverride: "", upscaleMinPxOverride: "" });
-            setScreen("pipeline");
-          }}
+          onGoToProcess={() => setScreen("pipeline")}
         />
       </div>
 
@@ -141,8 +137,6 @@ export function Root() {
           outputDir={outputDir}     setOutputDir={setOutputDir}
           excludeTags={excludeTags}
           removedImages={removedImages}
-          upscaleMaxPxOverride={pipelineOverrides.upscaleMaxPxOverride}
-          upscaleMinPxOverride={pipelineOverrides.upscaleMinPxOverride}
           onGoToEditor={(s) => { setEditorSettings(s); setEditorKey(k => k + 1); setScreen("editor"); }}
           onGoToTemplates={() => setScreen("templates")}
         />
