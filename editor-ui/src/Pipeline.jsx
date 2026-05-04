@@ -289,7 +289,7 @@ function usePipeline() {
     }
   }, [classify]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false }) => {
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false, upscaleMaxPx = 0 }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -313,6 +313,7 @@ function usePipeline() {
           folder_mode: folderMode, do_upscale: doUpscale, scale,
           do_rembg: doRembg, input_dir: inputDir.trim(), output_dir: outputDir.trim(),
           exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel, resume,
+          upscale_max_px: upscaleMaxPx,
         }),
         signal: ctrl.signal,
       });
@@ -954,11 +955,12 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
 export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
   const [folderMode, setFolderMode] = useState("bulk");
   const [doUpscale, setDoUpscale] = useState(true);
-  const [scale, setScale] = useState("4");
+  const [scale, setScale] = useState("2");
   const [doRembg, setDoRembg] = useState(true);
   const [canvasSize, setCanvasSize] = useState("1440");
   const [thumbnail, setThumbnail] = useState(true);
   const [rembgModel, setRembgModel] = useState("birefnet-general");
+  const [upscaleMaxPx, setUpscaleMaxPx] = useState("");
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
   const [logOpen, setLogOpen] = useState(true);
   const [errOpen, setErrOpen] = useState(true);
@@ -986,9 +988,15 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
         const s = data.settings;
         // BUG-15 FIX: only non-path settings here — no setInputDir / setOutputDir
         if (s.output?.folder_mode) setFolderMode(s.output.folder_mode);
+        if (typeof s.output?.do_upscale === "boolean") setDoUpscale(s.output.do_upscale);
+        if (s.output?.upscale_scale === "2" || s.output?.upscale_scale === "4") setScale(s.output.upscale_scale);
         if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
         if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
         if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
+        if (Object.prototype.hasOwnProperty.call(s.processing ?? {}, "upscale_max_px")) {
+          const savedMaxPx = Number(s.processing.upscale_max_px);
+          setUpscaleMaxPx(Number.isFinite(savedMaxPx) && savedMaxPx > 0 ? String(savedMaxPx) : "");
+        }
       })
       .catch(() => {});
   }, []);
@@ -1055,25 +1063,29 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
   const handleStart = useCallback(() => {
     const skipList     = removedImages ? [...removedImages] : [];
     const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
+    const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
     start({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
       excludeList: activeExclude, skipList, rembgModel, resume: false,
+      upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
     });
     setShowResume(false);
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel]);
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx]);
 
   const handleResume = useCallback(() => {
     if (!resumeSession?.src_root) return;
     setInputDir(resumeSession.src_root);
     const skipList = removedImages ? [...removedImages] : [];
     const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
+    const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
     start({
       folderMode, doUpscale, scale, doRembg,
       inputDir: resumeSession.src_root,
       outputDir, excludeList: activeExclude, skipList, rembgModel, resume: true,
+      upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
     });
     setShowResume(false);
-  }, [resumeSession, setInputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel]);
+  }, [resumeSession, setInputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx]);
 
   const handleStartFresh = useCallback(async () => {
     try { await fetch(`${BASE}/session`, { method: "DELETE" }); } catch { void 0; }
@@ -1196,6 +1208,25 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
 
           <div style={{ marginTop: 16, marginBottom: 16, borderTop: `1px solid ${C.border}` }} />
           <SectionLabel>Output settings</SectionLabel>
+
+          <Row label="Skip upscale if any side ≥">
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="number"
+                value={upscaleMaxPx}
+                onChange={e => setUpscaleMaxPx(e.target.value)}
+                placeholder="no limit"
+                min={256} max={8192}
+                style={{
+                  width: 90, background: C.panel2, color: C.text,
+                  border: `1px solid ${C.border}`, borderRadius: 4,
+                  padding: "4px 5px", fontSize: 11, fontFamily: "JetBrains Mono",
+                  outline: "none", textAlign: "center"
+                }}
+              />
+              <span style={{ fontSize: 10, color: C.dim }}>empty = no limit</span>
+            </div>
+          </Row>
 
           <Row label="Canvas size (px)">
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>

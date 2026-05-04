@@ -20,7 +20,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from PIL import Image
 from sse_starlette.sse import EventSourceResponse
 from contextlib import asynccontextmanager
@@ -257,6 +257,14 @@ class PipelineConfig(BaseModel):
     skip_files:     list[str] = Field(default_factory=list)
     rembg_model:    str = ""
     resume:         bool = False
+    upscale_max_px: int = 0
+
+    @field_validator("upscale_max_px", mode="before")
+    @classmethod
+    def normalize_upscale_max_px(cls, value):
+        if value in ("", None):
+            return 0
+        return value
 
 class TemplatesPayload(BaseModel):
     templates: dict
@@ -618,12 +626,14 @@ def clear_session():
 _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
                                           "rembg_model": "birefnet-general", "rembg_fallback": "auto",
-                     "history_keep": 30, "force_cpu": False, "wipe_input_after_run": False},
+                     "history_keep": 30, "force_cpu": False, "wipe_input_after_run": False,
+                     "upscale_max_px": 0},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
-                     "thumbnail_size": 400, "folder_mode": "bulk", "input_dir": "", "output_dir": ""},
-    "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#ffffff", "theme": "dark"},
+                     "thumbnail_size": 400, "folder_mode": "bulk", "input_dir": "", "output_dir": "",
+                     "do_upscale": True, "upscale_scale": "2"},
+    "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#f5f5f1", "theme": "light"},
     "guides":       {"use_custom": False, "custom": {}},
 }
 
@@ -699,6 +709,8 @@ async def run_pipeline(cfg: PipelineConfig):
         cmd += ["--exclude-rembg", ",".join(f.strip() for f in cfg.exclude_rembg if f.strip())]
     if cfg.skip_files:
         cmd += ["--skip-files", ",".join(f.strip() for f in cfg.skip_files if f.strip())]
+    if cfg.upscale_max_px > 0:
+        cmd += ["--upscale-max-px", str(cfg.upscale_max_px)]
     if cfg.resume:
         cmd.append("--resume")
 
