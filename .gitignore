@@ -23,6 +23,8 @@ __pycache__/
 # Logs / temp
 *.log
 *.tmp
+.cache/
+cache/
 session.json
 
 # Editor / OS

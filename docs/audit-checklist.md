@@ -99,3 +99,12 @@ Manual verification checklist for path flow, pipeline fallbacks, and editor outp
 2. Confirm it appears in Input grid and pipeline source/image counts.
 3. Run pipeline in `bulk`, then repeat in `clean` (or nested subfolder) mode.
 4. Confirm outputs are still written as `.png`.
+
+## 16) Input Preview Cache
+1. Open Input tab on a folder with large images and note initial thumbnail load time.
+2. Switch tabs or reload the page, then return to Input.
+3. Confirm repeated thumbnail/preview loads are faster and visually identical.
+4. Replace one source image file in place (same name), then refresh Input.
+5. Confirm preview regenerates for the changed file (no stale old thumbnail).
+6. Corrupt one cached preview file under `.cache/previews` (for example, truncate it), then reload Input.
+7. Confirm the corrupted cache entry is regenerated and preview still loads.

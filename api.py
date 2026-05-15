@@ -7,6 +7,7 @@
 import asyncio
 import copy
 import hashlib
+import io
 import json
 import os
 import platform
@@ -23,7 +24,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from PIL import Image, UnidentifiedImageError
 from sse_starlette.sse import EventSourceResponse
@@ -83,9 +84,17 @@ OUTPUT_ROOT   = BASE_DIR / _cfg.get("paths", "output_root",   fallback="output")
 TEMPLATES_DIR = BASE_DIR / _cfg.get("paths", "templates_dir", fallback="templates")
 SESSION_FILE  = BASE_DIR / "session.json"
 SETTINGS_FILE = BASE_DIR / "settings.json"
+PREVIEW_CACHE_DIR = BASE_DIR / ".cache" / "previews"
+PREVIEW_CACHE_VERSION = "preview-v1"
+PREVIEW_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+PREVIEW_CACHE_CLEANUP_INTERVAL_SECONDS = 15 * 60
 
 SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".avif"}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
+
+PREVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_preview_cache_cleanup_lock = threading.Lock()
+_preview_cache_last_cleanup = 0.0
 
 def _is_avif_decode_supported() -> bool:
     try:
@@ -236,6 +245,93 @@ def _resolve_safe_path(raw: str, *, must_exist: bool = True, allow_file: bool = 
     if not any(resolved == root or root in resolved.parents for root in _ALLOWED_ROOTS):
         raise HTTPException(status_code=403, detail="Path outside allowed roots")
     return resolved
+
+
+def _preview_has_alpha(img: Image.Image) -> bool:
+    return img.mode in {"RGBA", "LA"} or (img.mode == "P" and "transparency" in img.info)
+
+
+def _preview_cache_key(src: Path, size: int) -> str:
+    stat = src.stat()
+    payload = "|".join([
+        str(src.resolve()),
+        str(stat.st_mtime_ns),
+        str(stat.st_size),
+        str(size),
+        PREVIEW_CACHE_VERSION,
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _preview_cache_path(cache_key: str, fmt: str) -> Path:
+    ext = ".png" if fmt == "PNG" else ".jpg"
+    return PREVIEW_CACHE_DIR / f"{cache_key}{ext}"
+
+
+def _preview_cached_file(cache_key: str) -> Path | None:
+    best_path: Path | None = None
+    best_mtime = -1
+    for ext in (".png", ".jpg"):
+        file_path = PREVIEW_CACHE_DIR / f"{cache_key}{ext}"
+        try:
+            if not file_path.is_file():
+                continue
+            stat = file_path.stat()
+            if stat.st_size <= 0:
+                continue
+            if stat.st_mtime_ns > best_mtime:
+                best_mtime = stat.st_mtime_ns
+                best_path = file_path
+        except Exception:
+            continue
+    return best_path
+
+
+def _write_preview_cache_atomically(target: Path, content: bytes) -> bool:
+    tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with tmp.open("wb") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+        return True
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+
+def _cleanup_preview_cache_if_due() -> None:
+    global _preview_cache_last_cleanup
+    now = time.time()
+    if now - _preview_cache_last_cleanup < PREVIEW_CACHE_CLEANUP_INTERVAL_SECONDS:
+        return
+    if not _preview_cache_cleanup_lock.acquire(blocking=False):
+        return
+    try:
+        now = time.time()
+        if now - _preview_cache_last_cleanup < PREVIEW_CACHE_CLEANUP_INTERVAL_SECONDS:
+            return
+        cutoff = now - PREVIEW_CACHE_MAX_AGE_SECONDS
+        try:
+            PREVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return
+        for file_path in PREVIEW_CACHE_DIR.glob("*"):
+            try:
+                if not file_path.is_file():
+                    continue
+                stat = file_path.stat()
+                if stat.st_size <= 0 or stat.st_mtime < cutoff:
+                    file_path.unlink(missing_ok=True)
+            except Exception:
+                continue
+        _preview_cache_last_cleanup = now
+    finally:
+        _preview_cache_cleanup_lock.release()
 
 # ── Template helpers ──────────────────────────────────────────────────────────
 
@@ -542,21 +638,32 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
         raise HTTPException(status_code=400, detail="Unsupported file type for preview")
 
     size = max(64, min(1600, size))
+    try:
+        cache_key = _preview_cache_key(p, size)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"Missing file: {path}") from e
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"Preview source read failed: {e}") from e
+    _cleanup_preview_cache_if_due()
+    cached = _preview_cached_file(cache_key)
+    if cached is not None:
+        media_type = "image/png" if cached.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(
+            str(cached),
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=60"},
+        )
+
     img: Image.Image | None = None
     fmt = "unknown"
-
     try:
         img = _open_image_checked(p)
         # Downscale preserving aspect ratio (no-op if already within bounds)
         if max(img.width, img.height) > size:
             img.thumbnail((size, size), Image.LANCZOS)
 
-        import io
         buf = io.BytesIO()
-        has_alpha = (
-            img.mode in {"RGBA", "LA"}
-            or (img.mode == "P" and "transparency" in img.info)
-        )
+        has_alpha = _preview_has_alpha(img)
         fmt = "PNG" if has_alpha else "JPEG"
 
         # Always return browser-safe raster format for previews.
@@ -568,12 +675,17 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
 
         quality_kwargs = {} if fmt == "PNG" else {"quality": 85, "optimize": True}
         img.save(buf, format=fmt, **quality_kwargs)
-        buf.seek(0)
+        payload = buf.getvalue()
 
-        from fastapi.responses import Response
+        cache_target = _preview_cache_path(cache_key, fmt)
+        try:
+            PREVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            _write_preview_cache_atomically(cache_target, payload)
+        except Exception:
+            pass
+
         mime = "image/png" if fmt == "PNG" else "image/jpeg"
-        return Response(content=buf.getvalue(), media_type=mime,
-                        headers={"Cache-Control": "public, max-age=60"})
+        return Response(content=payload, media_type=mime, headers={"Cache-Control": "public, max-age=60"})
     except HTTPException:
         raise
     except (UnidentifiedImageError, OSError) as e:
