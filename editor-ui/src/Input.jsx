@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 const BASE = "/api";
 
@@ -9,6 +9,29 @@ const C = {
   green:  "var(--green)",  blue:    "var(--accent)",
   yellow: "var(--yellow)", red:     "var(--red)",
 };
+
+function toForwardSlashes(path = "") {
+  return String(path || "").replace(/\\/g, "/");
+}
+
+function trimTrailingSlashes(path = "") {
+  return path.replace(/\/+$/, "");
+}
+
+function normalizeImageId(path = "") {
+  return trimTrailingSlashes(toForwardSlashes(path).trim());
+}
+
+function relativePathFromInput(absPath, inputDir) {
+  const absNorm = normalizeImageId(absPath);
+  const rootNorm = normalizeImageId(inputDir);
+  if (!absNorm || !rootNorm) return "";
+  const absLower = absNorm.toLowerCase();
+  const rootLower = rootNorm.toLowerCase();
+  if (absLower === rootLower) return "";
+  if (absLower.startsWith(`${rootLower}/`)) return absNorm.slice(rootNorm.length + 1);
+  return "";
+}
 
 export default function Input({
   inputDir, setInputDir,
@@ -85,22 +108,36 @@ export default function Input({
     setBrowseLoading(false);
   }, [inputDir, setInputDir]);
 
-  // Visible images: exclude removed + apply search filter
-  const visible = thumbs.filter(absPath => {
+  const imageEntries = useMemo(() => thumbs.map(absPath => {
     const name = absPath.replace(/.*[/\\]/, "");
-    if (removedImages.has(name)) return false;
-    if (search && !name.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
+    const relativePath = relativePathFromInput(absPath, inputDir);
+    const imageId = normalizeImageId(relativePath || absPath);
+    const relFolder = relativePath.includes("/") ? relativePath.slice(0, relativePath.lastIndexOf("/")) : "";
+    return { absPath, name, relativePath, imageId, relFolder };
+  }), [thumbs, inputDir]);
+
+  const entriesByAbsPath = useMemo(() => {
+    const map = new Map();
+    imageEntries.forEach(entry => map.set(entry.absPath, entry));
+    return map;
+  }, [imageEntries]);
+
+  // Visible images: exclude removed + apply search filter
+  const visible = imageEntries.filter(entry => {
+    if (removedImages.has(entry.imageId)) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return entry.name.toLowerCase().includes(q) || entry.relativePath.toLowerCase().includes(q);
   });
 
-  const toggleSelect = useCallback((name, e, visibleNames) => {
-    if (e.shiftKey && lastSelectedRef.current && visibleNames) {
+  const toggleSelect = useCallback((imageId, e, visibleIds) => {
+    if (e.shiftKey && lastSelectedRef.current && visibleIds) {
       // Range select from last clicked to current
-      const a = visibleNames.indexOf(lastSelectedRef.current);
-      const b = visibleNames.indexOf(name);
+      const a = visibleIds.indexOf(lastSelectedRef.current);
+      const b = visibleIds.indexOf(imageId);
       if (a !== -1 && b !== -1) {
         const [from, to] = a < b ? [a, b] : [b, a];
-        const range = visibleNames.slice(from, to + 1);
+        const range = visibleIds.slice(from, to + 1);
         setSelected(prev => {
           const next = new Set(prev);
           range.forEach(n => next.add(n));
@@ -109,15 +146,15 @@ export default function Input({
         return;
       }
     }
-    lastSelectedRef.current = name;
+    lastSelectedRef.current = imageId;
     setSelected(prev => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
+      if (next.has(imageId)) next.delete(imageId); else next.add(imageId);
       return next;
     });
   }, []);
 
-  const selectAll  = () => setSelected(new Set(visible.map(p => p.replace(/.*[/\\]/, ""))));
+  const selectAll  = () => setSelected(new Set(visible.map(entry => entry.imageId)));
   const selectNone = () => setSelected(new Set());
 
   const excludeSelected = () => {
@@ -136,15 +173,16 @@ export default function Input({
     // Remove from session — also strip from excludeTags so they don't get sent to pipeline
     setExcludeTags(prev => prev.filter(n => !selected.has(n)));
     setRemovedImages(prev => { const next = new Set(prev); selected.forEach(n => next.add(n)); return next; });
-    if (previewPath && selected.has(previewPath.replace(/.*[/\\]/, ""))) setPreviewPath(null);
+    const previewImageId = previewPath ? entriesByAbsPath.get(previewPath)?.imageId : null;
+    if (previewImageId && selected.has(previewImageId)) setPreviewPath(null);
     setSelected(new Set());
     lastSelectedRef.current = null;
   };
 
   const selArr      = [...selected];
   const allExcl     = selArr.length > 0 && selArr.every(n => excludeTags.includes(n));
-  // visible names list used for shift-click range
-  const visibleNames = visible.map(p => p.replace(/.*[/\\]/, ""));
+  // visible IDs list used for shift-click range
+  const visibleIds = visible.map(entry => entry.imageId);
   // excludeTags that are still in the visible set (not removed)
   const activeExcludeCount = excludeTags.filter(n => !removedImages.has(n)).length;
 
@@ -308,18 +346,18 @@ export default function Input({
               gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
               gap: 8, alignContent: "start",
             }}>
-              {visible.map(absPath => {
-                const name      = absPath.replace(/.*[/\\]/, "");
+              {visible.map(entry => {
+                const { absPath, name, imageId, relFolder } = entry;
                 const ext       = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
-                const isSel     = selected.has(name);
-                const isExcl    = excludeTags.includes(name);
+                const isSel     = selected.has(imageId);
+                const isExcl    = excludeTags.includes(imageId);
                 const isPreview = previewPath === absPath;
                 const thumbFailed = thumbLoadErrors.has(absPath);
                 return (
                   <div
                     key={absPath}
                     className="inp-thumb inp-card"
-                    onClick={e => toggleSelect(name, e, visibleNames)}
+                    onClick={e => toggleSelect(imageId, e, visibleIds)}
                     style={{
                       position: "relative", borderRadius: 5, overflow: "hidden",
                       border: `2px solid ${isSel ? C.blue : isPreview ? "color-mix(in srgb,var(--accent) 40%,var(--border))" : C.border}`,
@@ -406,12 +444,22 @@ export default function Input({
 
                     {/* Filename bar */}
                     <div style={{
-                      padding: "3px 5px", fontSize: 9,
+                      padding: "3px 5px",
                       color: isExcl ? C.yellow : C.dim,
-                      overflow: "hidden", textOverflow: "ellipsis",
-                      whiteSpace: "nowrap", fontFamily: "JetBrains Mono",
+                      fontFamily: "JetBrains Mono",
                       background: C.panel,
-                    }}>{name}</div>
+                    }}>
+                      <div style={{
+                        fontSize: 9,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>{name}</div>
+                      {relFolder && (
+                        <div style={{
+                          marginTop: 1, fontSize: 8, color: C.dim2,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>{relFolder}/</div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -421,8 +469,10 @@ export default function Input({
 
         {/* ── Preview sidebar ── */}
         {previewPath && (() => {
-          const name   = previewPath.replace(/.*[/\\]/, "");
-          const isExcl = excludeTags.includes(name);
+          const previewEntry = entriesByAbsPath.get(previewPath);
+          if (!previewEntry) return null;
+          const { name, imageId, relFolder } = previewEntry;
+          const isExcl = excludeTags.includes(imageId);
           return (
             <div style={{
               width: 220, flexShrink: 0, background: C.panel,
@@ -467,6 +517,15 @@ export default function Input({
                   fontSize: 10, color: C.text, fontFamily: "JetBrains Mono",
                   wordBreak: "break-all", marginBottom: 16, lineHeight: 1.6,
                 }}>{name}</div>
+                {!!relFolder && (
+                  <>
+                    <div style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Folder</div>
+                    <div style={{
+                      fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono",
+                      wordBreak: "break-all", marginBottom: 16, lineHeight: 1.6,
+                    }}>{relFolder}</div>
+                  </>
+                )}
 
                 {/* Exclude toggle */}
                 <div style={{
@@ -475,8 +534,8 @@ export default function Input({
                 }}>
                   <span style={{ fontSize: 11, color: C.dim }}>Exclude from BG</span>
                   <button className="inp-btn" onClick={() => {
-                    if (isExcl) setExcludeTags(prev => prev.filter(x => x !== name));
-                    else setExcludeTags(prev => [...prev, name]);
+                    if (isExcl) setExcludeTags(prev => prev.filter(x => x !== imageId));
+                    else setExcludeTags(prev => [...prev, imageId]);
                   }} style={{
                     background: isExcl ? "var(--yellow-bg)" : C.panel2,
                     color: isExcl ? C.yellow : C.dim,
@@ -488,8 +547,8 @@ export default function Input({
 
                 {/* Remove from session */}
                 <button className="inp-btn" onClick={() => {
-                  setExcludeTags(prev => prev.filter(x => x !== name));
-                  setRemovedImages(prev => { const n = new Set(prev); n.add(name); return n; });
+                  setExcludeTags(prev => prev.filter(x => x !== imageId));
+                  setRemovedImages(prev => { const n = new Set(prev); n.add(imageId); return n; });
                   setPreviewPath(null);
                   setPreviewLoadError(false);
                 }} style={{

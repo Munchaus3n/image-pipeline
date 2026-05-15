@@ -14,9 +14,10 @@ if sys.stderr.encoding.lower() != "utf-8":
 
 import shutil
 import subprocess
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from PIL import Image, ImageFilter, ImageChops, UnidentifiedImageError
 import numpy as np
 from scipy.ndimage import binary_fill_holes, label
@@ -107,6 +108,89 @@ def collect_images(root: Path, recursive: bool) -> tuple[list[Path], set[Path]]:
 
 def mirror_path(src: Path, src_root: Path, dst_root: Path, suffix: str = ".png") -> Path:
     return dst_root / src.relative_to(src_root).with_suffix(suffix)
+
+
+def _normalize_image_token(value: str) -> str:
+    token = str(value or "").strip().replace("\\", "/")
+    token = token.rstrip("/")
+    while token.startswith("./"):
+        token = token[2:]
+    while token.startswith("/"):
+        token = token[1:]
+    return token.lower()
+
+
+def _relative_image_id(src: Path, root: Path, fallback_root: Path | None = None) -> str:
+    try:
+        rel = src.relative_to(root)
+    except ValueError:
+        rel = None
+    if rel is None and fallback_root is not None:
+        try:
+            rel = src.relative_to(fallback_root)
+        except ValueError:
+            rel = None
+    if rel is None:
+        rel = Path(src.name)
+    return _normalize_image_token(rel.as_posix())
+
+
+def _token_without_ext(token: str) -> str:
+    norm = _normalize_image_token(token)
+    if not norm:
+        return norm
+    return str(PurePosixPath(norm).with_suffix("")).lower()
+
+
+def _resolve_paths_from_tokens(
+    images: list[Path],
+    root: Path,
+    tokens: set[str] | list[str] | tuple[str, ...],
+    fallback_root: Path | None = None,
+) -> set[Path]:
+    by_rel: dict[str, set[Path]] = defaultdict(set)
+    by_rel_no_ext: dict[str, set[Path]] = defaultdict(set)
+    by_abs: dict[str, set[Path]] = defaultdict(set)
+    by_abs_no_ext: dict[str, set[Path]] = defaultdict(set)
+    by_name: dict[str, set[Path]] = defaultdict(set)
+    by_stem: dict[str, set[Path]] = defaultdict(set)
+
+    for image in images:
+        rel_id = _relative_image_id(image, root, fallback_root=fallback_root)
+        if rel_id:
+            by_rel[rel_id].add(image)
+            by_rel_no_ext[_token_without_ext(rel_id)].add(image)
+
+        abs_id = _normalize_image_token(str(image))
+        if abs_id:
+            by_abs[abs_id].add(image)
+            by_abs_no_ext[_token_without_ext(abs_id)].add(image)
+
+        by_name[image.name.lower()].add(image)
+        by_stem[image.stem.lower()].add(image)
+
+    matched: set[Path] = set()
+    for raw in tokens:
+        token = _normalize_image_token(raw)
+        if not token:
+            continue
+
+        token_no_ext = _token_without_ext(token)
+        exact_matches = set()
+        exact_matches.update(by_rel.get(token, set()))
+        exact_matches.update(by_rel_no_ext.get(token_no_ext, set()))
+        exact_matches.update(by_abs.get(token, set()))
+        exact_matches.update(by_abs_no_ext.get(token_no_ext, set()))
+
+        if exact_matches:
+            matched.update(exact_matches)
+            continue
+
+        # Legacy fallback: broad basename/stem matching when no exact path ID matches.
+        matched.update(by_name.get(token, set()))
+        matched.update(by_stem.get(token, set()))
+
+    return matched
 
 
 def _open_image_checked(path: Path) -> Image.Image:
@@ -452,16 +536,20 @@ def batch_remove_bg(
     dst_root: Path,
     src_root: Path,
     no_rembg_originals: set | None = None,
-    exclude_names: set[str] | None = None,
+    exclude_tokens: set[str] | None = None,
     corrupted_dir: Path | None = None,
     force_cpu: bool = False,
     rembg_fallback: str = "auto",
 ) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
 
-    no_rembg_names  = {p.name for p in (no_rembg_originals or set())}
-    excluded        = {n.strip().lower() for n in (exclude_names or set()) if n.strip()}
-    excluded_stems  = {Path(n).stem.lower() for n in excluded}
+    no_rembg_names = {p.name for p in (no_rembg_originals or set())}
+    excluded_paths = _resolve_paths_from_tokens(
+        upscaled,
+        upscale_root,
+        exclude_tokens or set(),
+        fallback_root=src_root,
+    )
     print(f"__total__:{len(upscaled)}", flush=True)
 
     providers, device_label = _select_onnx_providers(force_cpu=force_cpu)
@@ -514,7 +602,7 @@ def batch_remove_bg(
         if dst.exists():
             skip(f"{src.name} (already processed)")
             print(f"__skip_rembg__:{src.name}", flush=True)
-        elif src.name in no_rembg_names or src.name.lower() in excluded or src.stem.lower() in excluded_stems:
+        elif src.name in no_rembg_names or src in excluded_paths:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tight_crop(_open_image_checked(src).convert("RGBA")).save(dst, format="PNG")
@@ -687,11 +775,12 @@ def main():
             no_rembg_set = nested_no_rembg
             folder_mode  = "clean"
 
-    excluded_names = {s.strip().lower() for s in args.exclude_rembg.split(",") if s.strip()}
-    skip_names     = {s.strip().lower() for s in args.skip_files.split(",")    if s.strip()}
-    if skip_names:
+    exclude_tokens = {_normalize_image_token(s) for s in args.exclude_rembg.split(",") if s.strip()}
+    skip_tokens = {_normalize_image_token(s) for s in args.skip_files.split(",") if s.strip()}
+    if skip_tokens:
         before = len(images)
-        images = [p for p in images if p.name.lower() not in skip_names]
+        skipped_paths = _resolve_paths_from_tokens(images, input_dir, skip_tokens)
+        images = [p for p in images if p not in skipped_paths]
         info(f"Skipped {before - len(images)} file(s) (removed from session)")
 
     if not images:
@@ -720,8 +809,8 @@ def main():
     table.add_row("Images",    str(len(images)))
     if no_rembg_set:
         table.add_row("No-rembg", f"{len(no_rembg_set)} (upscale + crop only)")
-    if excluded_names:
-        table.add_row("Skip list", f"{len(excluded_names)} file(s)")
+    if exclude_tokens:
+        table.add_row("Skip list", f"{len(exclude_tokens)} file(s)")
     table.add_row("Upscale",   f"NCNN {ncnn_model} ×{ncnn_scale}" if do_upscale else "skip")
     if do_upscale and args.upscale_max_px > 0:
         table.add_row("Upscale skip", f"images already ≥ {args.upscale_max_px}px")
@@ -771,7 +860,7 @@ def main():
     if do_rembg:
         src_root = upscale_dir if do_upscale else input_dir
         batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set,
-                        exclude_names=excluded_names,
+                        exclude_tokens=exclude_tokens,
                         corrupted_dir=corrupted_dir,
                         force_cpu=args.force_cpu,
                         rembg_fallback=args.rembg_fallback)

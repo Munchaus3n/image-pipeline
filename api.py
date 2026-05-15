@@ -6,6 +6,7 @@
 
 import asyncio
 import copy
+import hashlib
 import json
 import os
 import platform
@@ -172,12 +173,26 @@ def _output_base_from_src_root(src_root: Path) -> Path:
         return src_root.parent
     return OUTPUT_ROOT
 
-def mirror_save_path(src: Path, src_root: Path) -> Path:
+def _hashed_rel_fallback(src: Path) -> Path:
+    digest = hashlib.sha1(str(src).encode("utf-8")).hexdigest()[:10]
+    return Path(f"{src.stem}__{digest}{src.suffix}")
+
+def _relative_or_hashed(src: Path, src_root: Path) -> Path:
     try:
         rel = src.relative_to(src_root)
+        if str(rel) and str(rel) != ".":
+            return rel
     except ValueError:
-        rel = Path(src.name)
-    return _output_base_from_src_root(src_root) / "Editor" / "final" / rel
+        pass
+    return _hashed_rel_fallback(src)
+
+def mirror_save_path(src: Path, src_root: Path, output_base: Path | None = None, stage: str = "final") -> Path:
+    base = output_base or _output_base_from_src_root(src_root)
+    rel = _relative_or_hashed(src, src_root)
+    return base / "Editor" / stage / rel
+
+def mirror_skip_path(src: Path, src_root: Path, output_base: Path | None = None) -> Path:
+    return mirror_save_path(src, src_root, output_base=output_base, stage="skipped")
 
 # Allow any path on any local drive — this is a local-only app with no remote access.
 # On Windows: add every mounted drive root (C:\, D:\, ...).
@@ -582,17 +597,19 @@ def save_composition(req: SaveRequest):
         y = item.canvas_y - h // 2
         canvas.paste(resized, (x, y), resized)
 
-    ref_path  = Path(req.items[0].image_path)
-    src_root  = Path(req.src_root)
+    ref_path = Path(req.items[0].image_path)
+    src_root = Path(req.src_root) if req.src_root.strip() else None
     if req.output_dir.strip():
         output_base = _resolve_safe_path(req.output_dir, must_exist=False, allow_file=False, allow_dir=True)
-        try:
-            rel = ref_path.relative_to(src_root)
-        except ValueError:
-            rel = Path(ref_path.name)
-        save_path = (output_base / "Editor" / "final" / rel).with_suffix(".png")
+        if src_root:
+            save_path = mirror_save_path(ref_path, src_root, output_base=output_base, stage="final").with_suffix(".png")
+        else:
+            save_path = (output_base / "Editor" / "final" / _hashed_rel_fallback(ref_path)).with_suffix(".png")
     else:
-        save_path = mirror_save_path(ref_path, src_root).with_suffix(".png")    
+        if src_root:
+            save_path = mirror_save_path(ref_path, src_root, stage="final").with_suffix(".png")
+        else:
+            save_path = (OUTPUT_ROOT / "Editor" / "final" / _hashed_rel_fallback(ref_path)).with_suffix(".png")
     if req.is_combo:
         save_path = save_path.with_name(save_path.stem + "_combo.png")
 
@@ -632,21 +649,21 @@ def skip_image(req: SkipRequest):
     src = Path(req.image_path)
     if not src.exists():
         raise HTTPException(status_code=404, detail=f"Not found: {req.image_path}")
+    src_root = Path(req.src_root) if req.src_root.strip() else None
     # BUG-13 FIX: derive skip destination from src_root when provided,
     # so custom output dirs land in the right place.
     if req.output_dir.strip():
         output_base = _resolve_safe_path(req.output_dir, must_exist=False, allow_file=False, allow_dir=True)
-    elif req.src_root:
-        output_base = _output_base_from_src_root(Path(req.src_root))
+    elif src_root:
+        output_base = _output_base_from_src_root(src_root)
     else:
         output_base = OUTPUT_ROOT
-    rel = Path(src.name)
-    if req.src_root:
-        try:
-            rel = src.relative_to(Path(req.src_root))
-        except ValueError:
-            rel = Path(src.name)
-    dst = output_base / "Editor" / "skipped" / rel
+
+    if src_root:
+        dst = mirror_skip_path(src, src_root, output_base=output_base)
+    else:
+        dst = output_base / "Editor" / "skipped" / _hashed_rel_fallback(src)
+
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return {"skipped": str(dst)}
