@@ -56,8 +56,8 @@ async function post(path, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
 // Returns guides, templates, canvas_size
 export const getConfig  = ()           => get("/config");
 
-// Returns { folder, label, count }
-// outputDir: optional — if supplied, API looks inside it for bg_removed/upscaled first
+// Returns { folder, label, count, found, source_stage, reason, output_dir }
+// outputDir: optional. When supplied, API does not fall back to ./input.
 export const getSource  = (outputDir = "") =>
   get(`/source${outputDir ? `?output_dir=${encodeURIComponent(outputDir)}` : ""}`);
 

@@ -1001,22 +1001,19 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
       .catch(() => {});
   }, []);
 
-  // BUG-07 FIX: restore saved paths on mount only — never on focus.
-  // Previously loadSettings (called on focus) also called setOutputDir, so
-  // switching windows reset whatever the user had typed.
+  // Restore saved paths exactly once on mount.
+  // User edits (including intentionally clearing to blank) must win afterward.
   useEffect(() => {
     fetch(`${BASE}/settings`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.settings) return;
         const s = data.settings;
-        // BUG-20 consequence fixed here: inputDir now populates on load,
-        // so handleStart won't send an empty input_dir to the pipeline.
-        if (s.output?.input_dir && !inputDir)  setInputDir(s.output.input_dir);
-        if (s.output?.output_dir && !outputDir) setOutputDir(s.output.output_dir);
+        setInputDir(typeof s.output?.input_dir === "string" ? s.output.input_dir : "");
+        setOutputDir(typeof s.output?.output_dir === "string" ? s.output.output_dir : "");
       })
       .catch(() => {});
-  }, [inputDir, outputDir, setInputDir, setOutputDir]);
+  }, [setInputDir, setOutputDir]);
 
   // Load non-path settings on mount only.
   // This avoids overwriting in-session edits when the window regains focus

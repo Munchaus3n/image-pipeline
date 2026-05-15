@@ -1,4 +1,4 @@
-import { StrictMode, useState, useEffect } from "react";
+import { StrictMode, useState, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import Editor from "./Editor.jsx";
 import Input from "./Input.jsx";
@@ -18,6 +18,7 @@ const TABS = [
 export function Root() {
   const [screen, setScreen] = useState("input");
   const [theme,  setTheme]  = useState("dark");
+  const [mountedScreens, setMountedScreens] = useState(() => new Set(["input"]));
 
   useEffect(() => {
     fetch("/api/settings").then(r => r.ok ? r.json() : null)
@@ -32,6 +33,16 @@ export function Root() {
   const [removedImages, setRemovedImages] = useState(new Set());
   const [editorSettings, setEditorSettings] = useState({ canvasSize:1440, thumbnail:true });
   const [editorKey, setEditorKey] = useState(0);
+
+  const openScreen = useCallback((next) => {
+    setMountedScreens(prev => {
+      if (prev.has(next)) return prev;
+      const updated = new Set(prev);
+      updated.add(next);
+      return updated;
+    });
+    setScreen(next);
+  }, []);
 
   // BUG-11 FIX: theme toggle was sending only { appearance: { theme } } to POST /settings,
   // which replaced the entire settings.json with that partial object — silently wiping
@@ -91,7 +102,7 @@ export function Root() {
           {TABS.map((tab, i) => {
             const active = screen === tab.id;
             return (
-              <button key={tab.id} onClick={() => setScreen(tab.id)} style={{
+              <button key={tab.id} onClick={() => openScreen(tab.id)} style={{
                 display:"flex", alignItems:"center", gap:4, padding:"5px 12px",
                 background: active ? "var(--accent)" : "transparent",
                 color: active ? "var(--accent-fg)" : "var(--dim)",
@@ -119,17 +130,20 @@ export function Root() {
       </div>
 
       {/* Screens */}
-      <div style={{ flex:1, minHeight:0, display:screen==="input"     ? "flex" : "none", flexDirection:"column" }}>
+      {mountedScreens.has("input") && (
+      <div style={{ flex:1, minHeight:0, display:screen==="input" ? "flex" : "none", flexDirection:"column" }}>
         <Input
           inputDir={inputDir}         setInputDir={setInputDir}
           thumbs={thumbs}             setThumbs={setThumbs}
           excludeTags={excludeTags}   setExcludeTags={setExcludeTags}
           removedImages={removedImages} setRemovedImages={setRemovedImages}
-          onGoToProcess={() => setScreen("pipeline")}
+          onGoToProcess={() => openScreen("pipeline")}
         />
       </div>
+      )}
 
-      <div style={{ flex:1, minHeight:0, display:screen==="pipeline"  ? "flex" : "none", flexDirection:"column" }}>
+      {mountedScreens.has("pipeline") && (
+      <div style={{ flex:1, minHeight:0, display:screen==="pipeline" ? "flex" : "none", flexDirection:"column" }}>
         {/* BUG-18 FIX: onGoToTemplates was passed here but Pipeline's prop signature
             didn't include it, so it was silently ignored. Now Pipeline receives it. */}
         <Pipeline
@@ -137,29 +151,36 @@ export function Root() {
           outputDir={outputDir}     setOutputDir={setOutputDir}
           excludeTags={excludeTags}
           removedImages={removedImages}
-          onGoToEditor={(s) => { setEditorSettings(s); setEditorKey(k => k + 1); setScreen("editor"); }}
-          onPipelineDone={(s) => { setEditorSettings(s); setEditorKey(k => k + 1); }}
-          onGoToTemplates={() => setScreen("templates")}
+          onGoToEditor={(s) => { setEditorSettings(s); setEditorKey(k => k + 1); openScreen("editor"); }}
+          onPipelineDone={(s) => { setEditorSettings(s); }}
+          onGoToTemplates={() => openScreen("templates")}
         />
       </div>
+      )}
 
+      {mountedScreens.has("templates") && (
       <div style={{ flex:1, minHeight:0, display:screen==="templates" ? "flex" : "none", flexDirection:"column" }}>
-        <Templates onBack={() => setScreen("pipeline")} />
+        <Templates onBack={() => openScreen("pipeline")} />
       </div>
+      )}
 
-      <div style={{ flex:1, minHeight:0, display:screen==="editor"    ? "flex" : "none", flexDirection:"column" }}>
+      {mountedScreens.has("editor") && (
+      <div style={{ flex:1, minHeight:0, display:screen==="editor" ? "flex" : "none", flexDirection:"column" }}>
         <Editor
           key={editorKey}
-          onGoPipeline={() => setScreen("pipeline")}
+          onGoPipeline={() => openScreen("pipeline")}
           outputDir={outputDir}
           canvasSize={editorSettings.canvasSize}
           thumbnail={editorSettings.thumbnail}
         />
       </div>
+      )}
 
-      <div style={{ flex:1, minHeight:0, display:screen==="settings"  ? "flex" : "none", flexDirection:"column" }}>
+      {mountedScreens.has("settings") && (
+      <div style={{ flex:1, minHeight:0, display:screen==="settings" ? "flex" : "none", flexDirection:"column" }}>
         <Settings onThemeChange={setTheme} />
       </div>
+      )}
     </div>
   );
 }

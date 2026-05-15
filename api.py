@@ -14,6 +14,8 @@ import shutil
 import string
 import subprocess
 import sys
+import time
+import uuid
 import configparser
 from pathlib import Path
 from typing import Any, Literal
@@ -142,19 +144,23 @@ def images_in_folder(folder: Path) -> list[Path]:
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
     )
 
-def detect_source_folder(output_root: Path | None = None) -> tuple[Path, str]:
+def detect_source_folder(
+    output_root: Path | None = None, *, allow_input_fallback: bool = True
+) -> tuple[Path | None, str, str]:
     root = output_root or OUTPUT_ROOT
-    for folder, label in [
-        (root     / "processed", f"{root.name}/processed"),
-        (root     / "upscaled",  f"{root.name}/upscaled"),
-        (BASE_DIR / "input",     "input"),
+    for folder, label, stage in [
+        (root / "processed", f"{root.name}/processed", "processed"),
+        (root / "upscaled", f"{root.name}/upscaled", "upscaled"),
     ]:
         if folder.exists() and any(
             p.suffix.lower() in SUPPORTED_EXTS
             for p in folder.rglob("*") if p.is_file()
         ):
-            return folder, label
-    return BASE_DIR / "input", "input"
+            return folder, label, stage
+    if allow_input_fallback:
+        return BASE_DIR / "input", "input", "input"
+    root_label = root.name or str(root)
+    return None, f"{root_label}/(no output)", "none"
 
 # BUG-13 FIX: derive output base from src_root instead of using hardcoded OUTPUT_ROOT.
 # If src_root ends with a known pipeline output stage name (processed/upscaled/bg_removed),
@@ -272,7 +278,12 @@ class SkipRequest(BaseModel):
 class SessionData(BaseModel):
     src_root:    str
     queue_index: int
-    template:    str
+    template:    str = ""
+    output_dir:  str = ""
+    input_dir:   str = ""
+    source_stage: str = ""
+    run_id:      str = ""
+    timestamp:   int = 0
 
 class PipelineConfig(BaseModel):
     folder_mode:    Literal["bulk", "clean"]
@@ -432,10 +443,32 @@ def save_templates(payload: TemplatesPayload):
 
 @app.get("/source")
 def get_source(output_dir: str = ""):
-    base = _resolve_safe_path(output_dir, must_exist=True, allow_file=False, allow_dir=True) if output_dir.strip() else OUTPUT_ROOT
-    folder, label = detect_source_folder(base)
+    custom_output = bool(output_dir.strip())
+    base = (
+        _resolve_safe_path(output_dir, must_exist=False, allow_file=False, allow_dir=True)
+        if custom_output else OUTPUT_ROOT
+    )
+    folder, label, stage = detect_source_folder(base, allow_input_fallback=not custom_output)
+    if folder is None:
+        return {
+            "folder": "",
+            "label": label,
+            "count": 0,
+            "found": False,
+            "source_stage": "none",
+            "reason": "no_output_for_custom",
+            "output_dir": str(base),
+        }
     images = images_in_folder(folder)
-    return {"folder": str(folder), "label": label, "count": len(images)}
+    return {
+        "folder": str(folder),
+        "label": label,
+        "count": len(images),
+        "found": True,
+        "source_stage": stage,
+        "reason": "",
+        "output_dir": str(base),
+    }
 
 
 @app.get("/images")
@@ -626,7 +659,10 @@ def get_session():
     if not SESSION_FILE.exists():
         return {"exists": False}
     try:
-        data     = json.loads(SESSION_FILE.read_text())
+        raw_data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw_data, dict):
+            return {"exists": False}
+        data = SessionData.model_validate(raw_data).model_dump()
         src_root = Path(data["src_root"])
         if not src_root.exists():
             return {"exists": False}
@@ -634,6 +670,8 @@ def get_session():
         idx    = int(data.get("queue_index", 0))
         if idx >= len(images):
             return {"exists": False}
+        if not data.get("timestamp"):
+            data["timestamp"] = int(time.time())
         return {"exists": True, **data, "total": len(images)}
     except Exception:
         return {"exists": False}
@@ -641,7 +679,12 @@ def get_session():
 
 @app.post("/session")
 def save_session(data: SessionData):
-    SESSION_FILE.write_text(json.dumps(data.model_dump()))
+    payload = data.model_dump()
+    if not payload.get("timestamp"):
+        payload["timestamp"] = int(time.time())
+    if not payload.get("run_id"):
+        payload["run_id"] = f"session-{uuid.uuid4().hex[:10]}"
+    SESSION_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return {"ok": True}
 
 
@@ -795,6 +838,13 @@ async def run_pipeline(cfg: PipelineConfig):
             )
         )
     )
+    session_output_dir = cfg.output_dir.strip()
+    session_input_dir = cfg.input_dir.strip() or str(BASE_DIR / "input")
+    session_source_stage = (
+        "processed" if cfg.do_rembg else ("upscaled" if cfg.do_upscale else "input")
+    )
+    session_run_id = f"pipeline-{uuid.uuid4().hex[:10]}"
+    session_timestamp = int(time.time())
 
     async def event_stream():
         global _pipeline_running, _pipeline_proc
@@ -807,25 +857,31 @@ async def run_pipeline(cfg: PipelineConfig):
             else ("__ok_upscale__:", "__skip_upscale__:", "__err_upscale__:")
         )
 
-        # BUG-14 FIX: the pipeline session tracks which image to resume from.
-        # The `template` field stores the editor's active template (e.g. "Machine"),
-        # NOT the pipeline's folder_mode. Storing folder_mode here caused the
-        # editor's template restore condition to always fail silently because
-        # "bulk"/"clean" are never valid template names.
-        # We store "" here — the editor will set its own template in its session saves.
+        # Session checkpoint writer shared by initial save + per-image progress.
+        # `template` is editor-owned; pipeline always writes it as empty.
+        def _write_pipeline_session(index: int):
+            payload = SessionData(
+                src_root=str(session_src_root),
+                queue_index=index,
+                template="",
+                output_dir=session_output_dir,
+                input_dir=session_input_dir,
+                source_stage=session_source_stage,
+                run_id=session_run_id,
+                timestamp=session_timestamp,
+            ).model_dump()
+            SESSION_FILE.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
         def _update_session_progress(line: str):
             nonlocal progress_index
             if not line.startswith(done_prefixes):
                 return
             progress_index += 1
             try:
-                    SESSION_FILE.write_text(json.dumps(
-                    SessionData(
-                        src_root=str(session_src_root),
-                        queue_index=progress_index,
-                        template="",
-                    ).model_dump()
-                ))
+                _write_pipeline_session(progress_index)
             except Exception:
                 pass
 
@@ -838,13 +894,7 @@ async def run_pipeline(cfg: PipelineConfig):
             )
             _pipeline_proc = proc
             try:
-                SESSION_FILE.write_text(json.dumps(
-                    SessionData(
-                        src_root=str(session_src_root),
-                        queue_index=0,
-                        template="",  # BUG-14 FIX: was cfg.folder_mode — wrong field
-                    ).model_dump()
-                ))
+                _write_pipeline_session(0)
             except Exception:
                 pass
 

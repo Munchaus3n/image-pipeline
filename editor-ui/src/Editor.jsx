@@ -34,6 +34,14 @@ const C = {
   red:"var(--red)", magenta:"var(--magenta)",
 };
 
+function normalizePathKey(path = "") {
+  return String(path || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
 // Returns canvas-pixel-space bounds for an item.
 // All hit testing and drawing uses these values (DS-space, not CANVAS_SIZE-space).
 function itemBounds(item) {
@@ -152,13 +160,17 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   const prefetchRef  = useRef(null); // holds pre-loaded next htmlImg + metadata
   const nextItemIdRef = useRef(1);
   const refImageCacheRef = useRef(new Map());
-  const initRanRef = useRef(false);
   const confirmResolverRef = useRef(null);
+  const configRef = useRef({ guides: {}, templates: {} });
+  const sourceLoadSeqRef = useRef(0);
+  const resumePromptActiveRef = useRef(false);
+  const sessionRunIdRef = useRef("");
   // BUG-06 FIX: loadImage is useCallback but called from initFromFolder/advance which
   // need stable references. A ref breaks the circular dep chain cleanly — callers
   // always get the latest version without needing it in their own dep arrays.
   const loadImageRef = useRef(null);
 
+  const [bootstrapReady, setBootstrapReady] = useState(false);
   const [guides,     setGuides]     = useState({});
   const [templates,  setTemplates]  = useState({});
   const [srcFolder,  setSrcFolder]  = useState("");
@@ -175,6 +187,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   const [guideOpacity, setGuideOpacity] = useState(1.0);  // loaded from settings
   const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
   const [canvasSizeState, setCanvasSizeState] = useState(1440);
+  const [sourceStage, setSourceStage] = useState("");
   const [activeSnapZone, setActiveSnapZone] = useState(null); // tracks last snapped guide zone
   const [showRefOnCanvas, setShowRefOnCanvas] = useState(true);
   const [refOpacity, setRefOpacity] = useState(0.22);
@@ -255,6 +268,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     return srcFolder;
   }, [srcFolder]);
   const activeOutputDir = useMemo(() => outputDir.trim() || outputRoot, [outputDir, outputRoot]);
+  const requestedOutputDir = useMemo(() => outputDir.trim(), [outputDir]);
 
   // ── BUG-06 FIX: convert plain functions to useCallback for stable references ──
 
@@ -354,16 +368,23 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   }, []); // getImages is a stable import; all setters are stable; uses ref for loadImage
 
   // ── Init effect ───────────────────────────────────────────────────────────
-  // BUG-08 FIX: was fetching /api/settings twice sequentially (canvas_size + appearance).
-  // Now fetches once and reads both sections from the single response.
+  const clearToEmptySource = useCallback((message, label = "no output") => {
+    setSrcFolder("");
+    setSrcLabel(label);
+    setQueue([]);
+    setQueueIdx(0);
+    setItems([]);
+    setSelId(null);
+    setSourceStage("none");
+    setStatus(message);
+  }, []);
+
   useEffect(() => {
-    if (initRanRef.current) return;
-    initRanRef.current = true;
+    let cancelled = false;
     (async () => {
       try {
         const cfg = await getConfig();
 
-        // Single settings fetch — replaces two sequential fetches (BUG-08)
         let settings = {};
         try {
           const sRes = await fetch(`${BASE}/settings`);
@@ -371,77 +392,114 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
             const sData = await sRes.json();
             settings = sData?.settings ?? {};
           }
-        } catch { /* ignore */ }
+        } catch {
+          void 0;
+        }
 
-        // Priority: prop passed by Pipeline > settings.json > config.ini
         let resolvedSize = canvasSizeProp ?? cfg.canvas_size;
         const fromSettings = settings?.output?.canvas_size;
         if (!canvasSizeProp && fromSettings && fromSettings > 0) {
           resolvedSize = fromSettings;
         }
+
+        const nextGuides = { ...cfg.guides };
+        if (settings?.guides?.use_custom && settings?.guides?.custom) {
+          for (const [zone, vals] of Object.entries(settings.guides.custom)) {
+            if (!nextGuides[zone]) continue;
+            nextGuides[zone] = { ...nextGuides[zone], ...vals };
+          }
+        }
+
+        if (cancelled) return;
         CANVAS_SIZE = resolvedSize;
         setCanvasSizeState(resolvedSize);
-        setGuides(cfg.guides);
+        setGuides(nextGuides);
         setTemplates(cfg.templates);
+        configRef.current = { guides: nextGuides, templates: cfg.templates };
 
-        // Apply appearance overrides from the single fetch above
         const opacity = settings?.appearance?.guide_opacity;
         if (typeof opacity === "number") setGuideOpacity(Math.max(0, Math.min(1, opacity)));
         const bg = settings?.appearance?.canvas_bg_color;
         if (typeof bg === "string" && bg) setCanvasBgColor(bg);
-        if (settings?.guides?.use_custom && settings?.guides?.custom) {
-          const mergedGuides = { ...cfg.guides };
-          for (const [zone, vals] of Object.entries(settings.guides.custom)) {
-            if (!mergedGuides[zone]) continue;
-            mergedGuides[zone] = { ...mergedGuides[zone], ...vals };
-          }
-          setGuides(mergedGuides);
-        }
-
-        const session = await getSession();
-        if (session.exists) {
-          if (session.queue_index >= session.total) {
-            // Already completed — clear silently, don't prompt.
-            await clearSession().catch(() => {});
-            // Falls through to getSource below
-          } else {
-            // BUG-01 FIX: capture src_root BEFORE the async confirm dialog,
-            // so we have a stable reference whether user resumes or starts over.
-            const savedSrcRoot = session.src_root;
-            const resume = await askConfirm(
-              "Resume previous editor session?",
-              `Resume from image ${session.queue_index + 1}/${session.total}?\n${session.src_root}`,
-              "Resume",
-              "Start over",
-            );
-            if (resume) {
-              await initFromFolder(savedSrcRoot, session.queue_index, cfg.guides);
-              if (session.template && cfg.templates[session.template]) setTemplate(session.template);
-              return;
-            } else {
-              await clearSession();
-              // BUG-01 FIX: was falling through to getSource(outputDir) which returned
-              // wrong/empty folder when a custom output dir was involved.
-              // Now we restart from the same source folder at index 0.
-              await initFromFolder(savedSrcRoot, 0, cfg.guides);
-              return;
-            }
-          }
-        }
-
-        const src = await getSource(outputDir);
-        setSrcLabel(src.label);
-        await initFromFolder(src.folder, 0, cfg.guides);
+        setBootstrapReady(true);
       } catch (e) {
         setStatus(`API error: ${e.message}\nIs api.py running?`);
       }
     })();
-  }, [askConfirm, canvasSizeProp, outputDir, initFromFolder]);
 
-   useEffect(() => {
-    if (!outputDir || queue.length > 0 || !srcFolder) return;
-    initFromFolder(srcFolder, 0).catch(() => {});
-  }, [outputDir, queue.length, srcFolder, initFromFolder]);
+    return () => { cancelled = true; };
+  }, [canvasSizeProp]);
+
+  const loadEditorSource = useCallback(async () => {
+    if (!bootstrapReady || resumePromptActiveRef.current) return;
+
+    const runSeq = ++sourceLoadSeqRef.current;
+    const stillCurrent = () => runSeq === sourceLoadSeqRef.current;
+    const guidesForInit = configRef.current.guides;
+    const templateMap = configRef.current.templates;
+    const currentOutput = requestedOutputDir;
+
+    try {
+      const session = await getSession();
+      if (!stillCurrent()) return;
+
+      if (session.exists) {
+        const sessionOutputDir = (session.output_dir ?? "").trim();
+        const outputMismatch = Boolean(currentOutput)
+          && normalizePathKey(sessionOutputDir) !== normalizePathKey(currentOutput);
+
+        if (outputMismatch) {
+          setStatus(`Ignored stale session output (${sessionOutputDir || "./output"}); using current output (${currentOutput}).`);
+          await clearSession().catch(() => {});
+        } else {
+          resumePromptActiveRef.current = true;
+          const resume = await askConfirm(
+            "Resume previous editor session?",
+            `Resume from image ${session.queue_index + 1}/${session.total}?\nsource: ${session.src_root}\noutput: ${sessionOutputDir || "./output"}`,
+            "Resume",
+            "Start over",
+          );
+          resumePromptActiveRef.current = false;
+          if (!stillCurrent()) {
+            queueMicrotask(() => { loadEditorSource().catch(() => {}); });
+            return;
+          }
+          if (resume) {
+            sessionRunIdRef.current = session.run_id || `editor-${Date.now()}`;
+            setSourceStage(session.source_stage || "");
+            await initFromFolder(session.src_root, session.queue_index, guidesForInit);
+            if (session.template && templateMap[session.template]) setTemplate(session.template);
+            return;
+          }
+          await clearSession().catch(() => {});
+        }
+      }
+
+      const src = await getSource(currentOutput);
+      if (!stillCurrent()) return;
+      if (!src?.found || !src?.folder) {
+        clearToEmptySource(
+          currentOutput
+            ? "No processed or upscaled images found for this output folder."
+            : "No processed or upscaled output found. Using default ./input.",
+          src?.label || "no output",
+        );
+        return;
+      }
+      sessionRunIdRef.current = `editor-${Date.now()}`;
+      setSourceStage(src.source_stage || "");
+      setSrcLabel(src.label);
+      await initFromFolder(src.folder, 0, guidesForInit);
+    } catch (e) {
+      if (stillCurrent()) setStatus(`API error: ${e.message}\nIs api.py running?`);
+    } finally {
+      resumePromptActiveRef.current = false;
+    }
+  }, [askConfirm, bootstrapReady, clearToEmptySource, initFromFolder, requestedOutputDir]);
+
+  useEffect(() => {
+    loadEditorSource().catch(() => {});
+  }, [loadEditorSource]);
 
   // ── BUG-17 FIX: advance was a plain function — converted to useCallback ──
   // Uses loadImageRef so loadImage doesn't need to be in deps (avoids stale closure).
@@ -630,13 +688,22 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
       setSaved(true);
       setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}`);
       setTimeout(() => setSaved(false), 1600);
-      await saveSession({ src_root: srcFolder, queue_index: queueIdx + 1, template });
+      await saveSession({
+        src_root: srcFolder,
+        queue_index: queueIdx + 1,
+        template,
+        output_dir: requestedOutputDir,
+        input_dir: sourceStage === "input" ? srcFolder : "",
+        source_stage: sourceStage,
+        run_id: sessionRunIdRef.current || `editor-${Date.now()}`,
+        timestamp: Date.now(),
+      });
       advance();
     } catch (e) {
       prefetchRef.current = null;
       setStatus(`save failed: ${e.message}`);
     }
-  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, canvasSizeState, template, advance, prefetchNextImage, activeOutputDir]);
+  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, canvasSizeState, template, advance, prefetchNextImage, activeOutputDir, requestedOutputDir, sourceStage]);
 
   const doSkip = useCallback(async () => {
     prefetchNextImage(queue, queueIdx + 1);
@@ -1135,3 +1202,5 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     </>
   );
 }
+
+
