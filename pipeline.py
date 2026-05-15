@@ -543,7 +543,16 @@ def batch_remove_bg(
 ) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
 
-    no_rembg_names = {p.name for p in (no_rembg_originals or set())}
+    no_rembg_tokens = {
+        _relative_image_id(p, src_root)
+        for p in (no_rembg_originals or set())
+    }
+    no_rembg_paths = _resolve_paths_from_tokens(
+        upscaled,
+        upscale_root,
+        no_rembg_tokens,
+        fallback_root=src_root,
+    )
     excluded_paths = _resolve_paths_from_tokens(
         upscaled,
         upscale_root,
@@ -602,7 +611,7 @@ def batch_remove_bg(
         if dst.exists():
             skip(f"{src.name} (already processed)")
             print(f"__skip_rembg__:{src.name}", flush=True)
-        elif src.name in no_rembg_names or src in excluded_paths:
+        elif src in no_rembg_paths or src in excluded_paths:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tight_crop(_open_image_checked(src).convert("RGBA")).save(dst, format="PNG")
