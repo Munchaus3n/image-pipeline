@@ -5,6 +5,7 @@
 # =============================================================
 
 import asyncio
+import copy
 import json
 import os
 import platform
@@ -15,17 +16,23 @@ import subprocess
 import sys
 import configparser
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from sse_starlette.sse import EventSourceResponse
 from contextlib import asynccontextmanager
 import threading
 from concurrent.futures import ThreadPoolExecutor
+
+# If pillow-avif-plugin is installed, importing it registers AVIF decoders in Pillow.
+try:
+    import pillow_avif  # noqa: F401
+except Exception:
+    pass
 
 # Thumbnail writes are CPU+disk bound — run them on a thread pool so they
 # never block the save response. The editor advances immediately; thumb
@@ -74,7 +81,32 @@ TEMPLATES_DIR = BASE_DIR / _cfg.get("paths", "templates_dir", fallback="template
 SESSION_FILE  = BASE_DIR / "session.json"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 
-SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tiff"}
+SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".avif"}
+IMAGE_LIKE_EXTS = {
+    ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".avif",
+    ".heic", ".heif", ".bmp", ".gif", ".jfif", ".jxl",
+}
+AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
+
+def _is_avif_decode_supported() -> bool:
+    try:
+        ext_map = Image.registered_extensions()
+        return ext_map.get(".avif") is not None
+    except Exception:
+        return False
+
+_AVIF_DECODE_SUPPORTED = _is_avif_decode_supported()
+
+def _open_image_checked(path: Path) -> Image.Image:
+    if path.suffix.lower() == ".avif" and not _AVIF_DECODE_SUPPORTED:
+        raise HTTPException(status_code=400, detail=AVIF_DECODE_ERROR)
+    try:
+        with Image.open(path) as opened:
+            return opened.copy()
+    except (UnidentifiedImageError, OSError) as e:
+        if path.suffix.lower() == ".avif":
+            raise HTTPException(status_code=400, detail=AVIF_DECODE_ERROR) from e
+        raise
 
 def _g(key, fallback):
     return _cfg.getint("guides", key, fallback=fallback)
@@ -113,6 +145,37 @@ def images_in_folder(folder: Path) -> list[Path]:
         p for p in folder.rglob("*")
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
     )
+
+def _collect_supported_images_for_mode(root: Path, folder_mode: str) -> tuple[list[Path], list[Path]]:
+    recursive = sorted(
+        p for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
+    )
+    if folder_mode == "clean":
+        return recursive, recursive
+
+    top = sorted(
+        p for p in root.iterdir()
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
+    )
+    no_rembg_root = root / "no_rembg"
+    if no_rembg_root.exists() and no_rembg_root.is_dir():
+        top += sorted(
+            p for p in no_rembg_root.iterdir()
+            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
+        )
+    selected = sorted(set(top))
+    return selected, recursive
+
+def _collect_unsupported_image_like(root: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        ext = p.suffix.lower()
+        if ext in IMAGE_LIKE_EXTS and ext not in SUPPORTED_EXTS:
+            counts[ext] = counts.get(ext, 0) + 1
+    return dict(sorted(counts.items()))
 
 def detect_source_folder(output_root: Path | None = None) -> tuple[Path, str]:
     root = output_root or OUTPUT_ROOT
@@ -336,7 +399,7 @@ def browse_file(initial: str = "", filter: str = ""):
         root.focus_force()
         root.withdraw()
         filetypes = (
-            [("Images", "*.png *.jpg *.jpeg *.webp *.tiff"), ("All files", "*.*")]
+            [("Images", "*.png *.jpg *.jpeg *.webp *.tiff *.avif"), ("All files", "*.*")]
             if filter == "image" else [("All files", "*.*")]
         )
         path = filedialog.askopenfilename(
@@ -426,6 +489,8 @@ def serve_image(path: str = Query(...)):
         raise HTTPException(status_code=404, detail=f"Not found: {path}")
     if p.suffix.lower() not in SUPPORTED_EXTS:
         raise HTTPException(status_code=400, detail="Unsupported file type")
+    if p.suffix.lower() == ".avif":
+        _open_image_checked(p)
     return FileResponse(str(p))
 
 
@@ -442,32 +507,25 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
     size = max(64, min(1600, size))
 
     try:
-        with Image.open(p) as opened:
-            img = opened.copy()
-        # If image is already small enough, serve directly
-        if max(img.width, img.height) <= size:
-            return FileResponse(str(p))
-
-        # Downscale preserving aspect ratio
-        img.thumbnail((size, size), Image.LANCZOS)
+        img = _open_image_checked(p)
+        # Downscale preserving aspect ratio (no-op if already within bounds)
+        if max(img.width, img.height) > size:
+            img.thumbnail((size, size), Image.LANCZOS)
 
         import io
         buf = io.BytesIO()
-        fmt = "PNG" if p.suffix.lower() == ".png" else "JPEG"
-        
-        # JPEG cannot encode alpha or many palette/extended modes.
-        if fmt == "JPEG" and img.mode not in {"RGB", "L"}:
-            has_alpha = (
-                img.mode in {"RGBA", "LA"}
-                or (img.mode == "P" and "transparency" in img.info)
-            )
-            if has_alpha:
-                alpha_img = img.convert("RGBA")
-                flat = Image.new("RGBA", alpha_img.size, (255, 255, 255, 255))
-                flat.alpha_composite(alpha_img)
-                img = flat.convert("RGB")
-            else:
-                img = img.convert("RGB")
+        has_alpha = (
+            img.mode in {"RGBA", "LA"}
+            or (img.mode == "P" and "transparency" in img.info)
+        )
+        fmt = "PNG" if has_alpha else "JPEG"
+
+        # Always return browser-safe raster format for previews.
+        if fmt == "PNG":
+            if img.mode not in {"RGBA", "RGB", "L"}:
+                img = img.convert("RGBA")
+        elif img.mode not in {"RGB", "L"}:
+            img = img.convert("RGB")
 
         quality_kwargs = {} if fmt == "PNG" else {"quality": 85, "optimize": True}
         img.save(buf, format=fmt, **quality_kwargs)
@@ -477,6 +535,8 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
         mime = "image/png" if fmt == "PNG" else "image/jpeg"
         return Response(content=buf.getvalue(), media_type=mime,
                         headers={"Cache-Control": "public, max-age=60"})
+    except HTTPException:
+        raise
     except Exception as e:
         detail = f"Preview generation failed (mode={getattr(img, 'mode', 'unknown')}, fmt={locals().get('fmt', 'unknown')}): {e}"
         raise HTTPException(status_code=500, detail=detail)
@@ -516,8 +576,7 @@ def save_composition(req: SaveRequest):
         p = Path(item.image_path)
         if not p.exists():
             raise HTTPException(status_code=404, detail=f"Source image not found: {item.image_path}")
-        with Image.open(p) as opened:
-            img = opened.convert("RGBA")
+        img = _open_image_checked(p).convert("RGBA")
         w   = max(1, int(img.width  * item.scale))
         h   = max(1, int(img.height * item.scale))
         resized = img.resize((w, h), Image.LANCZOS)
@@ -638,7 +697,7 @@ _DEFAULT_SETTINGS = {
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
                      "thumbnail_size": 400, "folder_mode": "bulk", "input_dir": "", "output_dir": "",
-                     "do_upscale": True, "upscale_scale": "2"},
+                     "do_upscale": True, "do_rembg": True, "upscale_scale": "2"},
     "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#f5f5f1", "theme": "light"},
     "guides":       {"use_custom": False, "custom": {}},
 }
@@ -652,25 +711,53 @@ _REMBG_MODELS = [
     "bria-rmbg",
 ]
 
+def _deep_merge(base: Any, incoming: Any) -> Any:
+    if isinstance(base, dict) and isinstance(incoming, dict):
+        merged = dict(base)
+        for key, value in incoming.items():
+            merged[key] = _deep_merge(merged.get(key), value)
+        return merged
+    return incoming
+
+def _load_saved_settings_file() -> dict:
+    if not SETTINGS_FILE.exists():
+        return {}
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def _merged_settings(*layers: dict) -> dict:
+    merged = copy.deepcopy(_DEFAULT_SETTINGS)
+    for layer in layers:
+        if isinstance(layer, dict):
+            merged = _deep_merge(merged, layer)
+    return merged
+
+@app.get("/pipeline/output-batch-check")
+def pipeline_output_batch_check(path: str = ""):
+    target_dir = _resolve_safe_path(path, must_exist=False, allow_file=False, allow_dir=True)
+    markers = ["processed", "upscaled", "Editor", "corrupted"]
+    found = [name for name in markers if (target_dir / name).exists()]
+    return {
+        "has_previous_batch": bool(found),
+        "markers": found,
+        "output_dir": str(target_dir),
+    }
+
 @app.get("/settings")
 def get_settings():
-    if SETTINGS_FILE.exists():
-        try:
-            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-            # Merge with defaults so new keys are always present
-            merged = {**_DEFAULT_SETTINGS}
-            for section, vals in data.items():
-                merged[section] = {**_DEFAULT_SETTINGS.get(section, {}), **vals}
-            return {"settings": merged}
-        except Exception:
-            pass
-    return {"settings": _DEFAULT_SETTINGS}
+    return {"settings": _merged_settings(_load_saved_settings_file())}
 
 @app.post("/settings")
 def save_settings(payload: SettingsPayload):
     try:
+        existing = _load_saved_settings_file()
+        incoming = payload.settings if isinstance(payload.settings, dict) else {}
+        merged = _merged_settings(existing, incoming)
         SETTINGS_FILE.write_text(
-            json.dumps(payload.settings, indent=2, ensure_ascii=False),
+            json.dumps(merged, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         return {"ok": True}
@@ -692,6 +779,117 @@ def get_history_path():
 @app.get("/pipeline/status")
 def pipeline_status():
     return {"running": _pipeline_running}
+
+@app.post("/pipeline/preflight")
+def pipeline_preflight(cfg: PipelineConfig):
+    def _warn(code: str, message: str, severity: str = "warning") -> dict:
+        return {"code": code, "message": message, "severity": severity}
+
+    input_path = (
+        _resolve_safe_path(cfg.input_dir.strip(), must_exist=False, allow_file=False, allow_dir=True)
+        if cfg.input_dir.strip()
+        else (BASE_DIR / "input").resolve()
+    )
+    output_path = (
+        _resolve_safe_path(cfg.output_dir.strip(), must_exist=False, allow_file=False, allow_dir=True)
+        if cfg.output_dir.strip()
+        else OUTPUT_ROOT.resolve()
+    )
+
+    warnings: list[dict] = []
+    supported_selected: list[Path] = []
+    supported_recursive: list[Path] = []
+    unsupported_ext_counts: dict[str, int] = {}
+    nested_dirs_in_input = False
+
+    input_exists = input_path.exists() and input_path.is_dir()
+    if not input_exists:
+        warnings.append(_warn("input_missing", f"Input folder not found: {input_path}", "serious"))
+    else:
+        supported_selected, supported_recursive = _collect_supported_images_for_mode(input_path, cfg.folder_mode)
+        unsupported_ext_counts = _collect_unsupported_image_like(input_path)
+        nested_dirs_in_input = any(p.is_dir() for p in input_path.iterdir())
+
+    supported_count = len(supported_selected)
+    supported_recursive_count = len(supported_recursive)
+    nested_supported_count = max(0, supported_recursive_count - supported_count)
+
+    if supported_count == 0:
+        warnings.append(_warn("no_supported_images", "No supported images found.", "serious"))
+
+    if cfg.folder_mode == "bulk" and nested_dirs_in_input:
+        warnings.append(_warn(
+            "nested_with_bulk",
+            "Input folder has nested subfolders while bulk mode is selected.",
+            "warning",
+        ))
+    if cfg.folder_mode == "bulk" and supported_count == 0 and supported_recursive_count > 0:
+        warnings.append(_warn(
+            "subfolders_only_bulk",
+            "Images found only in subfolders; bulk mode may not process them as expected.",
+            "serious",
+        ))
+
+    if unsupported_ext_counts:
+        ext_summary = ", ".join(f"{ext}({count})" for ext, count in unsupported_ext_counts.items())
+        warnings.append(_warn(
+            "unsupported_image_like",
+            f"Unsupported files found: {ext_summary}.",
+            "warning",
+        ))
+
+    markers = ["processed", "upscaled", "Editor", "corrupted"]
+    existing_markers = [name for name in markers if (output_path / name).exists()]
+    if existing_markers:
+        warnings.append(_warn(
+            "output_has_previous_results",
+            "Output folder already contains previous results.",
+            "serious",
+        ))
+
+    if not cfg.do_upscale and not cfg.do_rembg:
+        warnings.append(_warn("both_stages_disabled", "Both upscale and rembg are disabled.", "serious"))
+
+    resolved_rembg_model = (cfg.rembg_model or "").strip()
+    if not resolved_rembg_model:
+        try:
+            _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")) if SETTINGS_FILE.exists() else {}
+            resolved_rembg_model = _s.get("processing", {}).get("rembg_model", "birefnet-general")
+        except Exception:
+            resolved_rembg_model = "birefnet-general"
+
+    has_serious_warnings = any(w["severity"] == "serious" for w in warnings)
+    return {
+        "preflight": {
+            "resolved": {
+                "input_dir": str(input_path),
+                "output_dir": str(output_path),
+            },
+            "counts": {
+                "supported_images": supported_count,
+                "supported_images_recursive": supported_recursive_count,
+                "unsupported_image_like": sum(unsupported_ext_counts.values()),
+            },
+            "unsupported_extensions": [
+                {"ext": ext, "count": count} for ext, count in unsupported_ext_counts.items()
+            ],
+            "folder_mode": cfg.folder_mode,
+            "nested_input_with_bulk": cfg.folder_mode == "bulk" and nested_dirs_in_input,
+            "stages": {
+                "do_upscale": cfg.do_upscale,
+                "do_rembg": cfg.do_rembg,
+                "upscale_scale": cfg.scale,
+                "upscale_max_px": cfg.upscale_max_px,
+                "rembg_model": resolved_rembg_model,
+            },
+            "output": {
+                "has_previous_batch": bool(existing_markers),
+                "markers": existing_markers,
+            },
+            "warnings": warnings,
+            "has_serious_warnings": has_serious_warnings,
+        }
+    }
 
 
 @app.post("/pipeline/run")

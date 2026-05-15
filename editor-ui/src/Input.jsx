@@ -24,6 +24,7 @@ export default function Input({
   const [previewPath,      setPreviewPath]      = useState(null);
   const [previewLoadError, setPreviewLoadError] = useState(false);
   const [browseLoading,    setBrowseLoading]    = useState(false);
+  const [thumbLoadErrors,  setThumbLoadErrors]  = useState(new Set());
   const lastSelectedRef = useRef(null);  // for shift-click range
   const loadedDirRef = useRef("");
 
@@ -33,6 +34,7 @@ export default function Input({
       setThumbs([]); setSelected(new Set());
       setExcludeTags([]); setRemovedImages(new Set());
       setLoadError(null);
+      setThumbLoadErrors(new Set());
       loadedDirRef.current = "";
       return;
     }
@@ -53,6 +55,7 @@ export default function Input({
             setRemovedImages(new Set());
             setPreviewPath(null);
             setPreviewLoadError(false);
+            setThumbLoadErrors(new Set());
             setLoadError(null);
             lastSelectedRef.current = null;
             loadedDirRef.current = loadedDir;
@@ -307,9 +310,11 @@ export default function Input({
             }}>
               {visible.map(absPath => {
                 const name      = absPath.replace(/.*[/\\]/, "");
+                const ext       = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
                 const isSel     = selected.has(name);
                 const isExcl    = excludeTags.includes(name);
                 const isPreview = previewPath === absPath;
+                const thumbFailed = thumbLoadErrors.has(absPath);
                 return (
                   <div
                     key={absPath}
@@ -352,12 +357,40 @@ export default function Input({
                     >👁</div>
 
                     {/* Thumbnail */}
-                    <img
-                      src={`${BASE}/preview?path=${encodeURIComponent(absPath)}&size=200`}
-                      alt={name}
-                      loading="lazy"
-                      style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }}
-                    />
+                    {thumbFailed ? (
+                      <div style={{
+                        width: "100%", aspectRatio: "1",
+                        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                        padding: "8px 6px", gap: 4,
+                        background: "var(--img-bg)", color: C.dim, textAlign: "center",
+                      }}>
+                        <div style={{
+                          fontSize: 9, color: C.text, fontFamily: "JetBrains Mono",
+                          maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                        }}>{name}</div>
+                        <div style={{ fontSize: 9, color: C.dim2, fontFamily: "JetBrains Mono" }}>{ext || "unknown"}</div>
+                        <div style={{ fontSize: 10, color: C.red }}>Preview unavailable</div>
+                      </div>
+                    ) : (
+                      <img
+                        src={`${BASE}/preview?path=${encodeURIComponent(absPath)}&size=200`}
+                        alt={name}
+                        loading="lazy"
+                        onLoad={() => setThumbLoadErrors(prev => {
+                          if (!prev.has(absPath)) return prev;
+                          const next = new Set(prev);
+                          next.delete(absPath);
+                          return next;
+                        })}
+                        onError={() => setThumbLoadErrors(prev => {
+                          if (prev.has(absPath)) return prev;
+                          const next = new Set(prev);
+                          next.add(absPath);
+                          return next;
+                        })}
+                        style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }}
+                      />
+                    )}
 
                     {/* Excluded badge */}
                     {isExcl && (

@@ -158,7 +158,7 @@ const DEFAULT = {
   processing:   { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false, upscale_max_px: 0  },
   rembg_api:    { provider: "local", url: "", key: "" },
   upscaler_api: { provider: "local", url: "", key: "", model: "" },
-  output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, upscale_scale: "2" },
+  output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, do_rembg: true, upscale_scale: "2" },
   appearance:   { guide_opacity: 1.0, ref_img_opacity: 0.05, canvas_bg_color: "#ffffff", theme: "dark" },
   guides:       { use_custom: false, custom: {} },
 };
@@ -348,6 +348,9 @@ export default function Settings({ onThemeChange }) {
             </Row>
             <Row label="Default upscale">
               <Toggle value={s.output.do_upscale ?? true} onChange={v => set("output", "do_upscale", v)} />
+            </Row>
+            <Row label="Default remove BG">
+              <Toggle value={s.output.do_rembg ?? true} onChange={v => set("output", "do_rembg", v)} />
             </Row>
             {(s.output.do_upscale ?? true) && (
               <Row label="Default upscale factor">

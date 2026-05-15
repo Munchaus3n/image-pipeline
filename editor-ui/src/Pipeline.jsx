@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+﻿import { useState, useRef, useEffect, useCallback } from "react";
 /*
 KNOWN LIMITATIONS (web build):
 - Focus-based settings reload is a temporary sync workaround; desktop Electron should use explicit app events.
@@ -9,7 +9,7 @@ KNOWN LIMITATIONS (web build):
 const BASE = "/api";
 
 // Opens a folder in the native OS file explorer via the API server.
-// path="" → server defaults to OUTPUT_ROOT.
+// path="" â†’ server defaults to OUTPUT_ROOT.
 const openFolder = (path = "") =>
   fetch(`${BASE}/open-folder?path=${encodeURIComponent(path)}`).catch(() => {});
 
@@ -22,7 +22,46 @@ const C = {
   yellow:  "var(--yellow)",  blue:    "var(--accent)",   magenta: "var(--magenta)",
 };
 
-// ── Primitives ────────────────────────────────────────────────────────────────
+const PIPELINE_DEFAULTS = {
+  folderMode: "bulk",
+  doUpscale: true,
+  scale: "2",
+  doRembg: true,
+  canvasSize: "1440",
+  thumbnail: true,
+  rembgModel: "birefnet-general",
+  upscaleMaxPx: "",
+};
+
+function mergeSettingsDefaults(current, incomingSettings = {}, editedKeys = new Set()) {
+  const out = incomingSettings?.output ?? {};
+  const proc = incomingSettings?.processing ?? {};
+
+  const incoming = {
+    folderMode: out.folder_mode === "clean" ? "clean" : "bulk",
+    doUpscale: typeof out.do_upscale === "boolean" ? out.do_upscale : PIPELINE_DEFAULTS.doUpscale,
+    scale: out.upscale_scale === "4" ? "4" : "2",
+    doRembg: typeof out.do_rembg === "boolean" ? out.do_rembg : PIPELINE_DEFAULTS.doRembg,
+    canvasSize: Number.isFinite(Number(out.canvas_size)) && Number(out.canvas_size) > 0
+      ? String(out.canvas_size)
+      : PIPELINE_DEFAULTS.canvasSize,
+    thumbnail: typeof out.thumbnail === "boolean" ? out.thumbnail : PIPELINE_DEFAULTS.thumbnail,
+    rembgModel: typeof proc.rembg_model === "string" && proc.rembg_model.trim()
+      ? proc.rembg_model.trim()
+      : PIPELINE_DEFAULTS.rembgModel,
+    upscaleMaxPx: Number.isFinite(Number(proc.upscale_max_px)) && Number(proc.upscale_max_px) > 0
+      ? String(Number(proc.upscale_max_px))
+      : PIPELINE_DEFAULTS.upscaleMaxPx,
+  };
+
+  const merged = { ...current };
+  for (const key of Object.keys(incoming)) {
+    if (!editedKeys.has(key)) merged[key] = incoming[key];
+  }
+  return merged;
+}
+
+// â”€â”€ Primitives â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function Row({ label, children }) {
   return (
@@ -93,7 +132,7 @@ function FolderInput({ value, onChange, placeholder }) {
         background: C.panel2, color: C.dim,
         border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 9px",
         fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0
-      }}>…</button>
+      }}>â€¦</button>
     </div>
   );
 }
@@ -114,7 +153,7 @@ function FieldLabel({ children }) {
 }
 
 function Spinner({ color = C.yellow, size = 12 }) {
-  const ch = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const ch = ["â ‹", "â ™", "â ¹", "â ¸", "â ¼", "â ´", "â ¦", "â §", "â ‡", "â "];
   const [f, setF] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setF(x => (x + 1) % ch.length), 80);
@@ -123,7 +162,7 @@ function Spinner({ color = C.yellow, size = 12 }) {
   return <span style={{ fontFamily: "JetBrains Mono", fontSize: size, color }}>{ch[f]}</span>;
 }
 
-// ── Pipeline hook ─────────────────────────────────────────────────────────────
+// â”€â”€ Pipeline hook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const KIND_COLOR = {
   ok: "#4ade80", error: "#f87171", warn: "#facc15",
@@ -178,17 +217,17 @@ function usePipeline() {
   }, [running]);
 
   const classify = useCallback((raw) => {
-    if (/→ bg_removed/.test(raw) || /→ upscaled/.test(raw)) return "ok";
-    if (/✓/.test(raw)) return "ok";
-    if (/✗|Error|error|failed on |Traceback|Exception/i.test(raw)) return "error";
-    if (/⚠|warn/i.test(raw)) return "warn";
-    if (/↷|skip|already (upscaled|processed)/i.test(raw)) return "skip";
-    if (/Stage \d|─{4,}|═{4,}/.test(raw)) return "section";
+    if (/â†’ bg_removed/.test(raw) || /â†’ upscaled/.test(raw)) return "ok";
+    if (/âœ“/.test(raw)) return "ok";
+    if (/âœ—|Error|error|failed on |Traceback|Exception/i.test(raw)) return "error";
+    if (/âš |warn/i.test(raw)) return "warn";
+    if (/â†·|skip|already (upscaled|processed)/i.test(raw)) return "skip";
+    if (/Stage \d|â”€{4,}|â•{4,}/.test(raw)) return "section";
     return "info";
   }, []);
 
   const appendLine = useCallback((raw) => {
-    // ── Structured machine-readable tokens ──────────────────────────────────
+    // â”€â”€ Structured machine-readable tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (raw.startsWith("__total__:")) {
       const n = parseInt(raw.slice(10), 10);
       if (!isNaN(n)) setTotalImages(n);
@@ -248,7 +287,7 @@ function usePipeline() {
       const fname = raw.slice(16);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "oom" } }));
       setOomGpuCount(c => c + 1);
-      setLog(prev => [...prev.slice(-800), { raw: `GPU OOM fallback → CPU retry: ${fname}`, kind: "warn" }]);
+      setLog(prev => [...prev.slice(-800), { raw: `GPU OOM fallback â†’ CPU retry: ${fname}`, kind: "warn" }]);
       return;
     }
 
@@ -265,7 +304,7 @@ function usePipeline() {
       return;
     }
 
-    // ── Human-readable log lines ─────────────────────────────────────────────
+    // â”€â”€ Human-readable log lines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const kind = classify(raw);
     const entry = { raw, kind };
     setLog(prev => [...prev.slice(-800), entry]);
@@ -333,7 +372,7 @@ function usePipeline() {
           if (!line.startsWith("data: ")) continue;
           const msg = line.slice(6);
           if (msg.startsWith("__done__")) {
-            appendLine(msg.includes("exit=0") ? "✓ Pipeline complete." : "✗ Pipeline exited with errors.");
+            appendLine(msg.includes("exit=0") ? "âœ“ Pipeline complete." : "âœ— Pipeline exited with errors.");
             setStagesDone({ upscale: true, rembg: true });
             setStage("done"); setDone(true); setRunning(false);
           } else if (msg.startsWith("__error__")) {
@@ -366,7 +405,7 @@ function usePipeline() {
   };
 }
 
-// ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
+// â”€â”€ Zone 1: Drop zone / Live stage animation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function Zone1({ running, done, stage, stagesDone, recentDone,
   imageDone, totalImages, doUpscale, doRembg, inputDir, setInputDir, rembgModel }) {
@@ -416,7 +455,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
           flex: 1, display: "flex", flexDirection: "column",
           alignItems: "center", justifyContent: "center", gap: 10, padding: 20
         }}>
-          <div style={{ fontSize: 28, opacity: 0.18 }}>⬇</div>
+          <div style={{ fontSize: 28, opacity: 0.18 }}>â¬‡</div>
           <div style={{ fontSize: 13, color: C.dim, textAlign: "center", lineHeight: 1.8 }}>
             Drop images here to set input folder
           </div>
@@ -426,7 +465,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
               borderRadius: 4, padding: "6px 16px", fontSize: 12, cursor: "pointer",
               fontFamily: "inherit", opacity: browseLoading ? 0.6 : 1
             }}>
-              {browseLoading ? "…" : "Browse folder"}
+              {browseLoading ? "â€¦" : "Browse folder"}
             </button>
           </div>
           {inputDir && (
@@ -449,7 +488,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
               style={{
                 marginLeft: 10, background: "transparent", color: C.dim, border: "none",
                 fontSize: 11, cursor: "pointer", fontFamily: "inherit"
-              }}>clear ×</button>
+              }}>clear Ã—</button>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, overflowY: "auto", alignContent: "flex-start" }}>
             {droppedFiles.map((f, i) => (
@@ -472,11 +511,11 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
       justifyContent: "center", gap: 14, margin: "12px 12px 0 0", borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel
     }}>
-      <div style={{ fontSize: 32, color: C.green, lineHeight: 1 }}>✓</div>
+      <div style={{ fontSize: 32, color: C.green, lineHeight: 1 }}>âœ“</div>
       <div style={{ fontSize: 15, fontWeight: 600, color: C.green }}>Pipeline complete</div>
       <div style={{ display: "flex", gap: 20 }}>
         <SmStat label="Done" value={imageDone} color={C.green} />
-        <SmStat label="Total" value={totalImages || "—"} color={C.dim} />
+        <SmStat label="Total" value={totalImages || "â€”"} color={C.dim} />
       </div>
     </div>
   );
@@ -521,7 +560,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
                 borderRadius: 5, padding: "14px 10px", textAlign: "center",
                 boxShadow: cardGlow, transition: "all 0.4s ease"
               }}>
-                {s.done && <div style={{ fontSize: 20, color: C.green, lineHeight: 1, marginBottom: 4 }}>✓</div>}
+                {s.done && <div style={{ fontSize: 20, color: C.green, lineHeight: 1, marginBottom: 4 }}>âœ“</div>}
                 {s.active && (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, animation: "pulseFade 1.4s ease-in-out infinite" }}>
                     <Spinner color={C.yellow} size={13} />
@@ -564,7 +603,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
               fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
               animation: "slideIn 0.2s ease",
               maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
-            }}>✓ {f}</div>
+            }}>âœ“ {f}</div>
           ))}
         </div>
       )}
@@ -581,7 +620,7 @@ function SmStat({ label, value, color }) {
   );
 }
 
-// ── LivePreview ───────────────────────────────────────────────────────────────
+// â”€â”€ LivePreview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
   const [loadedSrc, setLoadedSrc] = useState("");
@@ -594,7 +633,7 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
       justifyContent: "center", gap: 14, borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel, minHeight: 0,
     }}>
-      <div style={{ fontSize: 36, color: C.green }}>✓</div>
+      <div style={{ fontSize: 36, color: C.green }}>âœ“</div>
       <div style={{ fontSize: 15, fontWeight: 600, color: C.green }}>Pipeline complete</div>
       <div style={{ display: "flex", gap: 24 }}>
         <div style={{ textAlign: "center" }}>
@@ -602,7 +641,7 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
           <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase" }}>Done</div>
         </div>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: C.dim, fontFamily: "JetBrains Mono" }}>{totalImages || "—"}</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: C.dim, fontFamily: "JetBrains Mono" }}>{totalImages || "â€”"}</div>
           <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase" }}>Total</div>
         </div>
       </div>
@@ -652,14 +691,14 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
           height: "100%", gap: 8, color: C.dim2, fontSize: 11 }}>
           <Spinner color={C.dim2} size={13} />
-          <span style={{ fontFamily: "JetBrains Mono" }}>waiting…</span>
+          <span style={{ fontFamily: "JetBrains Mono" }}>waitingâ€¦</span>
         </div>
       )}
     </div>
   );
 }
 
-// ── Zone 2: Per-stage stats bar ───────────────────────────────────────────────
+// â”€â”€ Zone 2: Per-stage stats bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function StatChip({ icon, value, color }) {
   return (
@@ -679,16 +718,16 @@ function StageRow({ label, stats, total, active, stageDone, color }) {
         color: stageDone ? C.green : active ? color : C.dim,
         width: 78, flexShrink: 0,
       }}>{label}</div>
-      <StatChip icon="✓" value={stats.done} color={stats.done > 0 ? C.green  : C.dim} />
-      <StatChip icon="↷" value={stats.skip} color={stats.skip > 0 ? C.yellow : C.dim} />
-      <StatChip icon="✗" value={stats.err}  color={stats.err  > 0 ? C.red    : C.dim} />
+      <StatChip icon="âœ“" value={stats.done} color={stats.done > 0 ? C.green  : C.dim} />
+      <StatChip icon="â†·" value={stats.skip} color={stats.skip > 0 ? C.yellow : C.dim} />
+      <StatChip icon="âœ—" value={stats.err}  color={stats.err  > 0 ? C.red    : C.dim} />
       {total > 0 && (
         <span style={{ fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono", marginLeft: "auto" }}>
           {finished}/{total}
         </span>
       )}
       {active && <Spinner color={color} size={10} />}
-      {stageDone && <span style={{ fontSize: 10, color: C.green }}>✓</span>}
+      {stageDone && <span style={{ fontSize: 10, color: C.green }}>âœ“</span>}
     </div>
   );
 }
@@ -725,12 +764,12 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
           paddingTop: 4, borderTop: `1px solid ${C.border}`, marginTop: 1,
         }}>
           {(running || done) && (
-            <span style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono" }}>⏱ {fmt(elapsed)}</span>
+            <span style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono" }}>â± {fmt(elapsed)}</span>
           )}
           {running && <Spinner color={C.yellow} size={11} />}
           {done && !running && (
             <span style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: errs > 0 ? C.yellow : C.green }}>
-              {errs > 0 ? `⚠ done — ${errs} error${errs > 1 ? "s" : ""}` : "✓ complete"}
+              {errs > 0 ? `âš  done â€” ${errs} error${errs > 1 ? "s" : ""}` : "âœ“ complete"}
             </span>
           )}
           {oomGpuCount > 0 && (
@@ -744,7 +783,7 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
   );
 }
 
-// ── Tag chip input ────────────────────────────────────────────────────────────
+// â”€â”€ Tag chip input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function TagInput({ tags, onChange }) {
   const [input, setInput] = useState("");
@@ -773,13 +812,13 @@ function TagInput({ tags, onChange }) {
           <button onClick={() => onChange(tags.filter(x => x !== t))} style={{
             background: "none", border: "none", color: C.dim,
             cursor: "pointer", padding: 0, lineHeight: 1, fontSize: 11,
-          }}>×</button>
+          }}>Ã—</button>
         </span>
       ))}
       <input
         value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKey}
         onBlur={() => { if (input) { add(input); setInput(""); } }}
-        placeholder={tags.length ? "" : "filename.webp  →  Enter"}
+        placeholder={tags.length ? "" : "filename.webp  â†’  Enter"}
         style={{
           flex: 1, minWidth: 80, background: "transparent", border: "none",
           outline: "none", color: C.text, fontSize: 10,
@@ -790,7 +829,7 @@ function TagInput({ tags, onChange }) {
   );
 }
 
-// ── LogPanel ──────────────────────────────────────────────────────────────────
+// â”€â”€ LogPanel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) {
   const progressColor = (status) => {
@@ -800,9 +839,9 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
     if (status === "oom") return C.yellow;
     return C.yellow;
   };
-  const isRuleLike = (raw) => /[─═]{4,}/.test(raw);
-  const isPureRule = (raw) => /^[\s─═]+$/.test(raw.trim());
-  const extractRuleLabel = (raw) => raw.replace(/^[\s─═]+|[\s─═]+$/g, "").trim();
+  const isRuleLike = (raw) => /[â”€â•]{4,}/.test(raw);
+  const isPureRule = (raw) => /^[\sâ”€â•]+$/.test(raw.trim());
+  const extractRuleLabel = (raw) => raw.replace(/^[\sâ”€â•]+|[\sâ”€â•]+$/g, "").trim();
 
   return (
     <div style={{
@@ -817,7 +856,7 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
         <button onClick={() => setOpen(v => !v)} style={{
           background: "transparent", color: C.dim, border: "none",
           fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
-        }}>{open ? "▾ hide" : "▸ show"}</button>
+        }}>{open ? "â–¾ hide" : "â–¸ show"}</button>
       </div>
       {open && (
         <div ref={logRef} style={{
@@ -874,7 +913,7 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
   );
 }
 
-// ── ErrorPanel ────────────────────────────────────────────────────────────────
+// â”€â”€ ErrorPanel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
   const [expanded, setExpanded] = useState({});
@@ -897,7 +936,7 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
         <button onClick={() => setOpen(v => !v)} style={{
           background: "transparent", color: C.dim, border: "none",
           fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
-        }}>{open ? "▾ hide" : "▸ show"}</button>
+        }}>{open ? "â–¾ hide" : "â–¸ show"}</button>
       </div>
       {open && (
         <div ref={errorRef} style={{
@@ -925,7 +964,7 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
                       fontFamily: "JetBrains Mono", padding: 0, letterSpacing: "0.05em"
                     }}
                   >
-                    {expanded[i] ? "▾ hide context" : "▸ show context"}
+                    {expanded[i] ? "â–¾ hide context" : "â–¸ show context"}
                   </button>
                   {expanded[i] && (
                     <div style={{
@@ -948,32 +987,77 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
   );
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // BUG-18 FIX (receiver side): added onGoToTemplates to prop signature.
 // main.jsx passes this prop but the old signature omitted it, so it was silently ignored.
 export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
-  const [folderMode, setFolderMode] = useState("bulk");
-  const [doUpscale, setDoUpscale] = useState(true);
-  const [scale, setScale] = useState("2");
-  const [doRembg, setDoRembg] = useState(true);
-  const [canvasSize, setCanvasSize] = useState("1440");
-  const [thumbnail, setThumbnail] = useState(true);
-  const [rembgModel, setRembgModel] = useState("birefnet-general");
-  const [upscaleMaxPx, setUpscaleMaxPx] = useState("");
+  const [folderMode, setFolderMode] = useState(PIPELINE_DEFAULTS.folderMode);
+  const [doUpscale, setDoUpscale] = useState(PIPELINE_DEFAULTS.doUpscale);
+  const [scale, setScale] = useState(PIPELINE_DEFAULTS.scale);
+  const [doRembg, setDoRembg] = useState(PIPELINE_DEFAULTS.doRembg);
+  const [canvasSize, setCanvasSize] = useState(PIPELINE_DEFAULTS.canvasSize);
+  const [thumbnail, setThumbnail] = useState(PIPELINE_DEFAULTS.thumbnail);
+  const [rembgModel, setRembgModel] = useState(PIPELINE_DEFAULTS.rembgModel);
+  const [upscaleMaxPx, setUpscaleMaxPx] = useState(PIPELINE_DEFAULTS.upscaleMaxPx);
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
   const [logOpen, setLogOpen] = useState(true);
   const [errOpen, setErrOpen] = useState(true);
   const [resumeSession, setResumeSession] = useState(null);
   const [showResume, setShowResume] = useState(false);
+  const [preflight, setPreflight] = useState(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
   const doneNotifiedRef = useRef(false);
+  const initializedRef = useRef(false);
+  const editedKeysRef = useRef(new Set());
+  const pipelineStateRef = useRef({
+    folderMode: PIPELINE_DEFAULTS.folderMode,
+    doUpscale: PIPELINE_DEFAULTS.doUpscale,
+    scale: PIPELINE_DEFAULTS.scale,
+    doRembg: PIPELINE_DEFAULTS.doRembg,
+    canvasSize: PIPELINE_DEFAULTS.canvasSize,
+    thumbnail: PIPELINE_DEFAULTS.thumbnail,
+    rembgModel: PIPELINE_DEFAULTS.rembgModel,
+    upscaleMaxPx: PIPELINE_DEFAULTS.upscaleMaxPx,
+  });
+  const inputDirRef = useRef(inputDir);
+  const outputDirRef = useRef(outputDir);
 
-  // BUG-15 FIX: split settings loading into two concerns:
-  // 1. loadSettings — reloads non-path settings (model, flags, sizes).
-  //    Called on mount AND on window focus. Safe to re-run because it
-  //    never touches inputDir/outputDir, so user-typed paths are preserved.
-  // 2. A mount-only effect restores saved paths from settings.json once.
-  //    Never runs again, so switching windows can't overwrite what the user typed.
+  const markEdited = useCallback((key) => {
+    editedKeysRef.current.add(key);
+  }, []);
+
+  useEffect(() => {
+    pipelineStateRef.current = {
+      folderMode,
+      doUpscale,
+      scale,
+      doRembg,
+      canvasSize,
+      thumbnail,
+      rembgModel,
+      upscaleMaxPx,
+    };
+  }, [folderMode, doUpscale, scale, doRembg, canvasSize, thumbnail, rembgModel, upscaleMaxPx]);
+
+  useEffect(() => {
+    inputDirRef.current = inputDir;
+    outputDirRef.current = outputDir;
+  }, [inputDir, outputDir]);
+
+  const setPipelineStateFromSettings = useCallback((settings) => {
+    const merged = mergeSettingsDefaults(pipelineStateRef.current, settings, editedKeysRef.current);
+    setFolderMode(merged.folderMode);
+    setDoUpscale(merged.doUpscale);
+    setScale(merged.scale);
+    setDoRembg(merged.doRembg);
+    setCanvasSize(merged.canvasSize);
+    setThumbnail(merged.thumbnail);
+    setRembgModel(merged.rembgModel);
+    setUpscaleMaxPx(merged.upscaleMaxPx);
+    pipelineStateRef.current = merged;
+  }, []);
+
   const loadSettings = useCallback(() => {
     fetch(`${BASE}/models/rembg`)
       .then(r => r.ok ? r.json() : null)
@@ -986,40 +1070,18 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.settings) return;
-        const s = data.settings;
-        // BUG-15 FIX: only non-path settings here — no setInputDir / setOutputDir
-        if (s.output?.folder_mode) setFolderMode(s.output.folder_mode);
-        if (typeof s.output?.do_upscale === "boolean") setDoUpscale(s.output.do_upscale);
-        if (s.output?.upscale_scale === "2" || s.output?.upscale_scale === "4") setScale(s.output.upscale_scale);
-        if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
-        if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
-        if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
-        if (Object.prototype.hasOwnProperty.call(s.processing ?? {}, "upscale_max_px")) {
-          const savedMaxPx = Number(s.processing.upscale_max_px);
-          setUpscaleMaxPx(Number.isFinite(savedMaxPx) && savedMaxPx > 0 ? String(savedMaxPx) : "");
+        setPipelineStateFromSettings(data.settings);
+        if (!initializedRef.current) {
+          const out = data.settings.output ?? {};
+          if (!inputDirRef.current && typeof out.input_dir === "string" && out.input_dir.trim()) setInputDir(out.input_dir);
+          if (!outputDirRef.current && typeof out.output_dir === "string" && out.output_dir.trim()) setOutputDir(out.output_dir);
+          initializedRef.current = true;
         }
       })
       .catch(() => {});
-  }, []);
+  }, [setPipelineStateFromSettings, setInputDir, setOutputDir]);
 
-  // BUG-07 FIX: restore saved paths on mount only — never on focus.
-  // Previously loadSettings (called on focus) also called setOutputDir, so
-  // switching windows reset whatever the user had typed.
-  useEffect(() => {
-    fetch(`${BASE}/settings`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data?.settings) return;
-        const s = data.settings;
-        // BUG-20 consequence fixed here: inputDir now populates on load,
-        // so handleStart won't send an empty input_dir to the pipeline.
-        if (s.output?.input_dir && !inputDir)  setInputDir(s.output.input_dir);
-        if (s.output?.output_dir && !outputDir) setOutputDir(s.output.output_dir);
-      })
-      .catch(() => {});
-  }, [inputDir, outputDir, setInputDir, setOutputDir]);
-
-  // Non-path settings reload on mount + focus
+  // Load defaults on mount. On focus, reload defaults without overwriting fields edited in this session.
   useEffect(() => {
     loadSettings();
     window.addEventListener("focus", loadSettings);
@@ -1034,6 +1096,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setPreflight(null);
+  }, [folderMode, doUpscale, scale, doRembg, inputDir, outputDir, rembgModel, upscaleMaxPx]);
 
   const {
     running, done, log, errors, imageDone, imageError,
@@ -1074,7 +1140,54 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
     });
   }, [done, onPipelineDone, canvasSize, thumbnail]);
 
-  const handleStart = useCallback(() => {
+  const runPreflight = useCallback(async () => {
+    const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
+    const payload = {
+      folder_mode: folderMode,
+      do_upscale: doUpscale,
+      scale,
+      do_rembg: doRembg,
+      input_dir: inputDir,
+      output_dir: outputDir,
+      exclude_rembg: [],
+      skip_files: [],
+      rembg_model: rembgModel,
+      resume: false,
+      upscale_max_px: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
+    };
+
+    setPreflightLoading(true);
+    try {
+      const r = await fetch(`${BASE}/pipeline/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      const pf = data?.preflight ?? null;
+      setPreflight(pf);
+      return pf;
+    } catch {
+      return null;
+    } finally {
+      setPreflightLoading(false);
+    }
+  }, [folderMode, doUpscale, scale, doRembg, inputDir, outputDir, rembgModel, upscaleMaxPx]);
+
+  const handleStart = useCallback(async () => {
+    const pf = await runPreflight();
+    if (!pf) {
+      if (!window.confirm("Preflight check failed. Continue anyway?")) return;
+    } else if (pf.has_serious_warnings) {
+      const msg = [
+        "Preflight warnings:",
+        ...pf.warnings.map(w => `- ${w.message}`),
+        "",
+        "Continue anyway?",
+      ].join("\n");
+      if (!window.confirm(msg)) return;
+    }
     const skipList     = removedImages ? [...removedImages] : [];
     const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
     const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
@@ -1084,7 +1197,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
     });
     setShowResume(false);
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx]);
+  }, [runPreflight, start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx]);
 
   const handleResume = useCallback(() => {
     if (!resumeSession?.src_root) return;
@@ -1171,39 +1284,39 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           <SectionLabel>Folders</SectionLabel>
           <div style={{ marginBottom: 8 }}>
             <FieldLabel>Input folder</FieldLabel>
-            <FolderInput value={inputDir} onChange={setInputDir} placeholder="default: ./input" />
+            <FolderInput value={inputDir} onChange={(value) => setInputDir(value)} placeholder="default: ./input" />
           </div>
           <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
             <FieldLabel>Output folder</FieldLabel>
-            <FolderInput value={outputDir} onChange={setOutputDir} placeholder="default: ./output" />
+            <FolderInput value={outputDir} onChange={(value) => setOutputDir(value)} placeholder="default: ./output" />
           </div>
 
           <SectionLabel>Processing</SectionLabel>
 
           <Row label="Folder mode">
-            <Btn label="Bulk" active={folderMode === "bulk"} onClick={() => setFolderMode("bulk")} />
-            <Btn label="Clean" active={folderMode === "clean"} onClick={() => setFolderMode("clean")} />
+            <Btn label="Bulk" active={folderMode === "bulk"} onClick={() => { markEdited("folderMode"); setFolderMode("bulk"); }} />
+            <Btn label="Clean" active={folderMode === "clean"} onClick={() => { markEdited("folderMode"); setFolderMode("clean"); }} />
           </Row>
 
           <Row label="Upscale (NCNN)">
-            <PillToggle value={doUpscale} onChange={setDoUpscale} />
+            <PillToggle value={doUpscale} onChange={(value) => { markEdited("doUpscale"); setDoUpscale(value); }} />
           </Row>
 
           {doUpscale && (
             <Row label="Scale factor">
-              <Btn label="2×" active={scale === "2"} onClick={() => setScale("2")} />
-              <Btn label="4×" active={scale === "4"} onClick={() => setScale("4")} />
+              <Btn label="2Ã—" active={scale === "2"} onClick={() => { markEdited("scale"); setScale("2"); }} />
+              <Btn label="4Ã—" active={scale === "4"} onClick={() => { markEdited("scale"); setScale("4"); }} />
             </Row>
           )}
 
           <Row label="Remove BG">
-            <PillToggle value={doRembg} onChange={setDoRembg} />
+            <PillToggle value={doRembg} onChange={(value) => { markEdited("doRembg"); setDoRembg(value); }} />
           </Row>
           {doRembg && (
             <>
               <Row label="BG model">
                 <select
-                  value={rembgModel} onChange={e => setRembgModel(e.target.value)}
+                  value={rembgModel} onChange={e => { markEdited("rembgModel"); setRembgModel(e.target.value); }}
                   style={{
                     background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
                     borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
@@ -1222,12 +1335,12 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           <div style={{ marginTop: 16, marginBottom: 16, borderTop: `1px solid ${C.border}` }} />
           <SectionLabel>Output settings</SectionLabel>
 
-          <Row label="Skip upscale if any side ≥">
+          <Row label="Skip upscale if any side â‰¥">
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <input
                 type="number"
                 value={upscaleMaxPx}
-                onChange={e => setUpscaleMaxPx(e.target.value)}
+                onChange={e => { markEdited("upscaleMaxPx"); setUpscaleMaxPx(e.target.value); }}
                 placeholder="no limit"
                 min={256} max={8192}
                 style={{
@@ -1244,9 +1357,9 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           <Row label="Canvas size (px)">
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               {["1080", "1440", "2048"].map(s => (
-                <Btn key={s} label={s} active={canvasSize === s} onClick={() => setCanvasSize(s)} />
+                <Btn key={s} label={s} active={canvasSize === s} onClick={() => { markEdited("canvasSize"); setCanvasSize(s); }} />
               ))}
-              <input type="number" value={canvasSize} onChange={e => setCanvasSize(e.target.value)}
+              <input type="number" value={canvasSize} onChange={e => { markEdited("canvasSize"); setCanvasSize(e.target.value); }}
                 min={256} max={8192}
                 style={{
                   width: 54, background: C.panel2, color: C.text,
@@ -1259,7 +1372,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           </Row>
 
           <Row label="Thumbnail (400px)">
-            <PillToggle value={thumbnail} onChange={setThumbnail} />
+            <PillToggle value={thumbnail} onChange={(value) => { markEdited("thumbnail"); setThumbnail(value); }} />
           </Row>
 
           {/* Will run summary */}
@@ -1272,17 +1385,17 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
               letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700
             }}>Will run</div>
             {nothingSelected
-              ? <div style={{ fontSize: 12, color: C.red }}>✕ Enable at least one stage</div>
+              ? <div style={{ fontSize: 12, color: C.red }}>âœ• Enable at least one stage</div>
               : <>
-                {doUpscale && <div style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
+                {doUpscale && <div style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>âœ“ Upscale Ã—{scale} (NCNN Vulkan)</div>}
                 {doRembg && (() => {
                   const skipCount = removedImages?.size ?? 0;
                   const exclCount = excludeTags.filter(n => !removedImages?.has(n)).length;
                   return (
                     <div style={{ fontSize: 12, color: C.green }}>
-                      ✓ Remove BG ({rembgModel || "birefnet-general"})
-                      {exclCount > 0 && <span style={{ color: C.yellow }}> · {exclCount} excluded</span>}
-                      {skipCount  > 0 && <span style={{ color: C.dim   }}> · {skipCount} skipped</span>}
+                      âœ“ Remove BG ({rembgModel || "birefnet-general"})
+                      {exclCount > 0 && <span style={{ color: C.yellow }}> Â· {exclCount} excluded</span>}
+                      {skipCount  > 0 && <span style={{ color: C.dim   }}> Â· {skipCount} skipped</span>}
                     </div>
                   );
                 })()}
@@ -1290,23 +1403,64 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
             }
           </div>
 
+          {(preflightLoading || preflight) && (
+            <div style={{
+              marginTop: 8, background: C.panel2, border: `1px solid ${C.border}`,
+              borderRadius: 4, padding: "9px 12px"
+            }}>
+              <div style={{
+                fontSize: 9, color: C.dim, marginBottom: 6,
+                letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700
+              }}>Preflight</div>
+              {preflightLoading ? (
+                <div style={{ fontSize: 11, color: C.dim }}>Checkingâ€¦</div>
+              ) : preflight ? (
+                <>
+                  <div style={{ fontSize: 11, color: C.dim, lineHeight: 1.5 }}>
+                    <div>Input: <span style={{ color: C.text, fontFamily: "JetBrains Mono" }}>{preflight.resolved?.input_dir}</span></div>
+                    <div>Output: <span style={{ color: C.text, fontFamily: "JetBrains Mono" }}>{preflight.resolved?.output_dir}</span></div>
+                    <div>Supported images: <span style={{ color: C.text }}>{preflight.counts?.supported_images ?? 0}</span></div>
+                    <div>Unsupported image-like files: <span style={{ color: C.text }}>{preflight.counts?.unsupported_image_like ?? 0}</span></div>
+                    <div>Mode: <span style={{ color: C.text }}>{preflight.folder_mode}</span></div>
+                    <div>Stages: <span style={{ color: C.text }}>{preflight.stages?.do_upscale ? "upscale" : "no-upscale"} / {preflight.stages?.do_rembg ? "rembg" : "no-rembg"}</span></div>
+                    <div>Scale: <span style={{ color: C.text }}>Ã—{preflight.stages?.upscale_scale}</span></div>
+                    <div>Upscale max px: <span style={{ color: C.text }}>{preflight.stages?.upscale_max_px || 0}</span></div>
+                    <div>Rembg model: <span style={{ color: C.text }}>{preflight.stages?.rembg_model || "birefnet-general"}</span></div>
+                    <div>Output markers: <span style={{ color: C.text }}>{preflight.output?.markers?.length ? preflight.output.markers.join(", ") : "none"}</span></div>
+                  </div>
+                  {preflight.warnings?.length > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5 }}>
+                      {preflight.warnings.map((w, i) => (
+                        <div key={`${w.code}-${i}`} style={{ color: w.severity === "serious" ? C.red : C.yellow }}>
+                          {w.severity === "serious" ? "âš " : "â€¢"} {w.message}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ fontSize: 11, color: C.dim }}>No preflight data yet.</div>
+              )}
+            </div>
+          )}
+
           {/* Action buttons */}
           <div style={{ marginTop: "auto", paddingTop: 16 }}>
             {!running ? (
-              <button onClick={handleStart} disabled={nothingSelected} style={{
+              <button onClick={handleStart} disabled={nothingSelected || preflightLoading} style={{
                 width: "100%", padding: "10px 0",
-                background: nothingSelected ? C.dim2 : C.greenBg,
-                color: nothingSelected ? C.dim : C.green,
-                border: `1px solid ${nothingSelected ? C.border : C.greenBdr}`,
+                background: (nothingSelected || preflightLoading) ? C.dim2 : C.greenBg,
+                color: (nothingSelected || preflightLoading) ? C.dim : C.green,
+                border: `1px solid ${(nothingSelected || preflightLoading) ? C.border : C.greenBdr}`,
                 borderRadius: 8, fontSize: 13, fontWeight: 600,
-                cursor: nothingSelected ? "not-allowed" : "pointer", fontFamily: "inherit",
-              }}>▶  Run Pipeline</button>
+                cursor: (nothingSelected || preflightLoading) ? "not-allowed" : "pointer", fontFamily: "inherit",
+              }}>{preflightLoading ? "Checking…" : "Run Pipeline"}</button>
             ) : (
               <button onClick={stop} style={{
                 width: "100%", padding: "10px 0", background: C.redBg, color: C.red,
                 border: `1px solid ${C.redBdr}`, borderRadius: 8, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", fontFamily: "inherit",
-              }}>■  Stop</button>
+              }}>â–   Stop</button>
             )}
 
             <button onClick={handleGoToEditor} style={{
@@ -1314,7 +1468,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
               background: "color-mix(in srgb, var(--accent) 12%, transparent)",
               color: C.accent, border: `1px solid color-mix(in srgb, var(--accent) 30%, transparent)`,
               borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-            }}>Open Editor →</button>
+            }}>Open Editor â†’</button>
 
             {/* BUG-18 FIX (usage): onGoToTemplates now wired to the button */}
             {onGoToTemplates && (
@@ -1333,7 +1487,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                 borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
               }}
             >
-              📁 Open Output Folder
+              ðŸ“ Open Output Folder
             </button>
           </div>
         </div>
@@ -1384,3 +1538,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
     </div>
   );
 }
+
+
+
+

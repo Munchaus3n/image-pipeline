@@ -17,7 +17,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime
 from pathlib import Path
-from PIL import Image, ImageFilter, ImageChops
+from PIL import Image, ImageFilter, ImageChops, UnidentifiedImageError
 import numpy as np
 from scipy.ndimage import binary_fill_holes, label
 import onnxruntime as ort
@@ -43,7 +43,9 @@ NCNN_MODELS = {
 }
 
 REMBG_MODEL    = "birefnet-general"
-SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tiff"}
+SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".avif"}
+AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
+_AVIF_DECODE_SUPPORTED = Image.registered_extensions().get(".avif") is not None
 
 console = Console()
 
@@ -107,6 +109,18 @@ def mirror_path(src: Path, src_root: Path, dst_root: Path, suffix: str = ".png")
     return dst_root / src.relative_to(src_root).with_suffix(suffix)
 
 
+def _open_image_checked(path: Path) -> Image.Image:
+    if path.suffix.lower() == ".avif" and not _AVIF_DECODE_SUPPORTED:
+        raise RuntimeError(AVIF_DECODE_ERROR)
+    try:
+        with Image.open(path) as opened:
+            return opened.copy()
+    except (UnidentifiedImageError, OSError) as e:
+        if path.suffix.lower() == ".avif":
+            raise RuntimeError(AVIF_DECODE_ERROR) from e
+        raise
+
+
 def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
     """Copy a failed image to output/corrupted/, mirroring folder structure."""
     try:
@@ -133,8 +147,14 @@ _NCNN_TILE_SIZE      = "256"  # tile size passed to -t flag
 def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    with Image.open(src) as opened:
-        src_img = opened.copy()
+    try:
+        src_img = _open_image_checked(src)
+    except RuntimeError as e:
+        err(f"{src.name}: {e}")
+        return False
+    except Exception as e:
+        err(f"Could not read {src.name}: {e}")
+        return False
     has_alpha = src_img.mode in ("RGBA", "LA") or (
         src_img.mode == "P" and "transparency" in src_img.info
     )
@@ -181,10 +201,10 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
 
 def has_transparency(path: Path) -> bool:
     try:
-        with Image.open(path) as img:
-            if img.mode not in ("RGBA", "LA"):
-                return False
-            return img.split()[-1].getextrema()[0] < 255
+        img = _open_image_checked(path)
+        if img.mode not in ("RGBA", "LA"):
+            return False
+        return img.split()[-1].getextrema()[0] < 255
     except Exception:
         return False
 
@@ -292,8 +312,7 @@ BIREFNET_MAX = 1024
 def _prefetch_image(path: Path) -> None:
     """Pre-decode next image into OS page cache in a background thread."""
     try:
-        with Image.open(path) as img:
-            img.load()
+        _open_image_checked(path).load()
     except Exception:
         pass
 
@@ -301,8 +320,7 @@ def _prefetch_image(path: Path) -> None:
 def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> tuple[bool, str | None]:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with Image.open(src) as opened:
-            img = opened.convert("RGBA")
+        img = _open_image_checked(src).convert("RGBA")
 
         # Already transparent — clean up edges and crop, skip inference entirely
         if has_transparency(src):
@@ -382,13 +400,20 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
 
         # 2. Image already large enough → skip upscale, use original
         try:
-            with Image.open(src) as img:
-                w, h = img.size
+            img = _open_image_checked(src)
+            w, h = img.size
             if upscale_max_px > 0 and max(w, h) >= upscale_max_px:
                 skip(f"{src.name} ({w}×{h} — already ≥ {upscale_max_px}px)")
                 print(f"__skip_upscale__:{src.name}", flush=True)
                 outputs[-1] = src
                 continue
+        except RuntimeError as e:
+            warn(f"{src.name}: {e}")
+            print(f"__err_upscale__:{src.name}", flush=True)
+            outputs[-1] = src
+            if corrupted_dir:
+                _copy_corrupted(src, src_root, corrupted_dir)
+            continue
         except Exception as e:
             warn(f"Could not read {src.name} dimensions: {e}")
 
@@ -492,8 +517,7 @@ def batch_remove_bg(
         elif src.name in no_rembg_names or src.name.lower() in excluded or src.stem.lower() in excluded_stems:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                with Image.open(src) as opened:
-                    tight_crop(opened.convert("RGBA")).save(dst, format="PNG")
+                tight_crop(_open_image_checked(src).convert("RGBA")).save(dst, format="PNG")
                 ok(f"{src.name} → processed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
                 print(f"__skip_rembg__:{src.name}", flush=True)
             except Exception as e:
@@ -673,6 +697,20 @@ def main():
     if not images:
         err(f"No images found in: {input_dir}")
         sys.exit(1)
+
+    avif_inputs = [p for p in images if p.suffix.lower() == ".avif"]
+    if avif_inputs:
+        if not _AVIF_DECODE_SUPPORTED:
+            err(AVIF_DECODE_ERROR)
+            sys.exit(1)
+        try:
+            _open_image_checked(avif_inputs[0])
+        except RuntimeError as e:
+            err(str(e))
+            sys.exit(1)
+        except Exception as e:
+            err(f"Failed to read AVIF input {avif_inputs[0].name}: {e}")
+            sys.exit(1)
 
     section("Summary")
     table = Table.grid(padding=(0, 2))
