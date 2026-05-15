@@ -82,10 +82,6 @@ SESSION_FILE  = BASE_DIR / "session.json"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 
 SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".avif"}
-IMAGE_LIKE_EXTS = {
-    ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".avif",
-    ".heic", ".heif", ".bmp", ".gif", ".jfif", ".jxl",
-}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
 
 def _is_avif_decode_supported() -> bool:
@@ -145,37 +141,6 @@ def images_in_folder(folder: Path) -> list[Path]:
         p for p in folder.rglob("*")
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
     )
-
-def _collect_supported_images_for_mode(root: Path, folder_mode: str) -> tuple[list[Path], list[Path]]:
-    recursive = sorted(
-        p for p in root.rglob("*")
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
-    )
-    if folder_mode == "clean":
-        return recursive, recursive
-
-    top = sorted(
-        p for p in root.iterdir()
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
-    )
-    no_rembg_root = root / "no_rembg"
-    if no_rembg_root.exists() and no_rembg_root.is_dir():
-        top += sorted(
-            p for p in no_rembg_root.iterdir()
-            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
-        )
-    selected = sorted(set(top))
-    return selected, recursive
-
-def _collect_unsupported_image_like(root: Path) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        ext = p.suffix.lower()
-        if ext in IMAGE_LIKE_EXTS and ext not in SUPPORTED_EXTS:
-            counts[ext] = counts.get(ext, 0) + 1
-    return dict(sorted(counts.items()))
 
 def detect_source_folder(output_root: Path | None = None) -> tuple[Path, str]:
     root = output_root or OUTPUT_ROOT
@@ -735,17 +700,6 @@ def _merged_settings(*layers: dict) -> dict:
             merged = _deep_merge(merged, layer)
     return merged
 
-@app.get("/pipeline/output-batch-check")
-def pipeline_output_batch_check(path: str = ""):
-    target_dir = _resolve_safe_path(path, must_exist=False, allow_file=False, allow_dir=True)
-    markers = ["processed", "upscaled", "Editor", "corrupted"]
-    found = [name for name in markers if (target_dir / name).exists()]
-    return {
-        "has_previous_batch": bool(found),
-        "markers": found,
-        "output_dir": str(target_dir),
-    }
-
 @app.get("/settings")
 def get_settings():
     return {"settings": _merged_settings(_load_saved_settings_file())}
@@ -779,118 +733,6 @@ def get_history_path():
 @app.get("/pipeline/status")
 def pipeline_status():
     return {"running": _pipeline_running}
-
-@app.post("/pipeline/preflight")
-def pipeline_preflight(cfg: PipelineConfig):
-    def _warn(code: str, message: str, severity: str = "warning") -> dict:
-        return {"code": code, "message": message, "severity": severity}
-
-    input_path = (
-        _resolve_safe_path(cfg.input_dir.strip(), must_exist=False, allow_file=False, allow_dir=True)
-        if cfg.input_dir.strip()
-        else (BASE_DIR / "input").resolve()
-    )
-    output_path = (
-        _resolve_safe_path(cfg.output_dir.strip(), must_exist=False, allow_file=False, allow_dir=True)
-        if cfg.output_dir.strip()
-        else OUTPUT_ROOT.resolve()
-    )
-
-    warnings: list[dict] = []
-    supported_selected: list[Path] = []
-    supported_recursive: list[Path] = []
-    unsupported_ext_counts: dict[str, int] = {}
-    nested_dirs_in_input = False
-
-    input_exists = input_path.exists() and input_path.is_dir()
-    if not input_exists:
-        warnings.append(_warn("input_missing", f"Input folder not found: {input_path}", "serious"))
-    else:
-        supported_selected, supported_recursive = _collect_supported_images_for_mode(input_path, cfg.folder_mode)
-        unsupported_ext_counts = _collect_unsupported_image_like(input_path)
-        nested_dirs_in_input = any(p.is_dir() for p in input_path.iterdir())
-
-    supported_count = len(supported_selected)
-    supported_recursive_count = len(supported_recursive)
-    nested_supported_count = max(0, supported_recursive_count - supported_count)
-
-    if supported_count == 0:
-        warnings.append(_warn("no_supported_images", "No supported images found.", "serious"))
-
-    if cfg.folder_mode == "bulk" and nested_dirs_in_input:
-        warnings.append(_warn(
-            "nested_with_bulk",
-            "Input folder has nested subfolders while bulk mode is selected.",
-            "warning",
-        ))
-    if cfg.folder_mode == "bulk" and supported_count == 0 and supported_recursive_count > 0:
-        warnings.append(_warn(
-            "subfolders_only_bulk",
-            "Images found only in subfolders; bulk mode may not process them as expected.",
-            "serious",
-        ))
-
-    if unsupported_ext_counts:
-        ext_summary = ", ".join(f"{ext}({count})" for ext, count in unsupported_ext_counts.items())
-        warnings.append(_warn(
-            "unsupported_image_like",
-            f"Unsupported files found: {ext_summary}.",
-            "warning",
-        ))
-
-    markers = ["processed", "upscaled", "Editor", "corrupted"]
-    existing_markers = [name for name in markers if (output_path / name).exists()]
-    if existing_markers:
-        warnings.append(_warn(
-            "output_has_previous_results",
-            "Output folder already contains previous results.",
-            "serious",
-        ))
-
-    if not cfg.do_upscale and not cfg.do_rembg:
-        warnings.append(_warn("both_stages_disabled", "Both upscale and rembg are disabled.", "serious"))
-
-    resolved_rembg_model = (cfg.rembg_model or "").strip()
-    if not resolved_rembg_model:
-        try:
-            _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")) if SETTINGS_FILE.exists() else {}
-            resolved_rembg_model = _s.get("processing", {}).get("rembg_model", "birefnet-general")
-        except Exception:
-            resolved_rembg_model = "birefnet-general"
-
-    has_serious_warnings = any(w["severity"] == "serious" for w in warnings)
-    return {
-        "preflight": {
-            "resolved": {
-                "input_dir": str(input_path),
-                "output_dir": str(output_path),
-            },
-            "counts": {
-                "supported_images": supported_count,
-                "supported_images_recursive": supported_recursive_count,
-                "unsupported_image_like": sum(unsupported_ext_counts.values()),
-            },
-            "unsupported_extensions": [
-                {"ext": ext, "count": count} for ext, count in unsupported_ext_counts.items()
-            ],
-            "folder_mode": cfg.folder_mode,
-            "nested_input_with_bulk": cfg.folder_mode == "bulk" and nested_dirs_in_input,
-            "stages": {
-                "do_upscale": cfg.do_upscale,
-                "do_rembg": cfg.do_rembg,
-                "upscale_scale": cfg.scale,
-                "upscale_max_px": cfg.upscale_max_px,
-                "rembg_model": resolved_rembg_model,
-            },
-            "output": {
-                "has_previous_batch": bool(existing_markers),
-                "markers": existing_markers,
-            },
-            "warnings": warnings,
-            "has_serious_warnings": has_serious_warnings,
-        }
-    }
-
 
 @app.post("/pipeline/run")
 async def run_pipeline(cfg: PipelineConfig):

@@ -23,6 +23,7 @@ __pycache__/
 # Logs / temp
 *.log
 *.tmp
+session.json
 
 # Editor / OS
 .vscode/
