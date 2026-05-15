@@ -379,7 +379,7 @@ export default function Settings({ onThemeChange }) {
                 ]}
               />
             </Row>
-            <Row label="Force CPU" hint="Skip DirectML/CUDA">
+            <Row label="Force CPU" hint="Skip DirectML/CUDA (GPU OOM fallback to CPU is automatic)">
               <Toggle value={s.processing.force_cpu ?? false} onChange={v => set("processing", "force_cpu", v)} />
             </Row>
             <Row label="Crop padding" hint="Fraction added after crop">

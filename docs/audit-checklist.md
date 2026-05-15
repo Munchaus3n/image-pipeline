@@ -93,3 +93,9 @@ Manual verification checklist for path flow, pipeline fallbacks, and editor outp
 4. Confirm upscale and rembg complete and output files are still written as `.png`.
 5. If Pillow lacks AVIF decoding, confirm the user sees:
    `AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG.`
+
+## 15) TIF Input Support
+1. Place at least one `.tif` image in the input folder.
+2. Confirm it appears in Input grid and pipeline source/image counts.
+3. Run pipeline in `bulk`, then repeat in `clean` (or nested subfolder) mode.
+4. Confirm outputs are still written as `.png`.

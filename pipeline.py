@@ -44,9 +44,10 @@ NCNN_MODELS = {
 }
 
 REMBG_MODEL    = "birefnet-general"
-SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".avif"}
+SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
 _AVIF_DECODE_SUPPORTED = Image.registered_extensions().get(".avif") is not None
+_ALLOWED_REMBG_FALLBACKS = {"auto"}
 
 console = Console()
 
@@ -222,6 +223,26 @@ def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
         warn(f"Could not copy {src.name} to corrupted/: {e}")
 
 
+def _is_valid_existing_output(path: Path) -> bool:
+    if not path.exists() or not path.is_file():
+        return False
+    try:
+        if path.stat().st_size <= 0:
+            return False
+        with Image.open(path) as chk:
+            chk.verify()
+        return True
+    except Exception:
+        return False
+
+
+def _remove_invalid_output(path: Path, label: str) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except Exception as e:
+        warn(f"Could not remove invalid {label} output {path.name}: {e}")
+
+
 # ── Image processing ───────────────────────────────────────────────────────────
 
 # Images wider/taller than this get tiled to avoid VRAM OOM on Vulkan
@@ -342,6 +363,11 @@ def _is_oom_error(msg: str) -> bool:
         "failed to allocate memory",
         "bad alloc",
     ))
+
+
+def _normalize_rembg_fallback(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in _ALLOWED_REMBG_FALLBACKS else "auto"
 
 
 _GPU_MEM_FRACTION = 0.80
@@ -469,13 +495,11 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
         # 1. Valid file already exists → skip
         already_done = False
         if dst.exists():
-            try:
-                if dst.stat().st_size > 0:
-                    with Image.open(dst) as _chk:
-                        _chk.verify()
-                    already_done = True
-            except Exception:
-                dst.unlink(missing_ok=True)  # corrupted — delete, re-run
+            if _is_valid_existing_output(dst):
+                already_done = True
+            else:
+                warn(f"{src.name} has invalid existing upscaled output — regenerating.")
+                _remove_invalid_output(dst, "upscaled")
 
         if already_done:
             skip(f"{src.name} (already upscaled)")
@@ -608,10 +632,13 @@ def batch_remove_bg(
         dst = (dst_root / rel).with_suffix(".png")
         outputs.append(dst)
 
-        if dst.exists():
+        if dst.exists() and _is_valid_existing_output(dst):
             skip(f"{src.name} (already processed)")
             print(f"__skip_rembg__:{src.name}", flush=True)
         elif src in no_rembg_paths or src in excluded_paths:
+            if dst.exists():
+                warn(f"{src.name} has invalid existing processed output — regenerating.")
+                _remove_invalid_output(dst, "processed")
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tight_crop(_open_image_checked(src).convert("RGBA")).save(dst, format="PNG")
@@ -621,6 +648,9 @@ def batch_remove_bg(
                 err(f"Crop failed on {src.name}: {e}")
                 print(f"__err_rembg__:{src.name}", flush=True)
         else:
+            if dst.exists():
+                warn(f"{src.name} has invalid existing processed output — regenerating.")
+                _remove_invalid_output(dst, "processed")
             to_run.append((src, dst))
 
     if not to_run:
@@ -692,11 +722,15 @@ def main():
     parser.add_argument("--force-cpu",        action="store_true")
     parser.add_argument("--exclude-rembg",    default="")
     parser.add_argument("--skip-files",       default="")
-    parser.add_argument("--rembg-fallback",   default="auto", choices=["auto", "manual"])
+    parser.add_argument("--rembg-fallback",   default="auto")
     parser.add_argument("--wipe-input-after-run", action="store_true")
     parser.add_argument("--upscale-max-px",   type=int, default=0)
     parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
+    rembg_fallback_raw = args.rembg_fallback
+    args.rembg_fallback = _normalize_rembg_fallback(args.rembg_fallback)
+    if str(rembg_fallback_raw or "").strip().lower() != args.rembg_fallback:
+        warn("rembg fallback mode is now automatic; normalizing to 'auto'.")
 
     header()
 

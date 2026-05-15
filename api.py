@@ -84,7 +84,7 @@ TEMPLATES_DIR = BASE_DIR / _cfg.get("paths", "templates_dir", fallback="template
 SESSION_FILE  = BASE_DIR / "session.json"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 
-SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".avif"}
+SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".avif"}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
 
 def _is_avif_decode_supported() -> bool:
@@ -96,6 +96,8 @@ def _is_avif_decode_supported() -> bool:
 
 _AVIF_DECODE_SUPPORTED = _is_avif_decode_supported()
 
+_ALLOWED_REMBG_FALLBACKS = {"auto"}
+
 def _open_image_checked(path: Path) -> Image.Image:
     if path.suffix.lower() == ".avif" and not _AVIF_DECODE_SUPPORTED:
         raise HTTPException(status_code=400, detail=AVIF_DECODE_ERROR)
@@ -106,6 +108,10 @@ def _open_image_checked(path: Path) -> Image.Image:
         if path.suffix.lower() == ".avif":
             raise HTTPException(status_code=400, detail=AVIF_DECODE_ERROR) from e
         raise
+
+def _normalize_rembg_fallback(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in _ALLOWED_REMBG_FALLBACKS else "auto"
 
 def _g(key, fallback):
     return _cfg.getint("guides", key, fallback=fallback)
@@ -349,6 +355,24 @@ app.add_middleware(
 _pipeline_running = False
 _pipeline_proc: asyncio.subprocess.Process | None = None
 
+def _terminate_process_tree_by_pid(pid: int | None) -> None:
+    if not pid:
+        return
+    try:
+        if platform.system() == "Windows":
+            subprocess.call(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+        import signal
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except Exception:
+        pass
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/config")
@@ -390,7 +414,7 @@ def browse_file(initial: str = "", filter: str = ""):
         root.focus_force()
         root.withdraw()
         filetypes = (
-            [("Images", "*.png *.jpg *.jpeg *.webp *.tiff *.avif"), ("All files", "*.*")]
+            [("Images", "*.png *.jpg *.jpeg *.webp *.tif *.tiff *.avif"), ("All files", "*.*")]
             if filter == "image" else [("All files", "*.*")]
         )
         path = filedialog.askopenfilename(
@@ -513,11 +537,13 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
     size: max dimension in pixels (default 800). Original returned if already smaller."""
     p = _resolve_safe_path(path, must_exist=True, allow_file=True, allow_dir=False)
     if not p.exists():
-        raise HTTPException(status_code=404, detail=f"Not found: {path}")
+        raise HTTPException(status_code=404, detail=f"Missing file: {path}")
     if p.suffix.lower() not in SUPPORTED_EXTS:
-        raise HTTPException(status_code=400, detail="Unsupported file type")
+        raise HTTPException(status_code=400, detail="Unsupported file type for preview")
 
     size = max(64, min(1600, size))
+    img: Image.Image | None = None
+    fmt = "unknown"
 
     try:
         img = _open_image_checked(p)
@@ -550,8 +576,10 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
                         headers={"Cache-Control": "public, max-age=60"})
     except HTTPException:
         raise
+    except (UnidentifiedImageError, OSError) as e:
+        raise HTTPException(status_code=400, detail=f"Preview decode failed: {e}") from e
     except Exception as e:
-        detail = f"Preview generation failed (mode={getattr(img, 'mode', 'unknown')}, fmt={locals().get('fmt', 'unknown')}): {e}"
+        detail = f"Preview generation failed (mode={getattr(img, 'mode', 'unknown')}, fmt={fmt}): {e}"
         raise HTTPException(status_code=500, detail=detail)
 
 
@@ -749,7 +777,12 @@ def _load_saved_settings_file() -> dict:
         return {}
     try:
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        processing = data.get("processing")
+        if isinstance(processing, dict) and "rembg_fallback" in processing:
+            processing["rembg_fallback"] = _normalize_rembg_fallback(processing.get("rembg_fallback"))
+        return data
     except Exception:
         return {}
 
@@ -770,6 +803,9 @@ def save_settings(payload: SettingsPayload):
         existing = _load_saved_settings_file()
         incoming = payload.settings if isinstance(payload.settings, dict) else {}
         merged = _merged_settings(existing, incoming)
+        processing = merged.get("processing")
+        if isinstance(processing, dict) and "rembg_fallback" in processing:
+            processing["rembg_fallback"] = _normalize_rembg_fallback(processing.get("rembg_fallback"))
         SETTINGS_FILE.write_text(
             json.dumps(merged, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -826,7 +862,7 @@ async def run_pipeline(cfg: PipelineConfig):
         rembg_model = (cfg.rembg_model or "").strip() or _s.get("processing", {}).get("rembg_model", "birefnet-general")
         if rembg_model:
             cmd += ["--rembg-model", rembg_model]
-        rembg_fallback = _s.get("processing", {}).get("rembg_fallback", "auto")
+        rembg_fallback = _normalize_rembg_fallback(_s.get("processing", {}).get("rembg_fallback", "auto"))
         if rembg_fallback:
             cmd += ["--rembg-fallback", str(rembg_fallback)]
         if _s.get("processing", {}).get("wipe_input_after_run", False):
@@ -942,18 +978,8 @@ async def run_pipeline(cfg: PipelineConfig):
         finally:
             if proc and proc.returncode is None:
                 try:
-                    if platform.system() == "Windows":
-                        subprocess.call(
-                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-                    else:
-                        proc.terminate()
-                        try:
-                            await asyncio.wait_for(proc.wait(), timeout=2)
-                        except asyncio.TimeoutError:
-                            proc.kill()
+                    _terminate_process_tree_by_pid(proc.pid)
+                    await asyncio.wait_for(proc.wait(), timeout=2)
                 except Exception:
                     pass
             _pipeline_running = False
@@ -966,25 +992,14 @@ async def run_pipeline(cfg: PipelineConfig):
 async def stop_pipeline():
     global _pipeline_proc, _pipeline_running
 
-    pid = _pipeline_proc.pid if _pipeline_proc else None
-
-    if platform.system() == "Windows":
-        if pid:
-            subprocess.call(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        subprocess.call(
-            ["taskkill", "/F", "/IM", "realesrgan-ncnn-vulkan.exe"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-    else:
-        if pid:
-            try:
-                import signal
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+    proc = _pipeline_proc
+    pid = proc.pid if proc else None
+    _terminate_process_tree_by_pid(pid)
+    if proc and proc.returncode is None:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2)
+        except Exception:
+            pass
 
     _pipeline_proc    = None
     _pipeline_running = False
