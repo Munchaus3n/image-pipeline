@@ -952,7 +952,7 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
 
 // BUG-18 FIX (receiver side): added onGoToTemplates to prop signature.
 // main.jsx passes this prop but the old signature omitted it, so it was silently ignored.
-export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
+export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
   const [folderMode, setFolderMode] = useState("bulk");
   const [doUpscale, setDoUpscale] = useState(true);
   const [scale, setScale] = useState("2");
@@ -966,6 +966,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
   const [errOpen, setErrOpen] = useState(true);
   const [resumeSession, setResumeSession] = useState(null);
   const [showResume, setShowResume] = useState(false);
+  const doneNotifiedRef = useRef(false);
 
   // BUG-15 FIX: split settings loading into two concerns:
   // 1. loadSettings — reloads non-path settings (model, flags, sizes).
@@ -1060,6 +1061,19 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
     };
   }, [running]);
 
+  useEffect(() => {
+    if (!done) {
+      doneNotifiedRef.current = false;
+      return;
+    }
+    if (doneNotifiedRef.current) return;
+    doneNotifiedRef.current = true;
+    onPipelineDone?.({
+      canvasSize: parseInt(canvasSize, 10) || 1440,
+      thumbnail,
+    });
+  }, [done, onPipelineDone, canvasSize, thumbnail]);
+
   const handleStart = useCallback(() => {
     const skipList     = removedImages ? [...removedImages] : [];
     const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
@@ -1095,9 +1109,8 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, inputDir, setI
 
   // BUG-02 FIX: pass output root directly (no extra "/output" append).
   const handleGoToEditor = useCallback(() => {
-    const trimmed = outputDir.trim();
-    onGoToEditor({ outputDir: trimmed, canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
-  }, [onGoToEditor, outputDir, canvasSize, thumbnail]);
+    onGoToEditor({ canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
+  }, [onGoToEditor, canvasSize, thumbnail]);
 
   const nothingSelected = !doUpscale && !doRembg;
 

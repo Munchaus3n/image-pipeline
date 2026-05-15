@@ -254,15 +254,16 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     }
     return srcFolder;
   }, [srcFolder]);
+  const activeOutputDir = useMemo(() => outputDir.trim() || outputRoot, [outputDir, outputRoot]);
 
   // ── BUG-06 FIX: convert plain functions to useCallback for stable references ──
 
   // allDone has no state/callback deps — clearSession is a stable import
   const allDone = useCallback(async () => {
     setItems([]); setSelId(null);
-    setStatus(`all images processed.\noutput → ${outputRoot}/Editor/final/`);
+    setStatus(`all images processed.\noutput → ${activeOutputDir}/Editor/final/`);
     await clearSession().catch(() => {});
-  }, [outputRoot]);
+  }, [activeOutputDir]);
 
   // prefetchNextImage: reads template/guides to pre-size the placement
   const prefetchNextImage = useCallback((q, nextIdx) => {
@@ -624,7 +625,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
         payload, srcFolder, queueIdx, comboMode,
         thumbnailProp,
         canvasSizeProp ?? canvasSizeState,
-        outputRoot,
+        activeOutputDir,
       );
       setSaved(true);
       setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}`);
@@ -635,16 +636,16 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
       prefetchRef.current = null;
       setStatus(`save failed: ${e.message}`);
     }
-  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, canvasSizeState, template, advance, prefetchNextImage, outputRoot]);
+  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, canvasSizeState, template, advance, prefetchNextImage, activeOutputDir]);
 
   const doSkip = useCallback(async () => {
     prefetchNextImage(queue, queueIdx + 1);
     if (queueIdx < queue.length) {
-      try { await skipImage(queue[queueIdx], srcFolder, outputRoot); } catch { void 0; }
+      try { await skipImage(queue[queueIdx], srcFolder, activeOutputDir); } catch { void 0; }
     }
     setStatus("skipped.");
     advance();
-  }, [queue, queueIdx, advance, prefetchNextImage, srcFolder, outputRoot]);
+  }, [queue, queueIdx, advance, prefetchNextImage, srcFolder, activeOutputDir]);
 
   const onKeyDown = useCallback((e) => {
     const n = e.shiftKey ? 10 : 1;
@@ -1106,7 +1107,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
           <CollSection label="Output" accent="var(--green)" defaultOpen>
           {/* BUG-03 FIX: was openFolder() with no arg — opened OUTPUT_ROOT on server.
               Now passes srcFolder so Explorer opens the actual session source folder. */}
-          <Btn className="ed-btn" onClick={() => openFolder(outputRoot || srcFolder)} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
+          <Btn className="ed-btn" onClick={() => openFolder(activeOutputDir || srcFolder)} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
             📁 Open Output Folder
           </Btn>
           </CollSection>

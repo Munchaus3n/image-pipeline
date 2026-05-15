@@ -30,7 +30,7 @@ export function Root() {
   const [excludeTags,   setExcludeTags]   = useState([]);
   const [thumbs,        setThumbs]        = useState([]);
   const [removedImages, setRemovedImages] = useState(new Set());
-  const [editorSettings, setEditorSettings] = useState({ outputDir:"", canvasSize:1440, thumbnail:true });
+  const [editorSettings, setEditorSettings] = useState({ canvasSize:1440, thumbnail:true });
   const [editorKey, setEditorKey] = useState(0);
 
   // BUG-11 FIX: theme toggle was sending only { appearance: { theme } } to POST /settings,
@@ -138,6 +138,7 @@ export function Root() {
           excludeTags={excludeTags}
           removedImages={removedImages}
           onGoToEditor={(s) => { setEditorSettings(s); setEditorKey(k => k + 1); setScreen("editor"); }}
+          onPipelineDone={(s) => { setEditorSettings(s); setEditorKey(k => k + 1); }}
           onGoToTemplates={() => setScreen("templates")}
         />
       </div>
@@ -150,7 +151,7 @@ export function Root() {
         <Editor
           key={editorKey}
           onGoPipeline={() => setScreen("pipeline")}
-          outputDir={editorSettings.outputDir}
+          outputDir={outputDir}
           canvasSize={editorSettings.canvasSize}
           thumbnail={editorSettings.thumbnail}
         />

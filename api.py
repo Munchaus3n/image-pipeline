@@ -583,7 +583,13 @@ def skip_image(req: SkipRequest):
         output_base = _output_base_from_src_root(Path(req.src_root))
     else:
         output_base = OUTPUT_ROOT
-    dst = output_base / "Editor" / "skipped" / src.name
+    rel = Path(src.name)
+    if req.src_root:
+        try:
+            rel = src.relative_to(Path(req.src_root))
+        except ValueError:
+            rel = Path(src.name)
+    dst = output_base / "Editor" / "skipped" / rel
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return {"skipped": str(dst)}
