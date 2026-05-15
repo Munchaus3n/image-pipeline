@@ -42,6 +42,13 @@ function normalizePathKey(path = "") {
     .toLowerCase();
 }
 
+const DEFAULT_OUTPUT_IDENTITY = "__default_output__";
+
+function normalizeOutputIdentity(path = "") {
+  const key = normalizePathKey(path);
+  return key || DEFAULT_OUTPUT_IDENTITY;
+}
+
 // Returns canvas-pixel-space bounds for an item.
 // All hit testing and drawing uses these values (DS-space, not CANVAS_SIZE-space).
 function itemBounds(item) {
@@ -269,6 +276,10 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   }, [srcFolder]);
   const activeOutputDir = useMemo(() => outputDir.trim() || outputRoot, [outputDir, outputRoot]);
   const requestedOutputDir = useMemo(() => outputDir.trim(), [outputDir]);
+  const currentOutputIdentity = useMemo(
+    () => normalizeOutputIdentity(requestedOutputDir),
+    [requestedOutputDir],
+  );
 
   // ── BUG-06 FIX: convert plain functions to useCallback for stable references ──
 
@@ -445,11 +456,11 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
 
       if (session.exists) {
         const sessionOutputDir = (session.output_dir ?? "").trim();
-        const outputMismatch = Boolean(currentOutput)
-          && normalizePathKey(sessionOutputDir) !== normalizePathKey(currentOutput);
+        const outputMismatch = normalizeOutputIdentity(sessionOutputDir) !== currentOutputIdentity;
+        const currentOutputLabel = currentOutput || "./output";
 
         if (outputMismatch) {
-          setStatus(`Ignored stale session output (${sessionOutputDir || "./output"}); using current output (${currentOutput}).`);
+          setStatus(`Ignored stale session output (${sessionOutputDir || "./output"}); using current output (${currentOutputLabel}).`);
           await clearSession().catch(() => {});
         } else {
           resumePromptActiveRef.current = true;
@@ -495,7 +506,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     } finally {
       resumePromptActiveRef.current = false;
     }
-  }, [askConfirm, bootstrapReady, clearToEmptySource, initFromFolder, requestedOutputDir]);
+  }, [askConfirm, bootstrapReady, clearToEmptySource, initFromFolder, requestedOutputDir, currentOutputIdentity]);
 
   useEffect(() => {
     loadEditorSource().catch(() => {});
@@ -668,6 +679,19 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     setStatus("undone.");
   }, []);
 
+  const saveSessionCheckpoint = useCallback(async (nextQueueIndex) => {
+    await saveSession({
+      src_root: srcFolder,
+      queue_index: nextQueueIndex,
+      template,
+      output_dir: requestedOutputDir,
+      input_dir: sourceStage === "input" ? srcFolder : "",
+      source_stage: sourceStage,
+      run_id: sessionRunIdRef.current || `editor-${Date.now()}`,
+      timestamp: Date.now(),
+    });
+  }, [srcFolder, template, requestedOutputDir, sourceStage]);
+
   const doSave = useCallback(async () => {
     if (!items.length) return;
     try {
@@ -688,31 +712,23 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
       setSaved(true);
       setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}`);
       setTimeout(() => setSaved(false), 1600);
-      await saveSession({
-        src_root: srcFolder,
-        queue_index: queueIdx + 1,
-        template,
-        output_dir: requestedOutputDir,
-        input_dir: sourceStage === "input" ? srcFolder : "",
-        source_stage: sourceStage,
-        run_id: sessionRunIdRef.current || `editor-${Date.now()}`,
-        timestamp: Date.now(),
-      });
+      await saveSessionCheckpoint(queueIdx + 1);
       advance();
     } catch (e) {
       prefetchRef.current = null;
       setStatus(`save failed: ${e.message}`);
     }
-  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, canvasSizeState, template, advance, prefetchNextImage, activeOutputDir, requestedOutputDir, sourceStage]);
+  }, [items, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, canvasSizeState, advance, prefetchNextImage, activeOutputDir, saveSessionCheckpoint]);
 
   const doSkip = useCallback(async () => {
     prefetchNextImage(queue, queueIdx + 1);
     if (queueIdx < queue.length) {
       try { await skipImage(queue[queueIdx], srcFolder, activeOutputDir); } catch { void 0; }
     }
+    await saveSessionCheckpoint(queueIdx + 1).catch(() => {});
     setStatus("skipped.");
     advance();
-  }, [queue, queueIdx, advance, prefetchNextImage, srcFolder, activeOutputDir]);
+  }, [queue, queueIdx, advance, prefetchNextImage, srcFolder, activeOutputDir, saveSessionCheckpoint]);
 
   const onKeyDown = useCallback((e) => {
     const n = e.shiftKey ? 10 : 1;
