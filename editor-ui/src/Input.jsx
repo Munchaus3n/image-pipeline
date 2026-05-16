@@ -349,6 +349,7 @@ export default function Input({
               {visible.map(entry => {
                 const { absPath, name, imageId, relFolder } = entry;
                 const ext       = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
+                const isAvif    = ext === ".avif";
                 const isSel     = selected.has(imageId);
                 const isExcl    = excludeTags.includes(imageId);
                 const isPreview = previewPath === absPath;
@@ -401,13 +402,17 @@ export default function Input({
                         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                         padding: "8px 6px", gap: 4,
                         background: "var(--img-bg)", color: C.dim, textAlign: "center",
+                        border: `1px dashed ${C.border}`,
                       }}>
+                        <div style={{ fontSize: 16, lineHeight: 1, color: C.dim2 }}>🖼</div>
                         <div style={{
                           fontSize: 9, color: C.text, fontFamily: "JetBrains Mono",
                           maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                         }}>{name}</div>
                         <div style={{ fontSize: 9, color: C.dim2, fontFamily: "JetBrains Mono" }}>{ext || "unknown"}</div>
-                        <div style={{ fontSize: 10, color: C.red }}>Preview unavailable</div>
+                        <div style={{ fontSize: 10, color: C.red }}>
+                          {isAvif ? "AVIF preview unavailable" : "Preview unavailable"}
+                        </div>
                       </div>
                     ) : (
                       <img
@@ -472,6 +477,7 @@ export default function Input({
           const previewEntry = entriesByAbsPath.get(previewPath);
           if (!previewEntry) return null;
           const { name, imageId, relFolder } = previewEntry;
+          const previewExt = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
           const isExcl = excludeTags.includes(imageId);
           return (
             <div style={{
@@ -499,7 +505,9 @@ export default function Input({
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 11, textAlign: "center", padding: 12,
                 }}>
-                  Preview unavailable. Try another image.
+                  {previewExt === ".avif"
+                    ? "AVIF preview unavailable. Check API AVIF decoder support."
+                    : "Preview unavailable. Try another image."}
                 </div>
               ) : (
                 <img

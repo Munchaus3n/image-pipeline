@@ -89,10 +89,13 @@ Manual verification checklist for path flow, pipeline fallbacks, and editor outp
 ## 14) AVIF Input Support
 1. Place at least one `.avif` image in the input folder.
 2. Confirm it appears in Input grid and pipeline source/image counts.
-3. Run pipeline in `bulk`, then repeat in `clean` (or nested subfolder) mode.
-4. Confirm upscale and rembg complete and output files are still written as `.png`.
-5. If Pillow lacks AVIF decoding, confirm the user sees:
-   `AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG.`
+3. Confirm Input grid thumbnail is visible for the AVIF item.
+4. Click the eye icon and confirm right-side preview is visible.
+5. Run pipeline in `bulk`, then repeat in `clean` (or nested subfolder) mode.
+6. Confirm upscale and rembg complete and output files are still written as `.png`.
+7. If AVIF preview decode is unavailable, confirm the API returns HTTP 400 with:
+   `AVIF preview decode failed. Install pillow-avif-plugin in the API environment.`
+8. In that decode-fail case, confirm the Input tile shows a visible fallback message (not a blank tile).
 
 ## 15) TIF Input Support
 1. Place at least one `.tif` image in the input folder.

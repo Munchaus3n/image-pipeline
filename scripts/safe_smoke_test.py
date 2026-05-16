@@ -13,10 +13,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +22,7 @@ from urllib import error, parse, request
 
 
 SANDBOX_TOKEN = "smoke-test-sandbox"
+EXPECTED_AVIF_PREVIEW_ERROR = "AVIF preview decode failed. Install pillow-avif-plugin in the API environment."
 
 
 @dataclass
@@ -332,6 +331,30 @@ def _write_image(path: Path, color: tuple[int, int, int], fmt: str, created: lis
     img.save(path, format=fmt)
 
 
+def _can_write_avif() -> bool:
+    try:
+        from PIL import Image
+        return "AVIF" in Image.SAVE
+    except Exception:
+        return False
+
+
+def _write_avif_sample(path: Path, created: list[tuple[Path, str]]) -> bool:
+    try:
+        from PIL import Image
+    except Exception:
+        return False
+    if not path.parent.exists():
+        _ensure_dir(path.parent, created)
+    if not path.exists():
+        _record_created(created, path, "file")
+    try:
+        Image.new("RGB", (32, 32), color=(90, 160, 220)).save(path, format="AVIF")
+        return True
+    except Exception:
+        return False
+
+
 def setup_sandbox(sandbox: Path, created: list[tuple[Path, str]]) -> dict[str, Path]:
     _ensure_dir(sandbox, created)
     input_dir = sandbox / "input"
@@ -372,7 +395,16 @@ def _json_dict(resp: ApiResponse) -> dict[str, Any]:
     raise ValueError("Response JSON is not an object.")
 
 
-def run_api_checks(repo_root: Path, api_url: str, sandbox: Path, results: list[CheckResult], created: list[tuple[Path, str]], verbose: bool = False) -> None:
+def run_api_checks(
+    repo_root: Path,
+    api_url: str,
+    sandbox: Path,
+    results: list[CheckResult],
+    created: list[tuple[Path, str]],
+    *,
+    avif_sample: Path | None = None,
+    verbose: bool = False,
+) -> None:
     client = ApiClient(api_url, verbose=verbose)
 
     try:
@@ -380,6 +412,28 @@ def run_api_checks(repo_root: Path, api_url: str, sandbox: Path, results: list[C
     except Exception as e:
         results.append(CheckResult("FAIL", "Sandbox setup", f"Failed to build sandbox fixtures: {e}"))
         return
+
+    # API diagnostics: AVIF decode capabilities in the running API process.
+    status_resp = client.request("GET", "/pipeline/status")
+    if status_resp.ok:
+        try:
+            payload = _json_dict(status_resp)
+            avif_supported = payload.get("avif_decode_supported")
+            avif_registered = payload.get("pillow_registered_avif")
+            imported = payload.get("pillow_avif_imported")
+            import_error = payload.get("pillow_avif_import_error")
+            details = (
+                f"avif_decode_supported={avif_supported} "
+                f"pillow_registered_avif={avif_registered} "
+                f"pillow_avif_imported={imported}"
+            )
+            if import_error:
+                details += f" import_error={import_error}"
+            results.append(CheckResult("PASS", "API AVIF diagnostics", details))
+        except Exception as e:
+            results.append(CheckResult("WARN", "API AVIF diagnostics", f"Could not parse /pipeline/status diagnostics: {e}"))
+    else:
+        results.append(CheckResult("WARN", "API AVIF diagnostics", f"Could not fetch /pipeline/status: HTTP {status_resp.status}"))
 
     # 1) /source with custom empty output
     r1 = client.request("GET", "/source", params={"output_dir": str(paths["output_empty"])})
@@ -453,7 +507,7 @@ def run_api_checks(repo_root: Path, api_url: str, sandbox: Path, results: list[C
     results.append(CheckResult(
         "PASS" if r5.ok else "FAIL",
         "API /preview .tif",
-        f"status={r5.status} url={r5.url} detail={r5.text or r5.error}",
+        f"status={r5.status} url={r5.url} detail={r5.error if not r5.ok else 'ok'}",
     ))
 
     # 6) /preview broken PNG
@@ -466,7 +520,45 @@ def run_api_checks(repo_root: Path, api_url: str, sandbox: Path, results: list[C
         f"status={r6.status} has_error_text={bool(text6.strip())} detail={text6 or r6.error}",
     ))
 
-    # 7) preview cache check (WARN if cannot verify)
+    # 7) /preview .avif using generated sample or caller-provided sample
+    avif_candidate: Path | None = None
+    if _can_write_avif():
+        generated_avif = paths["input"] / "sample.avif"
+        if _write_avif_sample(generated_avif, created):
+            avif_candidate = generated_avif
+            results.append(CheckResult("PASS", "AVIF sample prep", f"Generated AVIF sample: {generated_avif}"))
+        else:
+            results.append(CheckResult("WARN", "AVIF sample prep", "Pillow appears to support AVIF save but sample generation failed."))
+    if avif_candidate is None and avif_sample is not None:
+        if avif_sample.exists() and avif_sample.is_file():
+            avif_candidate = avif_sample
+            results.append(CheckResult("PASS", "AVIF sample prep", f"Using --avif-sample path: {avif_sample}"))
+        else:
+            results.append(CheckResult("WARN", "AVIF sample prep", f"--avif-sample not found: {avif_sample}"))
+
+    if avif_candidate is None:
+        results.append(CheckResult("WARN", "API /preview .avif", "No AVIF sample available; skipped AVIF preview check."))
+    else:
+        ravif = client.request("GET", "/preview", params={"path": str(avif_candidate), "size": "200"})
+        cavif = ravif.headers.get("content-type", "")
+        ok_content = cavif.startswith("image/png") or cavif.startswith("image/jpeg")
+        if ravif.ok and ok_content:
+            results.append(CheckResult(
+                "PASS",
+                "API /preview .avif",
+                f"status={ravif.status} content-type={cavif!r} url={ravif.url}",
+            ))
+        else:
+            detail = ravif.text or ravif.error
+            if ravif.status == 400 and EXPECTED_AVIF_PREVIEW_ERROR not in detail:
+                detail = f"{detail} (expected detail: {EXPECTED_AVIF_PREVIEW_ERROR})"
+            results.append(CheckResult(
+                "FAIL",
+                "API /preview .avif",
+                f"status={ravif.status} content-type={cavif!r} detail={detail}",
+            ))
+
+    # 8) preview cache check (WARN if cannot verify)
     cache_dir = repo_root / ".cache" / "previews"
     if cache_dir.exists():
         files = [p for p in cache_dir.glob("*") if p.is_file()]
@@ -484,7 +576,7 @@ def run_api_checks(repo_root: Path, api_url: str, sandbox: Path, results: list[C
         else:
             results.append(CheckResult("WARN", "Preview cache artifacts", "Preview requests failed, so cache verification was skipped."))
 
-    # 8) settings merge safety with backup + restore
+    # 9) settings merge safety with backup + restore
     settings_file = repo_root / "settings.json"
     backup_path = sandbox / "settings.backup.json"
     if not settings_file.exists():
@@ -582,6 +674,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Safe local smoke test for key stability fixes.")
     parser.add_argument("--api-url", default="", help="Run API smoke checks against a running local API.")
     parser.add_argument("--sandbox", default="", help="Sandbox folder path for smoke data (default: repo/.smoke-test-sandbox).")
+    parser.add_argument("--avif-sample", default="", help="Optional AVIF file path used for /preview AVIF smoke check when local AVIF generation is unavailable.")
     parser.add_argument("--cleanup", action="store_true", help="Delete the sandbox folder after checks (safe-guarded).")
     parser.add_argument("--keep-sandbox", action="store_true", help="Keep sandbox folder even when --cleanup is set.")
     parser.add_argument("--danger-run-pipeline", action="store_true", default=False, help="Reserved; intentionally not implemented.")
@@ -610,7 +703,16 @@ def main() -> int:
     run_static_checks(repo_root, results)
 
     if args.api_url.strip():
-        run_api_checks(repo_root, args.api_url.strip(), sandbox, results, created, verbose=args.verbose)
+        avif_sample = Path(args.avif_sample).expanduser().resolve() if args.avif_sample.strip() else None
+        run_api_checks(
+            repo_root,
+            args.api_url.strip(),
+            sandbox,
+            results,
+            created,
+            avif_sample=avif_sample,
+            verbose=args.verbose,
+        )
     else:
         results.append(CheckResult("PASS", "Mode", "Static checks mode only (no API calls performed)."))
 

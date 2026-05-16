@@ -32,11 +32,14 @@ from contextlib import asynccontextmanager
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-# If pillow-avif-plugin is installed, importing it registers AVIF decoders in Pillow.
+# If pillow-avif-plugin is installed, importing it may register AVIF decoders in Pillow.
+_PILLOW_AVIF_IMPORTED = False
+_PILLOW_AVIF_IMPORT_ERROR = ""
 try:
     import pillow_avif  # noqa: F401
-except Exception:
-    pass
+    _PILLOW_AVIF_IMPORTED = True
+except Exception as e:
+    _PILLOW_AVIF_IMPORT_ERROR = f"{type(e).__name__}: {e}"
 
 # Thumbnail writes are CPU+disk bound — run them on a thread pool so they
 # never block the save response. The editor advances immediately; thumb
@@ -90,18 +93,23 @@ PREVIEW_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 PREVIEW_CACHE_CLEANUP_INTERVAL_SECONDS = 15 * 60
 
 SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".avif"}
-AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
+AVIF_DECODE_ERROR = "AVIF preview decode failed. Install pillow-avif-plugin in the API environment."
 
 PREVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 _preview_cache_cleanup_lock = threading.Lock()
 _preview_cache_last_cleanup = 0.0
 
-def _is_avif_decode_supported() -> bool:
+def _registered_avif_decoder() -> str | None:
     try:
         ext_map = Image.registered_extensions()
-        return ext_map.get(".avif") is not None
+        value = ext_map.get(".avif")
+        return str(value) if value is not None else None
     except Exception:
-        return False
+        return None
+
+
+def _is_avif_decode_supported() -> bool:
+    return _registered_avif_decoder() is not None
 
 _AVIF_DECODE_SUPPORTED = _is_avif_decode_supported()
 
@@ -214,7 +222,14 @@ def mirror_skip_path(src: Path, src_root: Path, output_base: Path | None = None)
 # On all platforms: also allow the user's home directory.
 _drive_roots: set[Path] = set()
 if platform.system() == "Windows":
-    _drive_roots = {Path(f"{d}:\\") for d in string.ascii_uppercase if Path(f"{d}:\\").exists()}
+    for d in string.ascii_uppercase:
+        root = Path(f"{d}:\\")
+        try:
+            if root.exists():
+                _drive_roots.add(root)
+        except OSError:
+            # Some mapped/system drives can raise access errors on stat().
+            continue
 _drive_roots.add(Path.home())
 
 _ALLOWED_ROOTS = tuple(p.resolve() for p in (
@@ -940,7 +955,14 @@ def get_history_path():
 
 @app.get("/pipeline/status")
 def pipeline_status():
-    return {"running": _pipeline_running}
+    registered = _registered_avif_decoder()
+    return {
+        "running": _pipeline_running,
+        "avif_decode_supported": bool(registered),
+        "pillow_registered_avif": bool(registered),
+        "pillow_avif_imported": _PILLOW_AVIF_IMPORTED,
+        "pillow_avif_import_error": _PILLOW_AVIF_IMPORT_ERROR if not _PILLOW_AVIF_IMPORTED else "",
+    }
 
 @app.post("/pipeline/run")
 async def run_pipeline(cfg: PipelineConfig):

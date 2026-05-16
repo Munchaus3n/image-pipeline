@@ -29,6 +29,7 @@
     "input_dir": "",
     "output_dir": "",
     "do_upscale": true,
+    "do_rembg": true,
     "upscale_scale": "2"
   },
   "appearance": {
