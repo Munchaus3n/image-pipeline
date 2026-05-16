@@ -406,6 +406,8 @@ def run_api_checks(
     verbose: bool = False,
 ) -> None:
     client = ApiClient(api_url, verbose=verbose)
+    api_pillow_avif_imported: bool | None = None
+    api_pillow_avif_import_error = ""
 
     try:
         paths = setup_sandbox(sandbox, created)
@@ -422,6 +424,10 @@ def run_api_checks(
             avif_registered = payload.get("pillow_registered_avif")
             imported = payload.get("pillow_avif_imported")
             import_error = payload.get("pillow_avif_import_error")
+            if isinstance(imported, bool):
+                api_pillow_avif_imported = imported
+            if isinstance(import_error, str):
+                api_pillow_avif_import_error = import_error
             details = (
                 f"avif_decode_supported={avif_supported} "
                 f"pillow_registered_avif={avif_registered} "
@@ -538,6 +544,13 @@ def run_api_checks(
 
     if avif_candidate is None:
         results.append(CheckResult("WARN", "API /preview .avif", "No AVIF sample available; skipped AVIF preview check."))
+    elif api_pillow_avif_imported is False:
+        results.append(CheckResult(
+            "FAIL",
+            "API /preview .avif",
+            "AVIF sample exists but pillow_avif is missing in API environment."
+            + (f" import_error={api_pillow_avif_import_error}" if api_pillow_avif_import_error else ""),
+        ))
     else:
         ravif = client.request("GET", "/preview", params={"path": str(avif_candidate), "size": "200"})
         cavif = ravif.headers.get("content-type", "")
