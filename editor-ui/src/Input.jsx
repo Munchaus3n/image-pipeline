@@ -263,13 +263,13 @@ export default function Input({
 
         {/* Go to Process */}
         <button className="inp-btn input-next-button" onClick={onGoToProcess} disabled={!inputDir.trim()} style={{
-          background: inputDir.trim() ? "var(--green-bg)" : C.dim2,
-          color: inputDir.trim() ? C.green : C.dim,
-          border: `1px solid ${inputDir.trim() ? "var(--green-bdr)" : C.border}`,
+          background: inputDir.trim() ? "var(--accent)" : C.panel2,
+          color: inputDir.trim() ? "var(--accent-fg)" : C.dim2,
+          border: `1px solid ${inputDir.trim() ? "color-mix(in srgb, var(--accent) 72%, white 8%)" : C.border}`,
           borderRadius: 4, padding: "6px 18px", fontSize: 12, fontWeight: 600,
           cursor: inputDir.trim() ? "pointer" : "not-allowed",
           fontFamily: "inherit", flexShrink: 0,
-        }}>▶  Go to Process</button>
+        }}>Go to Process →</button>
       </div>
 
       {/* ── Selection action bar ── */}
@@ -298,7 +298,7 @@ export default function Input({
           <button className="inp-btn input-selection-clear" onClick={selectNone} style={{
             background: "transparent", color: C.dim, border: "none",
             fontSize: 11, cursor: "pointer", fontFamily: "inherit", marginLeft: "auto",
-          }}>✕ Clear selection</button>
+          }}>Clear</button>
         </div>
       )}
 

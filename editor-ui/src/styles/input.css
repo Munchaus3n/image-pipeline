@@ -70,3 +70,86 @@ input[type=number] { color-scheme: dark; }
   outline-offset: 0;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
+
+.input-toolbar {
+  margin: 10px 12px 8px;
+  padding: 10px 12px !important;
+  gap: 10px !important;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg)) !important;
+  box-shadow: var(--shadow);
+}
+
+.input-folder-group {
+  gap: 8px !important;
+}
+
+.input-path-field,
+.input-search-field {
+  min-height: 42px;
+  border-radius: 12px !important;
+  border-color: color-mix(in srgb, var(--border) 92%, transparent) !important;
+  background: color-mix(in srgb, var(--panel2) 86%, var(--panel)) !important;
+  padding: 0 14px !important;
+}
+
+.input-path-field::placeholder,
+.input-search-field::placeholder {
+  color: color-mix(in srgb, var(--dim2) 88%, transparent);
+}
+
+.input-count {
+  opacity: 0.82;
+  letter-spacing: 0.03em;
+}
+
+.input-toolbar .input-browse-button {
+  min-height: 40px;
+  border-radius: 11px !important;
+  padding: 0 12px !important;
+  font-size: 12px !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.input-toolbar .input-select-button {
+  border-radius: 11px !important;
+  padding: 0 12px !important;
+  min-height: 36px;
+}
+
+.input-toolbar .input-next-button {
+  min-height: 44px;
+  border-radius: 999px !important;
+  padding: 0 20px !important;
+  letter-spacing: 0.04em;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.input-toolbar .input-next-button:disabled {
+  box-shadow: none;
+}
+
+.input-selection-bar {
+  margin: 0 12px 10px;
+  padding: 9px 16px !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg)) !important;
+}
+
+.input-selection-count {
+  min-width: 94px;
+}
+
+.input-selection-action {
+  border-radius: 999px !important;
+  min-height: 34px;
+  padding: 0 14px !important;
+}
+
+.input-selection-clear {
+  opacity: 0.85;
+  padding-right: 2px;
+}
