@@ -142,24 +142,70 @@
   min-height: 0;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1100px) {
   .app-sidebar {
     width: 236px;
     min-width: 236px;
-    padding: 16px 14px;
+    gap: 14px;
+    padding: 16px 12px;
+  }
+
+  .app-logo {
+    gap: 10px;
+    padding-bottom: 8px;
   }
 
   .app-title {
     font-size: 28px;
   }
 
+  .app-version {
+    font-size: 10px;
+  }
+
   .app-tab {
+    gap: 8px;
+    border-radius: 12px;
+    padding: 9px 11px;
     font-size: 16px;
-    padding: 10px 12px;
   }
 
   .app-tab-index {
     min-width: 24px;
     font-size: 13px;
+  }
+}
+
+@media (max-width: 980px) {
+  .app-sidebar {
+    width: 212px;
+    min-width: 212px;
+    gap: 12px;
+    padding: 14px 10px;
+  }
+
+  .app-title {
+    font-size: 22px;
+  }
+
+  .app-version {
+    margin-top: 4px;
+    font-size: 9px;
+  }
+
+  .app-tab {
+    font-size: 14px;
+    padding: 8px 10px;
+    border-radius: 10px;
+  }
+
+  .app-tab-index {
+    min-width: 18px;
+    font-size: 11px;
+  }
+
+  .app-theme-toggle {
+    padding: 9px 10px;
+    font-size: 12px;
   }
 }
