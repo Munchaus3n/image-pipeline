@@ -470,7 +470,6 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
                 {s.done && <div style={{ fontSize: 14, color: C.green, lineHeight: 1, marginBottom: 2 }}>✓</div>}
                 {running && s.active && (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-                    <Spinner color={C.yellow} size={13} />
                     <span style={{ fontSize: 10, color: C.yellow, fontWeight: 600 }}>{s.sub}</span>
                   </div>
                 )}
@@ -593,7 +592,9 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages, compa
               position: "absolute", inset: 0, display: "flex", alignItems: "center",
               justifyContent: "center",
             }}>
-              <Spinner color={C.dim} size={18} />
+              <span style={{ fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono", letterSpacing: "0.05em" }}>
+                Loading preview...
+              </span>
             </div>
           )}
           <img
@@ -617,7 +618,6 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages, compa
       ) : (
         <div className="pipeline-live-empty" style={{ display: "flex", alignItems: "center", justifyContent: "center",
           height: "100%", gap: 8, color: C.dim2, fontSize: 11 }}>
-          {running ? <Spinner color={C.dim2} size={13} /> : null}
           <span style={{ fontFamily: "JetBrains Mono" }}>
             {running ? "Waiting for first preview..." : "No live preview yet"}
           </span>
