@@ -147,6 +147,12 @@
 .pipeline-results-area {
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
+}
+
+.pipeline-workspace {
+  min-width: 0;
+  min-height: 0;
 }
 
 .pipeline-results-column {
@@ -155,7 +161,7 @@
 }
 
 .pipeline-status-area {
-  min-height: clamp(330px, 48vh, 540px);
+  min-height: clamp(360px, 52vh, 620px);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -163,7 +169,7 @@
 
 .pipeline-live-area {
   flex: 1;
-  min-height: 0;
+  min-height: 210px;
   display: flex;
 }
 
@@ -179,6 +185,11 @@
 .pipeline-status-card-slot .pipeline-ready-card,
 .pipeline-status-card-slot .pipeline-progress-card {
   margin-top: 0 !important;
+  min-height: 118px;
+}
+
+.pipeline-drop-hint {
+  background: color-mix(in srgb, var(--panel2) 62%, var(--panel));
 }
 
 .pipeline-ready-card {
@@ -303,7 +314,7 @@
   }
 
   .pipeline-status-area {
-    min-height: clamp(300px, 45vh, 500px);
+    min-height: clamp(320px, 47vh, 540px);
   }
 }
 
@@ -319,7 +330,7 @@
 
   .pipeline-status-area {
     flex-basis: 50% !important;
-    min-height: clamp(280px, 40vh, 440px);
+    min-height: clamp(300px, 42vh, 460px);
   }
 
   .pipeline-ready-card {

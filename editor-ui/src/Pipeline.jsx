@@ -401,71 +401,6 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
     setBrowseLoading(false);
   };
 
-  if (!running && !done) return (
-    <div className="pipeline-zone pipeline-drop-zone" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-      style={{
-        flex: 1, display: "flex", flexDirection: "column",
-        margin: "12px 12px 0 0", borderRadius: 6, overflow: "hidden",
-        border: `2px dashed ${dragOver ? C.blue : C.border}`,
-        background: dragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
-        transition: "border-color 0.15s, background 0.15s"
-      }}>
-
-      {droppedFiles.length === 0 ? (
-        <div style={{
-          flex: 1, display: "flex", flexDirection: "column",
-          alignItems: "center", justifyContent: "center", gap: 10, padding: 20
-        }}>
-          <div style={{ fontSize: 28, opacity: 0.18 }}>⬇</div>
-          <div style={{ fontSize: 13, color: C.dim, textAlign: "center", lineHeight: 1.8 }}>
-            Drop images here to set input folder
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button className="pipeline-btn pipeline-browse-button pipeline-secondary-button" onClick={browseInput} disabled={browseLoading} style={{
-              background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
-              borderRadius: 4, padding: "6px 16px", fontSize: 12, cursor: "pointer",
-              fontFamily: "inherit", opacity: browseLoading ? 0.6 : 1
-            }}>
-              {browseLoading ? "…" : "Browse folder"}
-            </button>
-          </div>
-          {inputDir && (
-            <div style={{
-              fontSize: 10, color: C.green, fontFamily: "JetBrains Mono",
-              maxWidth: 360, textAlign: "center", wordBreak: "break-all", marginTop: 4
-            }}>
-              {inputDir}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 12, overflow: "hidden" }}>
-          <div style={{ fontSize: 11, color: C.green, marginBottom: 8 }}>
-            {droppedFiles.length} file{droppedFiles.length > 1 ? "s" : ""} from{" "}
-            <span style={{ fontFamily: "JetBrains Mono", fontSize: 10, color: C.dim }}>
-              {inputDir || "dropped folder"}
-            </span>
-            <button className="pipeline-btn pipeline-secondary-button" onClick={() => { setDroppedFiles([]); setInputDir(""); }}
-              style={{
-                marginLeft: 10, background: "transparent", color: C.dim, border: "none",
-                fontSize: 11, cursor: "pointer", fontFamily: "inherit"
-              }}>clear ×</button>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, overflowY: "auto", alignContent: "flex-start" }}>
-            {droppedFiles.map((f, i) => (
-              <div key={i} style={{
-                background: C.panel2, border: `1px solid ${C.border}`,
-                borderRadius: 3, padding: "3px 8px", fontSize: 10,
-                fontFamily: "JetBrains Mono", color: C.text,
-                maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
-              }}>{f}</div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
   if (done) return (
     <div className="pipeline-zone pipeline-progress-card" style={{
       flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
@@ -485,12 +420,20 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
     { id: "upscale", label: "Upscaling",  sub: "NCNN Vulkan",              active: stage === "upscale", done: stagesDone.upscale, skip: !doUpscale },
     { id: "rembg",   label: "Remove BG",  sub: rembgModel || "birefnet-general", active: stage === "rembg",   done: stagesDone.rembg,   skip: !doRembg  },
   ];
+  const idle = !running;
 
   return (
-    <div className="pipeline-zone pipeline-progress-card" style={{
+    <div
+      className={`pipeline-zone pipeline-progress-card ${idle ? "pipeline-drop-zone" : ""}`.trim()}
+      onDragOver={idle ? onDragOver : undefined}
+      onDragLeave={idle ? onDragLeave : undefined}
+      onDrop={idle ? onDrop : undefined}
+      style={{
       flex: 1, display: "flex", flexDirection: "column",
       margin: "12px 12px 0 0", borderRadius: 6,
-      border: `1px solid ${C.border}`, background: C.panel, overflow: "hidden"
+      border: idle ? `2px dashed ${dragOver ? C.blue : C.border}` : `1px solid ${C.border}`,
+      background: idle && dragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : C.panel,
+      overflow: "hidden", transition: "border-color 0.15s, background 0.15s"
     }}>
       <style>{`
         @keyframes pulseFade { 0%,100%{opacity:1} 50%{opacity:0.4} }
@@ -522,13 +465,18 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
                 boxShadow: cardGlow, transition: "all 0.4s ease"
               }}>
                 {s.done && <div style={{ fontSize: 20, color: C.green, lineHeight: 1, marginBottom: 4 }}>✓</div>}
-                {s.active && (
+                {running && s.active && (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, animation: "pulseFade 1.4s ease-in-out infinite" }}>
                     <Spinner color={C.yellow} size={13} />
                     <span style={{ fontSize: 10, color: C.yellow, fontWeight: 600 }}>{s.sub}</span>
                   </div>
                 )}
-                {!s.active && !s.done && (
+                {!running && !s.done && (
+                  <div style={{ fontSize: 10, color: textColor }}>
+                    {s.skip ? "skipped" : "ready"}
+                  </div>
+                )}
+                {running && !s.active && !s.done && (
                   <div style={{ fontSize: 10, color: textColor }}>
                     {s.skip ? "skipped" : s.sub}
                   </div>
@@ -550,6 +498,27 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
           );
         })}
       </div>
+
+      {idle && (
+        <div className="pipeline-drop-hint" style={{
+          borderTop: `1px solid ${C.border}`, padding: "8px 12px",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+          flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 10, color: C.dim, lineHeight: 1.5 }}>
+            {droppedFiles.length > 0
+              ? `${droppedFiles.length} dropped file${droppedFiles.length > 1 ? "s" : ""} · ${inputDir || "source set"}`
+              : "Optional: drop a folder here to set input source."}
+          </div>
+          <button className="pipeline-btn pipeline-browse-button pipeline-secondary-button" onClick={browseInput} disabled={browseLoading} style={{
+            background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
+            borderRadius: 4, padding: "6px 14px", fontSize: 11, cursor: "pointer",
+            fontFamily: "inherit", opacity: browseLoading ? 0.6 : 1, flexShrink: 0,
+          }}>
+            {browseLoading ? "…" : "Browse"}
+          </button>
+        </div>
+      )}
 
       {recentDone.length > 0 && (
         <div className="pipeline-recent-strip" style={{
@@ -745,7 +714,7 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
   );
 }
 
-function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, skipCount }) {
+function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, skipCount, canvasSize, thumbnail, inputDir }) {
   return (
     <div className="pipeline-ready-card" style={{
       marginTop: 8,
@@ -772,11 +741,14 @@ function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, sk
       </div>
       {!nothingSelected && (
         <div style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono" }}>
+          {inputDir ? "source ready · " : ""}
           {doUpscale ? "upscale " : ""}
           {doUpscale && doRembg ? "· " : ""}
           {doRembg ? "remove-bg" : ""}
           {activeExcludeCount > 0 ? ` · ${activeExcludeCount} excluded` : ""}
           {skipCount > 0 ? ` · ${skipCount} skipped` : ""}
+          {canvasSize ? ` · ${canvasSize}px` : ""}
+          {thumbnail ? " · thumbs on" : " · thumbs off"}
         </div>
       )}
     </div>
@@ -1356,22 +1328,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
         </div>
 
         {/* Right zone */}
-        <div className="pipeline-results-area" style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px" }}>
+        <div className="pipeline-results-area pipeline-workspace" style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px" }}>
           <div className="pipeline-results-column" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
 
             <div className="pipeline-status-area" style={{ flex: "0 0 56%", minHeight: 0, display: "flex", flexDirection: "column" }}>
-              <div className="pipeline-live-area">
-                <Zone1
-                  running={running} done={done}
-                  stage={stage} stagesDone={stagesDone}
-                  recentDone={recentDone}
-                  imageDone={imageDone} totalImages={totalImages}
-                  doUpscale={doUpscale} doRembg={doRembg}
-                  inputDir={inputDir} setInputDir={setInputDir}
-                  rembgModel={rembgModel}
-                />
-              </div>
-
               <div className="pipeline-status-card-slot">
                 {(running || done) && (
                   <Zone2
@@ -1386,12 +1346,27 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                 {!running && !done && (
                   <ReadyCard
                     nothingSelected={nothingSelected}
-                    doUpscale={doUpscale}
-                    doRembg={doRembg}
-                    activeExcludeCount={activeExcludeCount}
-                    skipCount={skipCount}
+                  doUpscale={doUpscale}
+                  doRembg={doRembg}
+                  activeExcludeCount={activeExcludeCount}
+                  skipCount={skipCount}
+                  canvasSize={canvasSize}
+                  thumbnail={thumbnail}
+                  inputDir={inputDir}
                   />
                 )}
+              </div>
+
+              <div className="pipeline-live-area">
+                <Zone1
+                  running={running} done={done}
+                  stage={stage} stagesDone={stagesDone}
+                  recentDone={recentDone}
+                  imageDone={imageDone} totalImages={totalImages}
+                  doUpscale={doUpscale} doRembg={doRembg}
+                  inputDir={inputDir} setInputDir={setInputDir}
+                  rembgModel={rembgModel}
+                />
               </div>
             </div>
 
