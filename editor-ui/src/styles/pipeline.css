@@ -433,24 +433,6 @@
   overflow: hidden;
 }
 
-.pipeline-live-card-summary {
-  background: color-mix(in srgb, #101a31 84%, var(--panel2));
-}
-
-.pipeline-live-card-stage.is-active {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
-  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 14%, #1a2d47), color-mix(in srgb, var(--panel2) 84%, var(--panel)));
-}
-
-.pipeline-live-card-stage.is-done {
-  border-color: color-mix(in srgb, var(--green-bdr) 76%, var(--border));
-  background: linear-gradient(145deg, color-mix(in srgb, var(--green-bg) 62%, var(--panel)), color-mix(in srgb, var(--panel2) 80%, var(--panel)));
-}
-
-.pipeline-live-card-stage.is-skipped {
-  border-color: color-mix(in srgb, var(--yellow-bdr) 56%, var(--border));
-}
-
 .pipeline-live-preview {
   position: relative;
   width: 100%;
@@ -499,30 +481,10 @@
   line-height: 1.4;
 }
 
-.pipeline-live-card-state {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: lowercase;
-  color: color-mix(in srgb, var(--dim) 70%, var(--text) 30%);
-}
-
-.pipeline-live-card-stage.is-active .pipeline-live-card-state {
-  color: color-mix(in srgb, var(--accent) 90%, #c0d2ff);
-}
-
-.pipeline-live-card-stage.is-done .pipeline-live-card-state {
-  color: color-mix(in srgb, var(--green) 92%, #c2f9d8);
-}
-
-.pipeline-live-card-stage.is-skipped .pipeline-live-card-state {
-  color: color-mix(in srgb, var(--yellow) 86%, #ffd998);
-}
-
-.pipeline-live-card-value {
-  font-size: 34px;
-  line-height: 1;
-  font-family: "JetBrains Mono", monospace;
-  color: color-mix(in srgb, var(--accent) 88%, #b8ccff);
+.pipeline-live-empty-has-name {
+  color: color-mix(in srgb, var(--dim) 66%, var(--text) 34%) !important;
+  font-size: 9px !important;
+  word-break: break-word;
 }
 
 .pipeline-status-card-slot {

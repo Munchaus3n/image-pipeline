@@ -148,6 +148,7 @@ function usePipeline() {
   const [oomGpuCount, setOomGpuCount] = useState(0);
   const [imageProgress, setImageProgress] = useState({});
   const [previewPath, setPreviewPath] = useState("");
+  const [livePreviewStrip, setLivePreviewStrip] = useState([]);
 
   const abortRef    = useRef(null);
   const logRef      = useRef(null);
@@ -160,6 +161,7 @@ function usePipeline() {
   const sentinelSet = useRef(new Set());
   const stageRef    = useRef("upscale");
   const recentLog   = useRef([]);
+  const previewPathByFile = useRef(new Map());
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -188,6 +190,16 @@ function usePipeline() {
     return "info";
   }, []);
 
+  const pushLivePreview = useCallback((fname, path = "") => {
+    if (!fname) return;
+    setLivePreviewStrip(prev => {
+      const existing = prev.find(item => item.name === fname);
+      const resolvedPath = path || existing?.path || "";
+      const next = [{ name: fname, path: resolvedPath }, ...prev.filter(item => item.name !== fname)];
+      return next.slice(0, 4);
+    });
+  }, []);
+
   const appendLine = useCallback((raw) => {
     // ── Structured machine-readable tokens ──────────────────────────────────
     if (raw.startsWith("__total__:")) {
@@ -198,6 +210,7 @@ function usePipeline() {
     if (raw.startsWith("__ok_upscale__:")) {
       const fname = raw.slice(15);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "ok" } }));
+      pushLivePreview(fname, previewPathByFile.current.get(fname) || "");
       if (!doneSet.current.has(fname)) {
         doneSet.current.add(fname);
         setImageDone(doneSet.current.size);
@@ -209,6 +222,7 @@ function usePipeline() {
     if (raw.startsWith("__ok_rembg__:")) {
       const fname = raw.slice(13);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "ok" } }));
+      pushLivePreview(fname, previewPathByFile.current.get(fname) || "");
       if (!doneSet.current.has(fname)) {
         doneSet.current.add(fname);
         setImageDone(doneSet.current.size);
@@ -257,6 +271,7 @@ function usePipeline() {
       const fullPath = raw.slice(15);
       const fileName = fullPath.replace(/.*[/\\]/, "");
       setPreviewPath(fullPath);
+      previewPathByFile.current.set(fileName, fullPath);
       if (!sentinelSet.current.has(fileName)) {
         sentinelSet.current.add(fileName);
         setLog(prev => [...prev.slice(-800), { raw: "", kind: "progress", filename: fileName }]);
@@ -289,7 +304,7 @@ function usePipeline() {
         return [...prev.slice(-200), { raw, kind, context: [...recentLog.current.slice(0, -1)] }];
       });
     }
-  }, [classify]);
+  }, [classify, pushLivePreview]);
 
   const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false, upscaleMaxPx = 0 }) => {
     if (running) return;
@@ -305,9 +320,11 @@ function usePipeline() {
     setOomGpuCount(0);
     setImageProgress({});
     setPreviewPath("");
+    setLivePreviewStrip([]);
     stageRef.current = "upscale";
     recentLog.current = [];
     doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set(); sentinelSet.current = new Set();
+    previewPathByFile.current = new Map();
 
     try {
       const r = await fetch(`${BASE}/pipeline/run`, {
@@ -364,32 +381,17 @@ function usePipeline() {
   return {
     running, done, log, errors, imageDone, imageSkipped, imageError,
     totalImages, recentDone, elapsed, stage, stagesDone,
-    upStats, bgStats, imageProgress, oomGpuCount, previewPath,
+    upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip,
     logRef, errorRef, start, stop
   };
 }
 
 // ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
 
-function Zone1({ running, done, stage, stagesDone, imageDone, totalImages, doUpscale, doRembg, previewPath }) {
+function Zone1({ running, imageDone, totalImages, livePreviewStrip }) {
   const totalLabel = totalImages > 0 ? totalImages : "—";
   const processedLabel = `${imageDone}/${totalLabel} processed`;
-
-  const stageCards = [
-    {
-      id: "upscale",
-      label: "Upscaling",
-      status: !doUpscale ? "skipped" : stagesDone.upscale ? "done" : running && stage === "upscale" ? "active" : running ? "pending" : "ready",
-    },
-    {
-      id: "rembg",
-      label: "Remove BG",
-      status: !doRembg ? "skipped" : stagesDone.rembg ? "done" : running && stage === "rembg" ? "active" : running ? "pending" : "ready",
-    },
-  ];
-
-  const summaryStatus = done ? "done" : running ? "active" : "pending";
-  const summaryText = done ? "complete" : running ? "processed" : "pending";
+  const slots = Array.from({ length: 4 }, (_, index) => livePreviewStrip[index] || null);
 
   return (
     <div className="pipeline-zone pipeline-progress-card pipeline-live-stream-block">
@@ -399,23 +401,13 @@ function Zone1({ running, done, stage, stagesDone, imageDone, totalImages, doUps
       </div>
 
       <div className="pipeline-live-grid">
-        <div className="pipeline-live-card pipeline-live-card-preview">
-          <LivePreview running={running} previewPath={previewPath} />
-        </div>
-
-        {stageCards.map((card) => (
-          <div key={card.id} className={`pipeline-live-card pipeline-live-card-stage is-${card.status}`}>
-            <span className={`pipeline-live-card-status is-${card.status}`} />
-            <div className="pipeline-live-card-state">{card.status}</div>
-            <div className="pipeline-live-card-label">{card.label}</div>
-          </div>
+        {slots.map((item, index) => (
+          <LivePreview
+            key={item ? `${item.name}-${item.path || "name"}` : `empty-${index}`}
+            running={running}
+            item={item}
+          />
         ))}
-
-        <div className="pipeline-live-card pipeline-live-card-summary">
-          <span className={`pipeline-live-card-status is-${summaryStatus}`} />
-          <div className="pipeline-live-card-value">{totalImages > 0 ? `${imageDone}/${totalImages}` : `${imageDone}/—`}</div>
-          <div className="pipeline-live-card-label">{summaryText}</div>
-        </div>
       </div>
     </div>
   );
@@ -432,37 +424,43 @@ function SmStat({ label, value, color }) {
 
 // ── LivePreview ───────────────────────────────────────────────────────────────
 
-function LivePreview({ running, previewPath }) {
+function LivePreview({ running, item }) {
   const [loadedSrc, setLoadedSrc] = useState("");
-  const src = previewPath ? `${BASE}/image?path=${encodeURIComponent(previewPath)}` : "";
+  const src = item?.path ? `${BASE}/image?path=${encodeURIComponent(item.path)}` : "";
   const loaded = Boolean(src) && loadedSrc === src;
 
   return (
-    <div className="pipeline-live-preview">
-      {src ? (
-        <>
-          {!loaded && (
-            <div className="pipeline-live-empty">
-              <span style={{ fontFamily: "JetBrains Mono" }}>Loading preview...</span>
+    <div className="pipeline-live-card pipeline-live-card-preview">
+      <div className="pipeline-live-preview">
+        {src ? (
+          <>
+            {!loaded && (
+              <div className="pipeline-live-empty">
+                <span style={{ fontFamily: "JetBrains Mono" }}>Loading preview...</span>
+              </div>
+            )}
+            <img
+              className="pipeline-preview-image"
+              key={src} src={src} alt={item?.name || ""}
+              onLoad={() => setLoadedSrc(src)} onError={() => setLoadedSrc(src)}
+              style={{ opacity: loaded ? 1 : 0 }}
+            />
+            <div className="pipeline-live-preview-name">
+              {item?.name || ""}
             </div>
-          )}
-          <img
-            className="pipeline-preview-image"
-            key={src} src={src} alt=""
-            onLoad={() => setLoadedSrc(src)} onError={() => setLoadedSrc(src)}
-            style={{ opacity: loaded ? 1 : 0 }}
-          />
-          <div className="pipeline-live-preview-name">
-            {previewPath.replace(/.*[/\\]/, "")}
+          </>
+        ) : item?.name ? (
+          <div className="pipeline-live-empty pipeline-live-empty-has-name">
+            <span style={{ fontFamily: "JetBrains Mono" }}>{item.name}</span>
           </div>
-        </>
-      ) : (
-        <div className="pipeline-live-empty">
-          <span style={{ fontFamily: "JetBrains Mono" }}>
-            {running ? "Waiting for first preview..." : "No live preview yet"}
-          </span>
-        </div>
-      )}
+        ) : (
+          <div className="pipeline-live-empty">
+            <span style={{ fontFamily: "JetBrains Mono" }}>
+              {running ? "Waiting for first preview..." : "No previews yet"}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -892,7 +890,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
   const {
     running, done, log, errors, imageDone, imageError,
     totalImages, elapsed, stage, stagesDone,
-    upStats, bgStats, imageProgress, oomGpuCount, previewPath,
+    upStats, bgStats, imageProgress, oomGpuCount, livePreviewStrip,
     logRef, errorRef, start, stop,
   } = usePipeline();
 
@@ -1211,11 +1209,9 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
 
               <div className="pipeline-live-area">
                 <Zone1
-                  running={running} done={done}
-                  stage={stage} stagesDone={stagesDone}
+                  running={running}
                   imageDone={imageDone} totalImages={totalImages}
-                  doUpscale={doUpscale} doRembg={doRembg}
-                  previewPath={previewPath}
+                  livePreviewStrip={livePreviewStrip}
                 />
               </div>
             </div>
