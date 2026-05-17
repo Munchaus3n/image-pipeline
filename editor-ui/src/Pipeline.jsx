@@ -726,8 +726,8 @@ function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, sk
       <div className="pipeline-ready-title">
         {nothingSelected ? "Select stages to continue" : "Ready to process"}
       </div>
-      <div className="pipeline-ready-subtext" style={{ color: nothingSelected ? C.red : C.green }}>
-        {nothingSelected ? "Enable at least one stage to start." : "Press Run Pipeline to begin processing."}
+      <div className="pipeline-ready-subtitle">
+        {nothingSelected ? "Enable at least one stage to start." : "Press Run Pipeline in the header to begin processing."}
       </div>
 
       <div className="pipeline-ready-meta">
@@ -744,8 +744,8 @@ function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, sk
         <span className="pipeline-ready-meta-item">{thumbnail ? "thumbs on" : "thumbs off"}</span>
       </div>
 
-      <div className="pipeline-ready-hint">
-        {inputDir ? "Input source configured." : "Set input on the left, or drop a folder below."}
+      <div className={`pipeline-ready-source ${inputDir ? "is-ready" : "is-missing"}`}>
+        {inputDir ? "Input source configured." : "Input source missing. Set it on the left or drop a folder below."}
       </div>
     </div>
   );

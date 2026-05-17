@@ -428,16 +428,21 @@
 }
 
 .pipeline-ready-title {
-  font-size: clamp(26px, 2.55vw, 42px);
-  line-height: 1.1;
+  font-size: clamp(24px, 2.35vw, 38px);
+  line-height: 1.12;
   font-weight: 700;
   color: color-mix(in srgb, var(--text) 92%, #f6f9ff);
 }
 
-.pipeline-ready-subtext {
+.pipeline-ready-subtitle {
   max-width: 620px;
-  font-size: clamp(16px, 1.15vw, 22px);
-  line-height: 1.35;
+  font-size: clamp(15px, 1.06vw, 19px);
+  line-height: 1.38;
+  color: color-mix(in srgb, var(--dim) 64%, var(--text) 36%);
+}
+
+.pipeline-ready-card.is-disabled .pipeline-ready-subtitle {
+  color: color-mix(in srgb, var(--red) 72%, #f0b0b0);
 }
 
 .pipeline-ready-meta {
@@ -462,10 +467,18 @@
   color: color-mix(in srgb, var(--dim2) 82%, transparent);
 }
 
-.pipeline-ready-hint {
+.pipeline-ready-source {
   margin-top: 6px;
   font-size: 12px;
+  line-height: 1.35;
+}
+
+.pipeline-ready-source.is-ready {
   color: color-mix(in srgb, var(--dim2) 84%, var(--dim));
+}
+
+.pipeline-ready-source.is-missing {
+  color: color-mix(in srgb, var(--yellow) 68%, #f8de93);
 }
 
 .pipeline-progress-card {
@@ -631,7 +644,7 @@
     font-size: clamp(22px, 2.2vw, 34px);
   }
 
-  .pipeline-ready-subtext {
+  .pipeline-ready-subtitle {
     font-size: clamp(14px, 1.05vw, 18px);
   }
 
@@ -690,7 +703,7 @@
     font-size: clamp(18px, 2vw, 26px);
   }
 
-  .pipeline-ready-subtext {
+  .pipeline-ready-subtitle {
     font-size: clamp(13px, 1.05vw, 16px);
   }
 
