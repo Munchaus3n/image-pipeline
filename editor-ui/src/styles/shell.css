@@ -1,9 +1,9 @@
-[data-theme] {
+.app-shell {
   position: relative;
   isolation: isolate;
 }
 
-[data-theme]::before {
+.app-shell::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -14,12 +14,12 @@
     radial-gradient(980px 380px at 82% -16%, color-mix(in srgb, var(--panel2) 70%, transparent), transparent 62%);
 }
 
-[data-theme] > * {
+.app-shell > * {
   position: relative;
   z-index: 1;
 }
 
-[data-theme] > div:first-child {
+.app-header {
   margin: 10px 12px 0 !important;
   padding: 0 10px !important;
   min-height: 52px !important;
@@ -30,30 +30,50 @@
   box-shadow: var(--shadow-lg) !important;
 }
 
-[data-theme] > div:first-child > div:first-child {
+.app-logo {
   border-right-color: color-mix(in srgb, var(--border) 90%, transparent) !important;
   margin-right: 6px !important;
   padding-right: 14px !important;
 }
 
-[data-theme] > div:first-child > div:nth-child(2) > button {
+.app-logo-icon {
+  flex-shrink: 0;
+}
+
+.app-title {
+  color: var(--text);
+}
+
+.app-version {
+  letter-spacing: 0.04em;
+}
+
+.app-tabs .app-tab {
   border: 1px solid transparent !important;
   border-radius: 10px !important;
 }
 
-[data-theme] > div:first-child > div:nth-child(2) > button:hover {
+.app-tabs .app-tab:hover {
   background: color-mix(in srgb, var(--panel2) 65%, var(--panel)) !important;
   color: var(--text) !important;
 }
 
-[data-theme] > div:first-child > div:nth-child(2) > button[style*="var(--accent)"] {
+.app-tab-active {
   box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 26%, transparent) !important;
   border-color: color-mix(in srgb, var(--accent) 60%, var(--panel)) !important;
 }
 
-[data-theme] > div:first-child > button:last-child {
+.app-tab-index {
+  letter-spacing: 0.02em;
+}
+
+.app-theme-toggle {
   border-radius: 10px !important;
   border-color: color-mix(in srgb, var(--border) 92%, transparent) !important;
   background: color-mix(in srgb, var(--panel2) 70%, var(--panel)) !important;
   box-shadow: var(--shadow) !important;
+}
+
+.app-screen {
+  position: relative;
 }

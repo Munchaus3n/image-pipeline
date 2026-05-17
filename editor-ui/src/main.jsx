@@ -71,21 +71,21 @@ export function Root() {
   };
 
   return (
-    <div data-theme={theme} style={{
+    <div className="app-shell" data-theme={theme} style={{
       display:"flex", flexDirection:"column", height:"100vh",
       overflow:"hidden", background:"var(--bg)", color:"var(--text)",
     }}>
       {/* Header */}
-      <div style={{
+      <div className="app-header" style={{
         display:"flex", alignItems:"center", height:44, background:"var(--panel)",
         borderBottom:"1px solid var(--border)", flexShrink:0, padding:"0 12px", gap:8,
       }}>
         {/* Logo */}
-        <div style={{
+        <div className="app-logo" style={{
           display:"flex", alignItems:"center", gap:6, paddingRight:12,
           borderRight:"1px solid var(--border)", marginRight:4,
         }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5">
+          <svg className="app-logo-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5">
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
             <polyline points="7.5 4.21 12 6.81 16.5 4.21"/>
             <polyline points="7.5 19.79 7.5 14.6 3 12"/>
@@ -93,23 +93,23 @@ export function Root() {
             <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
             <line x1="12" y1="22.08" x2="12" y2="12"/>
           </svg>
-          <span style={{ fontSize:12, fontWeight:600, letterSpacing:"0.01em" }}>Image Pipeline Pro</span>
-          <span style={{ fontSize:9, color:"var(--dim)", fontFamily:"JetBrains Mono", fontWeight:500 }}>v2.0</span>
+          <span className="app-title" style={{ fontSize:12, fontWeight:600, letterSpacing:"0.01em" }}>Image Pipeline Pro</span>
+          <span className="app-version" style={{ fontSize:9, color:"var(--dim)", fontFamily:"JetBrains Mono", fontWeight:500 }}>v2.0</span>
         </div>
 
         {/* Tabs */}
-        <div style={{ display:"flex", gap:2, flex:1 }}>
+        <div className="app-tabs" style={{ display:"flex", gap:2, flex:1 }}>
           {TABS.map((tab, i) => {
             const active = screen === tab.id;
             return (
-              <button key={tab.id} onClick={() => openScreen(tab.id)} style={{
+              <button key={tab.id} className={active ? "app-tab app-tab-active" : "app-tab"} onClick={() => openScreen(tab.id)} style={{
                 display:"flex", alignItems:"center", gap:4, padding:"5px 12px",
                 background: active ? "var(--accent)" : "transparent",
                 color: active ? "var(--accent-fg)" : "var(--dim)",
                 border:"none", borderRadius:8, fontSize:12, fontWeight: active ? 600 : 400,
                 transition:"all 0.15s ease",
               }}>
-                <span style={{ fontSize:9, fontFamily:"JetBrains Mono", opacity: active ? 0.8 : 0.5 }}>{i+1}</span>
+                <span className="app-tab-index" style={{ fontSize:9, fontFamily:"JetBrains Mono", opacity: active ? 0.8 : 0.5 }}>{i+1}</span>
                 {tab.label}
               </button>
             );
@@ -118,6 +118,7 @@ export function Root() {
 
         {/* Theme toggle — BUG-11 FIX: uses handleThemeToggle which does read-patch-write */}
         <button
+          className="app-theme-toggle"
           onClick={handleThemeToggle}
           style={{
             width:28, height:28, borderRadius:8, border:"1px solid var(--border)",
@@ -131,7 +132,7 @@ export function Root() {
 
       {/* Screens */}
       {mountedScreens.has("input") && (
-      <div style={{ flex:1, minHeight:0, display:screen==="input" ? "flex" : "none", flexDirection:"column" }}>
+      <div className="app-screen" style={{ flex:1, minHeight:0, display:screen==="input" ? "flex" : "none", flexDirection:"column" }}>
         <Input
           inputDir={inputDir}         setInputDir={setInputDir}
           thumbs={thumbs}             setThumbs={setThumbs}
@@ -143,7 +144,7 @@ export function Root() {
       )}
 
       {mountedScreens.has("pipeline") && (
-      <div style={{ flex:1, minHeight:0, display:screen==="pipeline" ? "flex" : "none", flexDirection:"column" }}>
+      <div className="app-screen" style={{ flex:1, minHeight:0, display:screen==="pipeline" ? "flex" : "none", flexDirection:"column" }}>
         {/* BUG-18 FIX: onGoToTemplates was passed here but Pipeline's prop signature
             didn't include it, so it was silently ignored. Now Pipeline receives it. */}
         <Pipeline
@@ -159,13 +160,13 @@ export function Root() {
       )}
 
       {mountedScreens.has("templates") && (
-      <div style={{ flex:1, minHeight:0, display:screen==="templates" ? "flex" : "none", flexDirection:"column" }}>
+      <div className="app-screen" style={{ flex:1, minHeight:0, display:screen==="templates" ? "flex" : "none", flexDirection:"column" }}>
         <Templates onBack={() => openScreen("pipeline")} />
       </div>
       )}
 
       {mountedScreens.has("editor") && (
-      <div style={{ flex:1, minHeight:0, display:screen==="editor" ? "flex" : "none", flexDirection:"column" }}>
+      <div className="app-screen" style={{ flex:1, minHeight:0, display:screen==="editor" ? "flex" : "none", flexDirection:"column" }}>
         <Editor
           key={editorKey}
           onGoPipeline={() => openScreen("pipeline")}
@@ -177,7 +178,7 @@ export function Root() {
       )}
 
       {mountedScreens.has("settings") && (
-      <div style={{ flex:1, minHeight:0, display:screen==="settings" ? "flex" : "none", flexDirection:"column" }}>
+      <div className="app-screen" style={{ flex:1, minHeight:0, display:screen==="settings" ? "flex" : "none", flexDirection:"column" }}>
         <Settings onThemeChange={setTheme} />
       </div>
       )}
