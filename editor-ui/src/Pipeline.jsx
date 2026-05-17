@@ -745,6 +745,44 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
   );
 }
 
+function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, skipCount }) {
+  return (
+    <div className="pipeline-ready-card" style={{
+      marginTop: 8,
+      background: C.panel,
+      border: `1px solid ${C.border}`,
+      borderRadius: 4,
+      padding: "8px 14px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 5,
+      flexShrink: 0,
+    }}>
+      <div style={{
+        fontSize: 9,
+        letterSpacing: "0.1em",
+        textTransform: "uppercase",
+        fontWeight: 700,
+        color: C.dim,
+      }}>
+        Ready
+      </div>
+      <div style={{ fontSize: 12, color: nothingSelected ? C.red : C.green }}>
+        {nothingSelected ? "Enable at least one stage to start." : "Press Run Pipeline to begin processing."}
+      </div>
+      {!nothingSelected && (
+        <div style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono" }}>
+          {doUpscale ? "upscale " : ""}
+          {doUpscale && doRembg ? "· " : ""}
+          {doRembg ? "remove-bg" : ""}
+          {activeExcludeCount > 0 ? ` · ${activeExcludeCount} excluded` : ""}
+          {skipCount > 0 ? ` · ${skipCount} skipped` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Tag chip input ────────────────────────────────────────────────────────────
 
 function TagInput({ tags, onChange }) {
@@ -1110,6 +1148,8 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
   }, [onGoToEditor, canvasSize, thumbnail]);
 
   const nothingSelected = !doUpscale && !doRembg;
+  const skipCount = removedImages?.size ?? 0;
+  const activeExcludeCount = excludeTags.filter(n => !removedImages?.has(n)).length;
 
   return (
     <div className="pipeline-screen" style={{
@@ -1124,7 +1164,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
         select option{background:var(--panel2)}
       `}</style>
 
-      <div className="pipeline-main" style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
+      <div className="pipeline-main pipeline-layout" style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
 
         {/* Sidebar */}
         <div className="pipeline-settings-panel" style={{
@@ -1273,12 +1313,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
               : <>
                 {doUpscale && <div style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
                 {doRembg && (() => {
-                  const skipCount = removedImages?.size ?? 0;
-                  const exclCount = excludeTags.filter(n => !removedImages?.has(n)).length;
                   return (
                     <div style={{ fontSize: 12, color: C.green }}>
                       ✓ Remove BG ({rembgModel || "birefnet-general"})
-                      {exclCount > 0 && <span style={{ color: C.yellow }}> · {exclCount} excluded</span>}
+                      {activeExcludeCount > 0 && <span style={{ color: C.yellow }}> · {activeExcludeCount} excluded</span>}
                       {skipCount  > 0 && <span style={{ color: C.dim   }}> · {skipCount} skipped</span>}
                     </div>
                   );
@@ -1288,7 +1326,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           </div>
 
           {/* Action buttons */}
-          <div className="pipeline-top" style={{ marginTop: "auto", paddingTop: 16 }}>
+          <div className="pipeline-top pipeline-settings-actions" style={{ marginTop: "auto", paddingTop: 16 }}>
             {!running ? (
               <button className="pipeline-btn pipeline-run-button" onClick={handleStart} disabled={nothingSelected} style={{
                 width: "100%", padding: "10px 0",
@@ -1337,10 +1375,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
         </div>
 
         {/* Right zone */}
-        <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px" }}>
+        <div className="pipeline-results-area" style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px" }}>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
 
-            <div style={{ flex: "0 0 56%", minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <div className="pipeline-status-area" style={{ flex: "0 0 56%", minHeight: 0, display: "flex", flexDirection: "column" }}>
               <Zone1
                 running={running} done={done}
                 stage={stage} stagesDone={stagesDone}
@@ -1360,9 +1398,18 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                   oomGpuCount={oomGpuCount}
                 />
               )}
+              {!running && !done && (
+                <ReadyCard
+                  nothingSelected={nothingSelected}
+                  doUpscale={doUpscale}
+                  doRembg={doRembg}
+                  activeExcludeCount={activeExcludeCount}
+                  skipCount={skipCount}
+                />
+              )}
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="pipeline-bottom-panels" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 6 }}>
               <ErrorPanel
                 errorRef={errorRef} errors={errors} imageError={imageError}
                 open={errOpen} setOpen={setErrOpen}
