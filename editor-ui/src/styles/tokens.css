@@ -1,0 +1,64 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root,
+[data-theme="light"] {
+  /* Base colors - Light theme */
+  --bg:        hsl(228, 14%, 97%);
+  --panel:     hsl(0, 0%, 100%);
+  --panel2:    hsl(220, 14%, 94%);
+  --border:    hsl(220, 13%, 90%);
+  --text:      hsl(226, 12%, 22%);
+  --dim:       hsl(220, 10%, 46%);
+  --dim2:      hsl(224, 16%, 64%);
+
+  /* Accent colors */
+  --accent:    hsl(224, 100%, 65%);
+  --accent-fg: hsl(0, 0%, 100%);
+  --green:     hsl(142, 71%, 45%);
+  --green-bg:  hsl(142, 71%, 95%);
+  --green-bdr: hsl(142, 71%, 80%);
+  --red:       hsl(0, 84%, 60%);
+  --red-bg:    hsl(0, 84%, 95%);
+  --red-bdr:   hsl(0, 84%, 80%);
+  --yellow:    hsl(38, 92%, 50%);
+  --yellow-bg: hsl(38, 92%, 95%);
+  --yellow-bdr: hsl(38, 92%, 75%);
+  --magenta:   hsl(290, 75%, 60%);
+
+  /* Utility */
+  --img-bg:    hsl(220, 14%, 94%);
+  --scrollbar: hsl(220, 13%, 85%);
+  --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04);
+}
+
+[data-theme="dark"] {
+  /* Base colors - Dark theme */
+  --bg:        hsl(247, 12%, 14%);
+  --panel:     hsl(247, 18%, 10%);
+  --panel2:    hsl(222, 20%, 16%);
+  --border:    hsl(228, 8%, 12%);
+  --text:      hsl(0, 0%, 95%);
+  --dim:       hsl(0, 0%, 90%);
+  --dim2:      hsl(223, 9%, 48%);
+
+  /* Accent colors */
+  --accent:    hsl(224, 100%, 65%);
+  --accent-fg: hsl(0, 0%, 100%);
+  --green:     hsl(142, 98%, 41%);
+  --green-bg:  hsl(142, 71%, 12%);
+  --green-bdr: hsl(142, 71%, 25%);
+  --red:       hsl(0, 84%, 60%);
+  --red-bg:    hsl(0, 84%, 12%);
+  --red-bdr:   hsl(0, 100%, 68%);
+  --yellow:    hsl(51, 97%, 56%);
+  --yellow-bg: hsl(56, 100%, 12%);
+  --yellow-bdr: hsl(49, 72%, 52%);
+  --magenta:   hsl(290, 75%, 60%);
+
+  /* Utility */
+  --img-bg:    hsl(228, 20%, 5%);
+  --scrollbar: hsl(222, 20%, 22%);
+  --shadow:    0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.25);
+}

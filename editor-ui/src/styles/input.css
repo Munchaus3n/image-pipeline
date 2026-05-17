@@ -1,0 +1,7 @@
+input[type=number] { color-scheme: dark; }
+::placeholder { color: var(--dim2); opacity: 0.6; }
+
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
