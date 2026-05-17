@@ -529,28 +529,29 @@ export default function Input({
 
               {/* Info + controls */}
               <div className="input-preview-body" style={{ padding: "12px", flex: 1, overflowY: "auto" }}>
-                <div style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Filename</div>
-                <div style={{
+                <div className="input-preview-label" style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Filename</div>
+                <div className="input-preview-value" style={{
                   fontSize: 10, color: C.text, fontFamily: "JetBrains Mono",
                   wordBreak: "break-all", marginBottom: 16, lineHeight: 1.6,
                 }}>{name}</div>
                 {!!relFolder && (
                   <>
-                    <div style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Folder</div>
-                    <div style={{
+                    <div className="input-preview-label" style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Folder</div>
+                    <div className="input-preview-value" style={{
                       fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono",
                       wordBreak: "break-all", marginBottom: 16, lineHeight: 1.6,
                     }}>{relFolder}</div>
                   </>
                 )}
+                <div className="input-preview-divider" />
 
                 {/* Exclude toggle */}
                 <div className="input-preview-control" style={{
                   display: "flex", alignItems: "center", justifyContent: "space-between",
                   marginBottom: 8,
                 }}>
-                  <span style={{ fontSize: 11, color: C.dim }}>Exclude from BG</span>
-                  <button className="inp-btn input-preview-control" onClick={() => {
+                  <span className="input-preview-toggle-label" style={{ fontSize: 11, color: C.dim }}>Exclude from BG removal</span>
+                  <button className="inp-btn input-preview-toggle-button" onClick={() => {
                     if (isExcl) setExcludeTags(prev => prev.filter(x => x !== imageId));
                     else setExcludeTags(prev => [...prev, imageId]);
                   }} style={{
@@ -561,6 +562,7 @@ export default function Input({
                     cursor: "pointer", fontFamily: "inherit",
                   }}>{isExcl ? "Excluded ✓" : "Exclude"}</button>
                 </div>
+                <div className="input-preview-divider" />
 
                 {/* Remove from session */}
                 <button className="inp-btn input-preview-remove" onClick={() => {
