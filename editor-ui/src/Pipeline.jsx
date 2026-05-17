@@ -24,14 +24,14 @@ const C = {
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
-function Row({ label, children, className = "" }) {
+function Row({ label, children, className = "", controlsClassName = "" }) {
   return (
     <div className={`pipeline-row ${className}`.trim()} style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
       padding: "7px 0", borderBottom: `1px solid ${C.border}`
     }}>
       <span className="pipeline-field-label" style={{ fontSize: 12, color: C.dim }}>{label}</span>
-      <div style={{ display: "flex", gap: 5, alignItems: "center" }}>{children}</div>
+      <div className={`pipeline-row-controls ${controlsClassName}`.trim()} style={{ display: "flex", gap: 5, alignItems: "center" }}>{children}</div>
     </div>
   );
 }
@@ -1229,7 +1229,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           <SectionLabel>Output settings</SectionLabel>
           <div className="pipeline-section" style={{ marginBottom: 14 }}>
 
-          <Row label="Skip upscale if any side ≥">
+          <Row label="Skip upscale if any side ≥" className="pipeline-row-output-limit" controlsClassName="pipeline-row-controls-wrap">
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <input
                 type="number"
@@ -1248,8 +1248,8 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
             </div>
           </Row>
 
-          <Row label="Canvas size (px)">
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <Row label="Canvas size (px)" className="pipeline-row-canvas-size" controlsClassName="pipeline-row-controls-wrap">
+            <div className="pipeline-canvas-size-controls" style={{ display: "flex", gap: 4, alignItems: "center" }}>
               {["1080", "1440", "2048"].map(s => (
                 <Btn key={s} label={s} active={canvasSize === s} onClick={() => setCanvasSize(s)} />
               ))}
@@ -1272,17 +1272,17 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
 
           <SectionLabel>Will run</SectionLabel>
           {/* Will run summary */}
-          <div className="pipeline-section" style={{
+          <div className="pipeline-section pipeline-will-run-block" style={{
             marginTop: 0, background: C.panel2, border: `1px solid ${C.border}`,
             borderRadius: 4, padding: "9px 12px"
           }}>
             {nothingSelected
-              ? <div style={{ fontSize: 12, color: C.red }}>✕ Enable at least one stage</div>
+              ? <div className="pipeline-will-run-empty" style={{ fontSize: 12, color: C.red }}>✕ Enable at least one stage</div>
               : <>
-                {doUpscale && <div style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
+                {doUpscale && <div className="pipeline-will-run-item" style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
                 {doRembg && (() => {
                   return (
-                    <div style={{ fontSize: 12, color: C.green }}>
+                    <div className="pipeline-will-run-item" style={{ fontSize: 12, color: C.green }}>
                       ✓ Remove BG ({rembgModel || "birefnet-general"})
                       {activeExcludeCount > 0 && <span style={{ color: C.yellow }}> · {activeExcludeCount} excluded</span>}
                       {skipCount  > 0 && <span style={{ color: C.dim   }}> · {skipCount} skipped</span>}
