@@ -35,7 +35,6 @@ function Row({ label, children, className = "", controlsClassName = "" }) {
     </div>
   );
 }
-
 function Btn({ label, active, color, onClick, style = {}, className = "" }) {
   const bg  = active ? (color ? color + "22" : "color-mix(in srgb, var(--accent) 12%, transparent)") : "transparent";
   const fg  = active ? (color || C.text) : C.dim;
@@ -660,28 +659,22 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
 
   return (
     <div className="pipeline-log-panel" style={{
-      flex: open ? flex : "0 0 28px", minWidth: 0, minHeight: 0,
+      flex: open ? flex : "0 0 34px", minWidth: 0, minHeight: 0,
       display: "flex", flexDirection: "column",
       transition: "flex 0.2s ease"
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <div style={{ fontSize: 10, letterSpacing: "0.12em", color: C.dim, textTransform: "uppercase", fontWeight: 700 }}>
-          Output log
+      <div className="pipeline-bottom-panel-header">
+        <div className="pipeline-bottom-panel-title">
+          Output Log
         </div>
-        <button className="pipeline-btn pipeline-secondary-button" onClick={() => setOpen(v => !v)} style={{
-          background: "transparent", color: C.dim, border: "none",
-          fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
-        }}>{open ? "▾ hide" : "▸ show"}</button>
+        <button className="pipeline-bottom-panel-toggle" onClick={() => setOpen(v => !v)}>
+          {open ? "Hide" : "Show"}
+        </button>
       </div>
       {open && (
-        <div className="pipeline-log-list" ref={logRef} style={{
-          flex: 1, overflowY: "auto", overflowX: "hidden", background: C.panel,
-          border: `1px solid ${C.border}`, borderRadius: 4,
-          padding: "8px 12px", fontFamily: "JetBrains Mono",
-          fontSize: 11, lineHeight: 1.7, display: "flex", flexDirection: "column", gap: 8,
-        }}>
+        <div className="pipeline-log-list pipeline-log-console" ref={logRef}>
           {log.length === 0 && !running ? (
-            <div style={{ color: C.dim, fontSize: 12 }}>Configure and press Run Pipeline.</div>
+            <div className="pipeline-log-empty">Configure and press Run Pipeline.</div>
           ) : log.map((e, i) => {
             // BUG-05 FIX: inline ASCII progress bar instead of CSS width-transition div
             if (e.kind === "progress") {
@@ -736,33 +729,22 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
 
   return (
     <div className="pipeline-error-panel" style={{
-      flex: open ? flex : "0 0 28px", minHeight: 0,
+      flex: open ? flex : "0 0 34px", minHeight: 0,
       display: "flex", flexDirection: "column",
       transition: "flex 0.2s ease"
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <div style={{
-          fontSize: 10, letterSpacing: "0.12em", fontWeight: 700,
-          textTransform: "uppercase",
-          color: hasErrors ? C.red : C.dim
-        }}>
+      <div className="pipeline-bottom-panel-header">
+        <div className={`pipeline-bottom-panel-title ${hasErrors ? "has-errors" : ""}`}>
           Errors {hasErrors ? `(${imageError})` : ""}
         </div>
-        <button className="pipeline-btn pipeline-secondary-button" onClick={() => setOpen(v => !v)} style={{
-          background: "transparent", color: C.dim, border: "none",
-          fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
-        }}>{open ? "▾ hide" : "▸ show"}</button>
+        <button className="pipeline-bottom-panel-toggle" onClick={() => setOpen(v => !v)}>
+          {open ? "Hide" : "Show"}
+        </button>
       </div>
       {open && (
-        <div className="pipeline-log-list" ref={errorRef} style={{
-          flex: 1, overflowY: "auto",
-          background: hasErrors ? "var(--red-bg)" : C.panel,
-          border: `1px solid ${hasErrors ? "var(--red-bdr)" : C.border}`,
-          borderRadius: 4, padding: "8px 10px",
-          fontFamily: "JetBrains Mono", fontSize: 10, lineHeight: 1.7,
-        }}>
+        <div className={`pipeline-log-list pipeline-error-list ${hasErrors ? "has-errors" : ""}`} ref={errorRef}>
           {errors.length === 0 ? (
-            <div style={{ color: C.dim, fontSize: 11 }}>No errors</div>
+            <div className="pipeline-error-empty">No errors</div>
           ) : errors.map((e, i) => (
             <div key={i} style={{
               paddingBottom: 8, marginBottom: 8,
@@ -772,6 +754,7 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
               {e.context?.length > 0 && (
                 <>
                   <button
+                    className="pipeline-error-context-toggle"
                     onClick={() => setExpanded(p => ({ ...p, [i]: !p[i] }))}
                     style={{
                       marginTop: 3, background: "transparent", border: "none",
@@ -1214,7 +1197,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
               </div>
             </div>
 
-            <div className="pipeline-bottom-panels" style={{ flex: "1 1 auto", minHeight: 240, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="pipeline-bottom-panels" style={{ flex: "1 1 auto", minHeight: 210, display: "flex", flexDirection: "column", gap: 8 }}>
               <ErrorPanel
                 errorRef={errorRef} errors={errors} imageError={imageError}
                 open={errOpen} setOpen={setErrOpen}
@@ -1234,4 +1217,5 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
     </div>
   );
 }
+
 
