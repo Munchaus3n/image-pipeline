@@ -378,7 +378,8 @@
 }
 
 .pipeline-status-card-slot .pipeline-progress-card {
-  min-height: 118px;
+  min-height: clamp(188px, 25vh, 268px);
+  width: 100%;
 }
 
 .pipeline-drop-hint {
@@ -482,11 +483,127 @@
 }
 
 .pipeline-progress-card {
-  border-radius: 12px;
+  border-radius: 24px;
+  margin-top: 0 !important;
 }
 
-.pipeline-progress-card > div {
-  border-radius: 12px !important;
+.pipeline-progress-inner {
+  border-radius: 24px !important;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #1b2234 78%, var(--panel)), color-mix(in srgb, #141b2c 84%, var(--panel2))) !important;
+  box-shadow:
+    0 14px 32px rgba(5, 10, 24, 0.22),
+    inset 0 1px 0 color-mix(in srgb, var(--border) 22%, transparent);
+  padding: 18px 20px !important;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pipeline-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pipeline-progress-stage-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.pipeline-progress-stage-pill.is-active {
+  color: color-mix(in srgb, var(--accent) 92%, #c8d7ff);
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel2));
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.pipeline-progress-stage-pill.is-done {
+  color: color-mix(in srgb, var(--green) 92%, #c6fdda);
+  background: color-mix(in srgb, var(--green-bg) 70%, var(--panel2));
+  border-color: color-mix(in srgb, var(--green-bdr) 72%, var(--border));
+}
+
+.pipeline-progress-title {
+  font-size: clamp(18px, 1.8vw, 28px);
+  line-height: 1.2;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--text) 94%, #f7faff);
+}
+
+.pipeline-progress-percent {
+  font-family: "JetBrains Mono", monospace;
+  font-size: clamp(21px, 2vw, 30px);
+  line-height: 1;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent) 88%, #b8ccff);
+}
+
+.pipeline-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+  color: color-mix(in srgb, var(--dim) 78%, var(--text) 22%);
+}
+
+.pipeline-progress-meta > span + span::before {
+  content: "•";
+  margin-right: 10px;
+  color: color-mix(in srgb, var(--dim2) 84%, transparent);
+}
+
+.pipeline-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #12192b 86%, var(--panel2));
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  overflow: hidden;
+}
+
+.pipeline-progress-bar > div {
+  height: 100%;
+  min-width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 92%, #8fa8ff), color-mix(in srgb, #7f7fff 86%, var(--accent)));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
+  transition: width 0.25s ease;
+}
+
+.pipeline-progress-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pipeline-progress-stats .pipeline-stat {
+  min-width: 0;
+  text-align: left !important;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, #151d30 70%, var(--panel2));
+}
+
+.pipeline-progress-stats .pipeline-stat-value {
+  font-size: 19px !important;
+}
+
+.pipeline-progress-stats .pipeline-stat-label {
+  margin-top: 5px;
+  font-size: 9px;
+  letter-spacing: 0.09em;
 }
 
 .pipeline-stage-card {
@@ -651,6 +768,24 @@
   .pipeline-ready-meta-item {
     font-size: 13px;
   }
+
+  .pipeline-progress-inner {
+    padding: 15px 16px !important;
+    border-radius: 20px !important;
+    gap: 8px;
+  }
+
+  .pipeline-progress-title {
+    font-size: clamp(16px, 1.55vw, 22px);
+  }
+
+  .pipeline-progress-percent {
+    font-size: clamp(18px, 1.7vw, 24px);
+  }
+
+  .pipeline-progress-stats .pipeline-stat-value {
+    font-size: 17px !important;
+  }
 }
 
 @media (max-width: 1100px) {
@@ -718,5 +853,46 @@
 
   .pipeline-stat-value {
     font-size: 18px !important;
+  }
+
+  .pipeline-progress-inner {
+    padding: 12px 13px !important;
+    border-radius: 16px !important;
+    gap: 7px;
+  }
+
+  .pipeline-progress-stage-pill {
+    min-height: 24px;
+    padding: 0 10px;
+    font-size: 9px;
+  }
+
+  .pipeline-progress-title {
+    font-size: clamp(14px, 1.4vw, 18px);
+  }
+
+  .pipeline-progress-percent {
+    font-size: clamp(16px, 1.55vw, 21px);
+  }
+
+  .pipeline-progress-meta {
+    font-size: 10px;
+    gap: 8px;
+  }
+
+  .pipeline-progress-meta > span + span::before {
+    margin-right: 8px;
+  }
+
+  .pipeline-progress-stats {
+    gap: 6px;
+  }
+
+  .pipeline-progress-stats .pipeline-stat {
+    padding: 6px 8px;
+  }
+
+  .pipeline-progress-stats .pipeline-stat-value {
+    font-size: 15px !important;
   }
 }

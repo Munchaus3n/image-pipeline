@@ -664,50 +664,63 @@ function StageRow({ label, stats, total, active, stageDone, color }) {
 }
 
 function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, doUpscale, doRembg, stagesDone = {}, oomGpuCount = 0 }) {
-  const fmt  = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-  const n    = totalImages || 0;
-  const errs = upStats.err + bgStats.err;
+  const fmt = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  const n = Math.max(0, totalImages || 0);
+
+  const upProcessed = upStats.done + upStats.skip + upStats.err;
+  const bgProcessed = bgStats.done + bgStats.skip + bgStats.err;
+  const hasBothStages = doUpscale && doRembg;
+  const finalStats = doRembg ? bgStats : upStats;
+  const finalProcessed = doRembg ? bgProcessed : upProcessed;
+  const totalErrors = upStats.err + bgStats.err;
+
+  const upRatio = n > 0 ? Math.min(1, upProcessed / n) : 0;
+  const bgRatio = n > 0 ? Math.min(1, bgProcessed / n) : 0;
+  const progressRatio = n === 0 ? 0 : (
+    hasBothStages ? ((upRatio + bgRatio) / 2)
+      : doUpscale ? upRatio
+      : doRembg ? bgRatio
+      : 0
+  );
+  const progressPct = done ? 100 : Math.min(100, Math.max(0, Math.round(progressRatio * 100)));
+
+  const stagePill = done
+    ? "Completed"
+    : stage === "rembg"
+      ? "Stage 2/2 · Remove BG"
+      : hasBothStages
+        ? "Stage 1/2 · Upscaling"
+        : doUpscale
+          ? "Upscaling"
+          : "Remove BG";
 
   return (
-    <div className="pipeline-progress-card" style={{ marginTop: 8, flexShrink: 0 }}>
-      <div style={{
-        background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4,
-        padding: "7px 14px", display: "flex", flexDirection: "column", gap: 5,
-      }}>
-        {doUpscale && (
-          <StageRow
-            label="Upscale" stats={upStats} total={n}
-            active={stage === "upscale"}
-            stageDone={stagesDone.upscale || stage === "rembg" || stage === "done" || (done && !doRembg)}
-            color={C.blue}
-          />
-        )}
-        {doRembg && (
-          <StageRow
-            label="Remove BG" stats={bgStats} total={n}
-            active={stage === "rembg"}
-            stageDone={stagesDone.rembg || stage === "done" || (done && !doUpscale)}
-            color={C.magenta}
-          />
-        )}
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12,
-          paddingTop: 4, borderTop: `1px solid ${C.border}`, marginTop: 1,
-        }}>
-          {(running || done) && (
-            <span style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono" }}>⏱ {fmt(elapsed)}</span>
-          )}
-          {running && <Spinner color={C.yellow} size={11} />}
-          {done && !running && (
-            <span style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: errs > 0 ? C.yellow : C.green }}>
-              {errs > 0 ? `⚠ done — ${errs} error${errs > 1 ? "s" : ""}` : "✓ complete"}
-            </span>
-          )}
-          {oomGpuCount > 0 && (
-            <span style={{ fontSize: 11, color: C.yellow, fontFamily: "JetBrains Mono" }}>
-              OOM fallback: {oomGpuCount}
-            </span>
-          )}
+    <div className="pipeline-progress-card">
+      <div className="pipeline-progress-inner">
+        <div className="pipeline-progress-head">
+          <span className={`pipeline-progress-stage-pill ${done ? "is-done" : "is-active"}`}>{stagePill}</span>
+          <span className="pipeline-progress-percent">{progressPct}%</span>
+        </div>
+
+        <div className="pipeline-progress-title">
+          {done ? "Batch processing complete." : "Batch processing in progress..."}
+        </div>
+
+        <div className="pipeline-progress-meta">
+          <span>{n > 0 ? `${finalProcessed}/${n} files` : "count pending"}</span>
+          <span>elapsed {fmt(elapsed)}</span>
+          {oomGpuCount > 0 && <span>OOM fallback {oomGpuCount}</span>}
+          {done && totalErrors > 0 && <span>{totalErrors} error{totalErrors > 1 ? "s" : ""}</span>}
+        </div>
+
+        <div className="pipeline-progress-bar">
+          <div style={{ width: `${progressPct}%` }} />
+        </div>
+
+        <div className="pipeline-progress-stats">
+          <SmStat label="Processed" value={finalStats.done} color={C.green} />
+          <SmStat label="Skipped" value={finalStats.skip} color={finalStats.skip > 0 ? C.yellow : C.dim} />
+          <SmStat label="Errors" value={finalStats.err} color={finalStats.err > 0 ? C.red : C.dim} />
         </div>
       </div>
     </div>
