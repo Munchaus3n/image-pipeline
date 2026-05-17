@@ -31,3 +31,12 @@
 [data-theme] div[style*="padding: 20px 24px"] div[style*="border: 1px solid var(--border)"][style*="border-radius: 6px"][style*="padding: 16px"] {
   box-shadow: var(--shadow);
 }
+
+[data-theme] div[style*="width: 320px"][style*="border-right"] > div[style*="cursor: pointer"]:hover {
+  background: color-mix(in srgb, var(--panel2) 72%, var(--panel)) !important;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border)) !important;
+}
+
+[data-theme] div[style*="padding: 20px 24px"] div[style*="border: 1px dashed"]:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}

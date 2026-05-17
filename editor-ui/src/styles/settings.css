@@ -27,3 +27,11 @@
 [data-theme] div[style*="max-width: 800px"] input[type="range"] {
   filter: saturate(1.08);
 }
+
+[data-theme] div[style*="max-width: 800px"] > div[style*="border:1px solid var(--border)"] > button:hover {
+  background: color-mix(in srgb, var(--panel2) 78%, var(--panel)) !important;
+}
+
+[data-theme] div[style*="max-width: 800px"] > div[style*="border:1px solid var(--border)"] > button {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+}
