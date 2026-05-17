@@ -24,24 +24,24 @@ const C = {
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
-function Row({ label, children }) {
+function Row({ label, children, className = "" }) {
   return (
-    <div style={{
+    <div className={`pipeline-row ${className}`.trim()} style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
       padding: "7px 0", borderBottom: `1px solid ${C.border}`
     }}>
-      <span style={{ fontSize: 12, color: C.dim }}>{label}</span>
+      <span className="pipeline-field-label" style={{ fontSize: 12, color: C.dim }}>{label}</span>
       <div style={{ display: "flex", gap: 5, alignItems: "center" }}>{children}</div>
     </div>
   );
 }
 
-function Btn({ label, active, color, onClick, style = {} }) {
+function Btn({ label, active, color, onClick, style = {}, className = "" }) {
   const bg  = active ? (color ? color + "22" : "color-mix(in srgb, var(--accent) 12%, transparent)") : "transparent";
   const fg  = active ? (color || C.text) : C.dim;
   const bdr = active ? (color ? color + "55" : "color-mix(in srgb, var(--accent) 35%, transparent)") : "transparent";
   return (
-    <button onClick={onClick} style={{
+    <button className={`pipeline-btn ${className}`.trim()} onClick={onClick} style={{
       background: bg, color: fg, border: `1px solid ${bdr}`,
       borderRadius: 8, padding: "4px 12px", fontSize: 11, minWidth: 42,
       cursor: "pointer", fontFamily: "inherit", fontWeight: active ? 600 : 400,
@@ -52,13 +52,13 @@ function Btn({ label, active, color, onClick, style = {} }) {
 
 function PillToggle({ value, onChange }) {
   return (
-    <div onClick={() => onChange(!value)} style={{
+    <div className="pipeline-toggle" onClick={() => onChange(!value)} style={{
       width: 40, height: 22, borderRadius: 11, cursor: "pointer", flexShrink: 0,
       background: value ? C.greenBg : C.redBg,
       border: `1px solid ${value ? C.greenBdr : C.redBdr}`,
       position: "relative", transition: "background 0.2s ease, border-color 0.2s ease",
     }}>
-      <div style={{
+      <div className="pipeline-toggle-thumb" style={{
         width: 16, height: 16, borderRadius: "50%",
         background: value ? C.green : C.red,
         position: "absolute", top: 2,
@@ -80,8 +80,8 @@ function FolderInput({ value, onChange, placeholder }) {
   }, [value, onChange]);
 
   return (
-    <div style={{ display: "flex", gap: 4, width: "100%" }}>
-      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+    <div className="pipeline-folder-input" style={{ display: "flex", gap: 4, width: "100%" }}>
+      <input className="pipeline-path-field" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         style={{
           flex: 1, background: C.panel2, color: C.text,
           border: `1px solid ${C.border}`, borderRadius: 4,
@@ -89,7 +89,7 @@ function FolderInput({ value, onChange, placeholder }) {
           outline: "none", minWidth: 0
         }}
       />
-      <button onClick={browse} style={{
+      <button className="pipeline-btn pipeline-browse-button pipeline-secondary-button" onClick={browse} style={{
         background: C.panel2, color: C.dim,
         border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 9px",
         fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0
@@ -100,7 +100,7 @@ function FolderInput({ value, onChange, placeholder }) {
 
 function SectionLabel({ children }) {
   return (
-    <div style={{
+    <div className="pipeline-section-label" style={{
       fontSize: 10, letterSpacing: "0.12em", color: C.dim,
       textTransform: "uppercase", fontWeight: 700, marginBottom: 8
     }}>
@@ -110,7 +110,7 @@ function SectionLabel({ children }) {
 }
 
 function FieldLabel({ children }) {
-  return <div style={{ fontSize: 11, color: C.dim, marginBottom: 4 }}>{children}</div>;
+  return <div className="pipeline-field-label" style={{ fontSize: 11, color: C.dim, marginBottom: 4 }}>{children}</div>;
 }
 
 function Spinner({ color = C.yellow, size = 12 }) {
@@ -402,7 +402,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
   };
 
   if (!running && !done) return (
-    <div onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+    <div className="pipeline-zone pipeline-drop-zone" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
       style={{
         flex: 1, display: "flex", flexDirection: "column",
         margin: "12px 12px 0 0", borderRadius: 6, overflow: "hidden",
@@ -421,7 +421,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
             Drop images here to set input folder
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button onClick={browseInput} disabled={browseLoading} style={{
+            <button className="pipeline-btn pipeline-browse-button pipeline-secondary-button" onClick={browseInput} disabled={browseLoading} style={{
               background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
               borderRadius: 4, padding: "6px 16px", fontSize: 12, cursor: "pointer",
               fontFamily: "inherit", opacity: browseLoading ? 0.6 : 1
@@ -445,7 +445,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
             <span style={{ fontFamily: "JetBrains Mono", fontSize: 10, color: C.dim }}>
               {inputDir || "dropped folder"}
             </span>
-            <button onClick={() => { setDroppedFiles([]); setInputDir(""); }}
+            <button className="pipeline-btn pipeline-secondary-button" onClick={() => { setDroppedFiles([]); setInputDir(""); }}
               style={{
                 marginLeft: 10, background: "transparent", color: C.dim, border: "none",
                 fontSize: 11, cursor: "pointer", fontFamily: "inherit"
@@ -467,7 +467,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
   );
 
   if (done) return (
-    <div style={{
+    <div className="pipeline-zone" style={{
       flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", gap: 14, margin: "12px 12px 0 0", borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel
@@ -487,7 +487,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
   ];
 
   return (
-    <div style={{
+    <div className="pipeline-zone" style={{
       flex: 1, display: "flex", flexDirection: "column",
       margin: "12px 12px 0 0", borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel, overflow: "hidden"
@@ -516,7 +516,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
           const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
           return (
             <div key={s.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
-              <div style={{
+              <div className={`pipeline-stage-card ${s.active ? "pipeline-stage-card-active" : ""} ${s.done ? "pipeline-stage-card-done" : ""} ${s.skip ? "pipeline-stage-card-skipped" : ""}`.trim()} style={{
                 flex: 1, background: cardBg, border: `1px solid ${cardBdr}`,
                 borderRadius: 5, padding: "14px 10px", textAlign: "center",
                 boxShadow: cardGlow, transition: "all 0.4s ease"
@@ -536,7 +536,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
                 <div style={{ fontSize: 9, color: textColor, marginTop: 5, opacity: 0.6, letterSpacing: "0.06em" }}>{s.label}</div>
               </div>
               {i < stages.length - 1 && (
-                <div style={{ width: 28, height: 2, background: C.dim2, flexShrink: 0, position: "relative", margin: "0 4px" }}>
+                <div className="pipeline-stage-connector" style={{ width: 28, height: 2, background: C.dim2, flexShrink: 0, position: "relative", margin: "0 4px" }}>
                   <div style={{
                     position: "absolute", top: -4, left: 0, width: 8, height: 8,
                     borderRadius: "50%", background: s.done ? C.green : C.yellow,
@@ -552,13 +552,13 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
       </div>
 
       {recentDone.length > 0 && (
-        <div style={{
+        <div className="pipeline-recent-strip" style={{
           borderTop: `1px solid ${C.border}`, padding: "5px 12px",
           display: "flex", gap: 4, overflowX: "hidden", flexShrink: 0, alignItems: "center"
         }}>
           <span style={{ fontSize: 8, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>Done:</span>
           {recentDone.slice(0, 5).map((f, i) => (
-            <div key={i} style={{
+            <div key={i} className="pipeline-recent-item" style={{
               background: "var(--green-bg)", border: `1px solid var(--green-bdr)`,
               borderRadius: 3, padding: "2px 6px", fontSize: 8,
               fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
@@ -574,9 +574,9 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
 
 function SmStat({ label, value, color }) {
   return (
-    <div style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: "JetBrains Mono", lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.dim, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+    <div className="pipeline-stat" style={{ textAlign: "center" }}>
+      <div className="pipeline-stat-value" style={{ fontSize: 24, fontWeight: 700, color, fontFamily: "JetBrains Mono", lineHeight: 1 }}>{value}</div>
+      <div className="pipeline-stat-label" style={{ fontSize: 10, color: C.dim, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
     </div>
   );
 }
@@ -589,7 +589,7 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
   const loaded = Boolean(src) && loadedSrc === src;
 
   if (done && !running) return (
-    <div style={{
+    <div className="pipeline-live-preview" style={{
       flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", gap: 14, borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel, minHeight: 0,
@@ -607,13 +607,13 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
         </div>
       </div>
       {previewPath && (
-        <img src={src} alt="" style={{ maxHeight: 180, maxWidth: "80%", objectFit: "contain", borderRadius: 4, opacity: 0.5 }} />
+        <img className="pipeline-preview-image" src={src} alt="" style={{ maxHeight: 180, maxWidth: "80%", objectFit: "contain", borderRadius: 4, opacity: 0.5 }} />
       )}
     </div>
   );
 
   return (
-    <div style={{
+    <div className="pipeline-live-preview" style={{
       flex: 1, position: "relative", borderRadius: 6, overflow: "hidden",
       background: "var(--img-bg)", border: `1px solid ${C.border}`, minHeight: 0,
     }}>
@@ -632,6 +632,7 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
             </div>
           )}
           <img
+            className="pipeline-preview-image"
             key={src} src={src} alt=""
             onLoad={() => setLoadedSrc(src)} onError={() => setLoadedSrc(src)}
             style={{ width: "100%", height: "100%", objectFit: "contain", display: "block",
@@ -805,7 +806,7 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
   const extractRuleLabel = (raw) => raw.replace(/^[\s─═]+|[\s─═]+$/g, "").trim();
 
   return (
-    <div style={{
+    <div className="pipeline-log-panel" style={{
       flex: open ? flex : "0 0 28px", minWidth: 0, minHeight: 0,
       display: "flex", flexDirection: "column",
       transition: "flex 0.2s ease"
@@ -814,13 +815,13 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
         <div style={{ fontSize: 10, letterSpacing: "0.12em", color: C.dim, textTransform: "uppercase", fontWeight: 700 }}>
           Output log
         </div>
-        <button onClick={() => setOpen(v => !v)} style={{
+        <button className="pipeline-btn pipeline-secondary-button" onClick={() => setOpen(v => !v)} style={{
           background: "transparent", color: C.dim, border: "none",
           fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
         }}>{open ? "▾ hide" : "▸ show"}</button>
       </div>
       {open && (
-        <div ref={logRef} style={{
+        <div className="pipeline-log-list" ref={logRef} style={{
           flex: 1, overflowY: "auto", overflowX: "hidden", background: C.panel,
           border: `1px solid ${C.border}`, borderRadius: 4,
           padding: "8px 12px", fontFamily: "JetBrains Mono",
@@ -881,7 +882,7 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
   const hasErrors = imageError > 0;
 
   return (
-    <div style={{
+    <div className="pipeline-error-panel" style={{
       flex: open ? flex : "0 0 28px", minHeight: 0,
       display: "flex", flexDirection: "column",
       transition: "flex 0.2s ease"
@@ -894,13 +895,13 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
         }}>
           Errors {hasErrors ? `(${imageError})` : ""}
         </div>
-        <button onClick={() => setOpen(v => !v)} style={{
+        <button className="pipeline-btn pipeline-secondary-button" onClick={() => setOpen(v => !v)} style={{
           background: "transparent", color: C.dim, border: "none",
           fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
         }}>{open ? "▾ hide" : "▸ show"}</button>
       </div>
       {open && (
-        <div ref={errorRef} style={{
+        <div className="pipeline-log-list" ref={errorRef} style={{
           flex: 1, overflowY: "auto",
           background: hasErrors ? "var(--red-bg)" : C.panel,
           border: `1px solid ${hasErrors ? "var(--red-bdr)" : C.border}`,
@@ -1111,7 +1112,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
   const nothingSelected = !doUpscale && !doRembg;
 
   return (
-    <div style={{
+    <div className="pipeline-screen" style={{
       display: "flex", flexDirection: "column", background: C.bg, height: "100%",
       overflow: "hidden", fontFamily: "'Outfit','DM Sans',system-ui,sans-serif",
       color: C.text, fontSize: 13
@@ -1123,10 +1124,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
         select option{background:var(--panel2)}
       `}</style>
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
+      <div className="pipeline-main" style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
 
         {/* Sidebar */}
-        <div style={{
+        <div className="pipeline-settings-panel" style={{
           width: 300, background: C.panel, borderRight: `1px solid ${C.border}`,
           padding: "14px", display: "flex", flexDirection: "column",
           flexShrink: 0, overflowY: "auto"
@@ -1165,11 +1166,11 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           )}
 
           <SectionLabel>Folders</SectionLabel>
-          <div style={{ marginBottom: 8 }}>
+          <div className="pipeline-section" style={{ marginBottom: 8 }}>
             <FieldLabel>Input folder</FieldLabel>
             <FolderInput value={inputDir} onChange={setInputDir} placeholder="default: ./input" />
           </div>
-          <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+          <div className="pipeline-section" style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
             <FieldLabel>Output folder</FieldLabel>
             <FolderInput value={outputDir} onChange={setOutputDir} placeholder="default: ./output" />
           </div>
@@ -1259,7 +1260,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           </Row>
 
           {/* Will run summary */}
-          <div style={{
+          <div className="pipeline-section" style={{
             marginTop: 14, background: C.panel2, border: `1px solid ${C.border}`,
             borderRadius: 4, padding: "9px 12px"
           }}>
@@ -1287,9 +1288,9 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           </div>
 
           {/* Action buttons */}
-          <div style={{ marginTop: "auto", paddingTop: 16 }}>
+          <div className="pipeline-top" style={{ marginTop: "auto", paddingTop: 16 }}>
             {!running ? (
-              <button onClick={handleStart} disabled={nothingSelected} style={{
+              <button className="pipeline-btn pipeline-run-button" onClick={handleStart} disabled={nothingSelected} style={{
                 width: "100%", padding: "10px 0",
                 background: nothingSelected ? C.dim2 : C.greenBg,
                 color: nothingSelected ? C.dim : C.green,
@@ -1298,14 +1299,14 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                 cursor: nothingSelected ? "not-allowed" : "pointer", fontFamily: "inherit",
               }}>▶  Run Pipeline</button>
             ) : (
-              <button onClick={stop} style={{
+              <button className="pipeline-btn pipeline-stop-button" onClick={stop} style={{
                 width: "100%", padding: "10px 0", background: C.redBg, color: C.red,
                 border: `1px solid ${C.redBdr}`, borderRadius: 8, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", fontFamily: "inherit",
               }}>■  Stop</button>
             )}
 
-            <button onClick={handleGoToEditor} style={{
+            <button className="pipeline-btn pipeline-secondary-button" onClick={handleGoToEditor} style={{
               width: "100%", marginTop: 6, padding: "10px 0",
               background: "color-mix(in srgb, var(--accent) 12%, transparent)",
               color: C.accent, border: `1px solid color-mix(in srgb, var(--accent) 30%, transparent)`,
@@ -1314,7 +1315,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
 
             {/* BUG-18 FIX (usage): onGoToTemplates now wired to the button */}
             {onGoToTemplates && (
-              <button onClick={onGoToTemplates} style={{
+              <button className="pipeline-btn pipeline-secondary-button" onClick={onGoToTemplates} style={{
                 width: "100%", marginTop: 6, padding: "10px 0",
                 background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
                 borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
@@ -1322,6 +1323,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
             )}
 
             <button
+              className="pipeline-btn pipeline-secondary-button"
               onClick={() => openFolder(outputDir.trim())}
               style={{
                 width: "100%", marginTop: 6, padding: "10px 0",
