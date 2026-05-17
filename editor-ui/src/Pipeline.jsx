@@ -1340,10 +1340,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
         </div>
 
         {/* Right zone */}
-        <div className="pipeline-results-area pipeline-workspace" style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px" }}>
-          <div className="pipeline-results-column" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
+        <div className="pipeline-results-area pipeline-workspace" style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px", overflowY: "auto", overflowX: "hidden" }}>
+          <div className="pipeline-results-column" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 10 }}>
 
-            <div className="pipeline-status-area" style={{ flex: "0 0 56%", minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <div className="pipeline-status-area" style={{ flex: "0 0 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
               <div className="pipeline-status-card-slot">
                 {(running || done) && (
                   <Zone2
@@ -1382,7 +1382,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
               </div>
             </div>
 
-            <div className="pipeline-bottom-panels" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="pipeline-bottom-panels" style={{ flex: "1 1 auto", minHeight: 240, display: "flex", flexDirection: "column", gap: 6 }}>
               <ErrorPanel
                 errorRef={errorRef} errors={errors} imageError={imageError}
                 open={errOpen} setOpen={setErrOpen}
