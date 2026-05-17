@@ -386,7 +386,7 @@ function usePipeline() {
   };
 }
 
-// ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
+// Zone 1: Live preview strip
 
 function Zone1({ imageDone, totalImages, previewPath, livePreviewStrip }) {
   return (
@@ -462,7 +462,6 @@ function SmStat({ label, value, color }) {
   );
 }
 
-// ── LivePreview ───────────────────────────────────────────────────────────────
 
 // Zone 2: Per-stage stats bar
 
