@@ -455,9 +455,7 @@ function LivePreview({ running, item }) {
           </div>
         ) : (
           <div className="pipeline-live-empty">
-            <span style={{ fontFamily: "JetBrains Mono" }}>
-              {running ? "Waiting for first preview..." : "No previews yet"}
-            </span>
+            <span style={{ fontFamily: "JetBrains Mono" }}>No previews yet</span>
           </div>
         )}
       </div>
