@@ -1127,6 +1127,28 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
         select option{background:var(--panel2)}
       `}</style>
 
+      <div className="pipeline-header">
+        <div className="pipeline-header-title">Process · Pipeline</div>
+        <div className="pipeline-header-actions">
+          {!running ? (
+            <button
+              className="pipeline-btn pipeline-header-run-button pipeline-run-button"
+              onClick={handleStart}
+              disabled={nothingSelected}
+            >
+              ▶  Run Pipeline
+            </button>
+          ) : (
+            <button
+              className="pipeline-btn pipeline-header-stop-button pipeline-stop-button"
+              onClick={stop}
+            >
+              ■  Stop
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="pipeline-main pipeline-layout" style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
 
         {/* Sidebar */}
@@ -1292,28 +1314,11 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
 
           {/* Action buttons */}
           <div className="pipeline-top pipeline-settings-actions" style={{ paddingTop: 12 }}>
-            {!running ? (
-              <button className="pipeline-btn pipeline-run-button" onClick={handleStart} disabled={nothingSelected} style={{
-                width: "100%", padding: "10px 0",
-                background: nothingSelected ? C.dim2 : C.greenBg,
-                color: nothingSelected ? C.dim : C.green,
-                border: `1px solid ${nothingSelected ? C.border : C.greenBdr}`,
-                borderRadius: 8, fontSize: 13, fontWeight: 600,
-                cursor: nothingSelected ? "not-allowed" : "pointer", fontFamily: "inherit",
-              }}>▶  Run Pipeline</button>
-            ) : (
-              <button className="pipeline-btn pipeline-stop-button" onClick={stop} style={{
-                width: "100%", padding: "10px 0", background: C.redBg, color: C.red,
-                border: `1px solid ${C.redBdr}`, borderRadius: 8, fontSize: 13, fontWeight: 600,
-                cursor: "pointer", fontFamily: "inherit",
-              }}>■  Stop</button>
-            )}
-
             <button
               className="pipeline-btn pipeline-secondary-button"
               onClick={() => openFolder(outputDir.trim())}
               style={{
-                width: "100%", marginTop: 6, padding: "10px 0",
+                width: "100%", marginTop: 0, padding: "10px 0",
                 background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
                 borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
               }}
