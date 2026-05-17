@@ -1142,11 +1142,6 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
     setResumeSession(null);
   }, []);
 
-  // BUG-02 FIX: pass output root directly (no extra "/output" append).
-  const handleGoToEditor = useCallback(() => {
-    onGoToEditor({ canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
-  }, [onGoToEditor, canvasSize, thumbnail]);
-
   const nothingSelected = !doUpscale && !doRembg;
   const skipCount = removedImages?.size ?? 0;
   const activeExcludeCount = excludeTags.filter(n => !removedImages?.has(n)).length;
@@ -1344,22 +1339,6 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                 border: `1px solid ${C.redBdr}`, borderRadius: 8, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", fontFamily: "inherit",
               }}>■  Stop</button>
-            )}
-
-            <button className="pipeline-btn pipeline-secondary-button" onClick={handleGoToEditor} style={{
-              width: "100%", marginTop: 6, padding: "10px 0",
-              background: "color-mix(in srgb, var(--accent) 12%, transparent)",
-              color: C.accent, border: `1px solid color-mix(in srgb, var(--accent) 30%, transparent)`,
-              borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-            }}>Open Editor →</button>
-
-            {/* BUG-18 FIX (usage): onGoToTemplates now wired to the button */}
-            {onGoToTemplates && (
-              <button className="pipeline-btn pipeline-secondary-button" onClick={onGoToTemplates} style={{
-                width: "100%", marginTop: 6, padding: "10px 0",
-                background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
-                borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
-              }}>Manage Templates</button>
             )}
 
             <button
