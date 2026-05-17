@@ -1,1 +1,59 @@
-/* Shell styles will be split here in follow-up commits. */
+[data-theme] {
+  position: relative;
+  isolation: isolate;
+}
+
+[data-theme]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(1100px 420px at 18% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+    radial-gradient(980px 380px at 82% -16%, color-mix(in srgb, var(--panel2) 70%, transparent), transparent 62%);
+}
+
+[data-theme] > * {
+  position: relative;
+  z-index: 1;
+}
+
+[data-theme] > div:first-child {
+  margin: 10px 12px 0 !important;
+  padding: 0 10px !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--panel)) !important;
+  border-radius: 14px !important;
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg)) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+[data-theme] > div:first-child > div:first-child {
+  border-right-color: color-mix(in srgb, var(--border) 90%, transparent) !important;
+  margin-right: 6px !important;
+  padding-right: 14px !important;
+}
+
+[data-theme] > div:first-child > div:nth-child(2) > button {
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+}
+
+[data-theme] > div:first-child > div:nth-child(2) > button:hover {
+  background: color-mix(in srgb, var(--panel2) 65%, var(--panel)) !important;
+  color: var(--text) !important;
+}
+
+[data-theme] > div:first-child > div:nth-child(2) > button[style*="var(--accent)"] {
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 26%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--panel)) !important;
+}
+
+[data-theme] > div:first-child > button:last-child {
+  border-radius: 10px !important;
+  border-color: color-mix(in srgb, var(--border) 92%, transparent) !important;
+  background: color-mix(in srgb, var(--panel2) 70%, var(--panel)) !important;
+  box-shadow: var(--shadow) !important;
+}
