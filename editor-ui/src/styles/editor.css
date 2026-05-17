@@ -1,1 +1,44 @@
-/* Editor styles will be split here in follow-up commits. */
+/* Editor micro-polish, scoped to existing editor hooks/signatures */
+[data-theme] .ed-btn {
+  transition: transform 0.14s ease, box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+[data-theme] .ed-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+[data-theme] .ed-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+[data-theme] .ed-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 68%, transparent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+[data-theme] section:has(> .ed-btn) {
+  box-shadow: var(--shadow);
+}
+
+[data-theme] section:has(> .ed-btn) > .ed-btn {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+[data-theme] div[style*="width:262"][style*="border-left"] input:not([type="checkbox"]):not([type="range"]):not([type="color"]),
+[data-theme] div[style*="width:262"][style*="border-left"] select {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+[data-theme] div[style*="width:262"][style*="border-left"] input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus,
+[data-theme] div[style*="width:262"][style*="border-left"] select:focus {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+[data-theme] canvas {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  box-shadow: var(--shadow-lg);
+}
