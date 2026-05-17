@@ -1,10 +1,11 @@
 ﻿/* Pipeline micro-polish using stable class hooks */
 .pipeline-settings-panel {
   background: color-mix(in srgb, var(--panel) 95%, var(--bg));
-  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 86%, transparent);
+  box-shadow:
+    inset -1px 0 0 color-mix(in srgb, var(--border) 86%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--border) 22%, transparent);
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   scrollbar-gutter: stable;
 }
 
@@ -15,7 +16,7 @@
 
 .pipeline-settings-panel button:hover:not(:disabled),
 .pipeline-drop-zone button:hover:not(:disabled),
-.pipeline-btn:hover:not(:disabled) {
+.pipeline-settings-actions .pipeline-btn:hover:not(:disabled) {
   filter: none;
   transform: translateY(-1px);
   box-shadow: var(--shadow);
@@ -23,7 +24,7 @@
 
 .pipeline-settings-panel button:active:not(:disabled),
 .pipeline-drop-zone button:active:not(:disabled),
-.pipeline-btn:active:not(:disabled) {
+.pipeline-settings-actions .pipeline-btn:active:not(:disabled) {
   transform: translateY(0);
 }
 
@@ -53,6 +54,89 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+.pipeline-settings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  padding-bottom: 12px;
+}
+
+.pipeline-settings-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 25%, var(--scrollbar));
+}
+
+.pipeline-section-label {
+  margin: 2px 0 10px !important;
+  letter-spacing: 0.14em !important;
+  color: color-mix(in srgb, var(--dim) 76%, var(--text) 24%) !important;
+}
+
+.pipeline-section {
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  background: color-mix(in srgb, var(--panel2) 68%, var(--panel));
+  padding: 10px 12px;
+}
+
+.pipeline-row {
+  gap: 8px;
+  padding: 9px 0 !important;
+  border-bottom-color: color-mix(in srgb, var(--border) 88%, transparent) !important;
+}
+
+.pipeline-row .pipeline-field-label {
+  color: color-mix(in srgb, var(--dim) 78%, var(--text) 22%) !important;
+}
+
+.pipeline-field-label {
+  letter-spacing: 0.01em;
+}
+
+.pipeline-folder-input {
+  gap: 6px !important;
+}
+
+.pipeline-path-field {
+  min-height: 36px;
+  border-radius: 10px !important;
+  background: color-mix(in srgb, var(--panel2) 84%, var(--panel)) !important;
+  border-color: color-mix(in srgb, var(--border) 92%, transparent) !important;
+  padding: 0 10px !important;
+  font-size: 11px !important;
+  letter-spacing: 0.01em;
+}
+
+.pipeline-path-field::placeholder {
+  color: color-mix(in srgb, var(--dim2) 82%, transparent);
+}
+
+.pipeline-browse-button {
+  min-width: 40px;
+  border-radius: 10px !important;
+  padding: 0 10px !important;
+}
+
+.pipeline-settings-panel .pipeline-btn {
+  border-radius: 10px !important;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent);
+}
+
+.pipeline-row .pipeline-btn {
+  min-width: 58px;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+}
+
+.pipeline-toggle {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, rgba(255, 255, 255, 0.08) 60%, transparent);
+}
+
+.pipeline-toggle-thumb {
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.42) !important;
+}
+
 .pipeline-layout {
   min-height: 0;
 }
@@ -75,11 +159,32 @@
 }
 
 .pipeline-settings-actions {
-  position: sticky;
-  bottom: 0;
-  padding-bottom: 2px !important;
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--panel) 94%, var(--bg)) 22%);
+  margin-top: auto;
+  flex-shrink: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 22%, transparent), color-mix(in srgb, var(--panel) 97%, var(--bg)) 24%);
+  backdrop-filter: blur(2px);
+  padding-bottom: 4px !important;
   z-index: 2;
+}
+
+.pipeline-settings-actions .pipeline-btn {
+  min-height: 44px;
+  font-size: 13px !important;
+  font-weight: 600;
+}
+
+.pipeline-run-button {
+  box-shadow: 0 10px 20px color-mix(in srgb, var(--green) 18%, transparent);
+}
+
+.pipeline-stop-button {
+  box-shadow: 0 10px 20px color-mix(in srgb, var(--red) 14%, transparent);
+}
+
+.pipeline-settings-panel .pipeline-secondary-button,
+.pipeline-settings-actions .pipeline-secondary-button {
+  background: color-mix(in srgb, var(--panel2) 78%, var(--panel)) !important;
 }
 
 @media (max-width: 1280px) {

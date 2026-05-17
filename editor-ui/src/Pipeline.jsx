@@ -1170,8 +1170,9 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
         <div className="pipeline-settings-panel" style={{
           width: 300, background: C.panel, borderRight: `1px solid ${C.border}`,
           padding: "14px", display: "flex", flexDirection: "column",
-          flexShrink: 0, overflowY: "auto"
+          flexShrink: 0, overflow: "hidden"
         }}>
+          <div className="pipeline-settings-scroll">
           {showResume && resumeSession && (
             <div style={{
               marginBottom: 12,
@@ -1189,16 +1190,16 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                 {resumeSession.src_root}
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                <button onClick={handleResume} style={{
+                <button className="pipeline-btn pipeline-run-button" onClick={handleResume} style={{
                   flex: 1, background: C.greenBg, color: C.green, border: `1px solid ${C.greenBdr}`,
                   borderRadius: 6, padding: "6px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
                 }}>Resume</button>
-                <button onClick={handleStartFresh} style={{
+                <button className="pipeline-btn pipeline-secondary-button" onClick={handleStartFresh} style={{
                   flex: 1, background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
                   borderRadius: 6, padding: "6px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
                 }}>Start fresh</button>
               </div>
-              <button onClick={() => setShowResume(false)} style={{
+              <button className="pipeline-btn pipeline-secondary-button" onClick={() => setShowResume(false)} style={{
                 marginTop: 6, background: "transparent", border: "none", color: C.dim2,
                 padding: 0, fontSize: 10, cursor: "pointer", fontFamily: "inherit",
               }}>dismiss</button>
@@ -1324,9 +1325,10 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
               </>
             }
           </div>
+          </div>
 
           {/* Action buttons */}
-          <div className="pipeline-top pipeline-settings-actions" style={{ marginTop: "auto", paddingTop: 16 }}>
+          <div className="pipeline-top pipeline-settings-actions" style={{ paddingTop: 12 }}>
             {!running ? (
               <button className="pipeline-btn pipeline-run-button" onClick={handleStart} disabled={nothingSelected} style={{
                 width: "100%", padding: "10px 0",
