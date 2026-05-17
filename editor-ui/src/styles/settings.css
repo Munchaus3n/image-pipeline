@@ -1,1 +1,29 @@
-/* Settings styles will be split here in follow-up commits. */
+/* Settings micro-polish, scoped by Settings-specific max-width container */
+[data-theme] div[style*="max-width: 800px"] > div[style*="border: 1px solid var(--border)"][style*="border-radius: 8px"] {
+  box-shadow: var(--shadow);
+}
+
+[data-theme] div[style*="max-width: 800px"] button {
+  transition: transform 0.14s ease, box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+}
+
+[data-theme] div[style*="max-width: 800px"] button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+[data-theme] div[style*="max-width: 800px"] button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+[data-theme] div[style*="max-width: 800px"] input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus,
+[data-theme] div[style*="max-width: 800px"] select:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 66%, transparent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+[data-theme] div[style*="max-width: 800px"] input[type="range"] {
+  filter: saturate(1.08);
+}
