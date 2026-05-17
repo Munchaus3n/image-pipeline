@@ -715,42 +715,38 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
 }
 
 function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, skipCount, canvasSize, thumbnail, inputDir }) {
+  const activeStages = [
+    doUpscale ? "Upscale" : null,
+    doRembg ? "Remove BG" : null,
+  ].filter(Boolean);
+
   return (
-    <div className="pipeline-ready-card" style={{
-      marginTop: 8,
-      background: C.panel,
-      border: `1px solid ${C.border}`,
-      borderRadius: 4,
-      padding: "8px 14px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 5,
-      flexShrink: 0,
-    }}>
-      <div style={{
-        fontSize: 9,
-        letterSpacing: "0.1em",
-        textTransform: "uppercase",
-        fontWeight: 700,
-        color: C.dim,
-      }}>
-        Ready
+    <div className={`pipeline-ready-card ${nothingSelected ? "is-disabled" : "is-ready"}`}>
+      <div className="pipeline-ready-icon" aria-hidden="true">▶</div>
+      <div className="pipeline-ready-title">
+        {nothingSelected ? "Select stages to continue" : "Ready to process"}
       </div>
-      <div style={{ fontSize: 12, color: nothingSelected ? C.red : C.green }}>
+      <div className="pipeline-ready-subtext" style={{ color: nothingSelected ? C.red : C.green }}>
         {nothingSelected ? "Enable at least one stage to start." : "Press Run Pipeline to begin processing."}
       </div>
-      {!nothingSelected && (
-        <div style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono" }}>
-          {inputDir ? "source ready · " : ""}
-          {doUpscale ? "upscale " : ""}
-          {doUpscale && doRembg ? "· " : ""}
-          {doRembg ? "remove-bg" : ""}
-          {activeExcludeCount > 0 ? ` · ${activeExcludeCount} excluded` : ""}
-          {skipCount > 0 ? ` · ${skipCount} skipped` : ""}
-          {canvasSize ? ` · ${canvasSize}px` : ""}
-          {thumbnail ? " · thumbs on" : " · thumbs off"}
-        </div>
-      )}
+
+      <div className="pipeline-ready-meta">
+        {!nothingSelected && activeStages.length > 0 && (
+          <span className="pipeline-ready-meta-item">{activeStages.join(" + ")}</span>
+        )}
+        {activeExcludeCount > 0 && (
+          <span className="pipeline-ready-meta-item">{activeExcludeCount} excluded</span>
+        )}
+        {skipCount > 0 && (
+          <span className="pipeline-ready-meta-item">{skipCount} skipped</span>
+        )}
+        {canvasSize && <span className="pipeline-ready-meta-item">{canvasSize}px canvas</span>}
+        <span className="pipeline-ready-meta-item">{thumbnail ? "thumbs on" : "thumbs off"}</span>
+      </div>
+
+      <div className="pipeline-ready-hint">
+        {inputDir ? "Input source configured." : "Set input on the left, or drop a folder below."}
+      </div>
     </div>
   );
 }
