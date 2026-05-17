@@ -367,7 +367,7 @@
   margin: 0 !important;
 }
 
-.pipeline-live-stream-block {
+.pipeline-preview-strip {
   margin: 0 !important;
   border-radius: 18px !important;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent) !important;
@@ -399,7 +399,7 @@
   color: color-mix(in srgb, var(--dim) 66%, var(--text) 34%);
 }
 
-.pipeline-live-grid {
+.pipeline-preview-grid {
   --pipeline-live-tile-size: 134px;
   display: grid;
   grid-template-columns: repeat(4, var(--pipeline-live-tile-size));
@@ -410,7 +410,7 @@
   justify-content: space-between;
 }
 
-.pipeline-live-card {
+.pipeline-preview-slot {
   position: relative;
   width: var(--pipeline-live-tile-size);
   height: var(--pipeline-live-tile-size);
@@ -428,21 +428,7 @@
   padding: 12px 10px;
 }
 
-.pipeline-live-card-preview {
-  padding: 0;
-  overflow: hidden;
-}
-
-.pipeline-live-preview {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  border-radius: 14px;
-  background: linear-gradient(180deg, color-mix(in srgb, #171f31 74%, var(--panel)), color-mix(in srgb, #121a2a 84%, var(--panel2)));
-  overflow: hidden;
-}
-
-.pipeline-live-preview .pipeline-preview-image {
+.pipeline-preview-slot img {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -466,7 +452,7 @@
   white-space: nowrap;
 }
 
-.pipeline-live-empty {
+.pipeline-preview-placeholder {
   position: absolute;
   inset: 0;
   display: flex;
@@ -478,12 +464,6 @@
   font-size: 10px !important;
   letter-spacing: 0.02em;
   line-height: 1.4;
-}
-
-.pipeline-live-empty-has-name {
-  color: color-mix(in srgb, var(--dim) 66%, var(--text) 34%) !important;
-  font-size: 9px !important;
-  word-break: break-word;
 }
 
 .pipeline-status-card-slot {
@@ -946,15 +926,13 @@
     min-height: 0;
   }
 
-  .pipeline-live-grid {
+  .pipeline-preview-grid {
     --pipeline-live-tile-size: 120px;
     gap: 8px;
     padding: 9px 10px 10px;
   }
 
-  .pipeline-live-card,
-  .pipeline-live-card-preview,
-  .pipeline-live-preview {
+  .pipeline-preview-slot {
     min-height: 0;
   }
 
@@ -1048,7 +1026,7 @@
     min-height: 0;
   }
 
-  .pipeline-live-grid {
+  .pipeline-preview-grid {
     --pipeline-live-tile-size: 96px;
     grid-template-columns: repeat(4, var(--pipeline-live-tile-size));
     grid-auto-rows: var(--pipeline-live-tile-size);
@@ -1057,9 +1035,7 @@
     justify-content: space-between;
   }
 
-  .pipeline-live-card,
-  .pipeline-live-card-preview,
-  .pipeline-live-preview {
+  .pipeline-preview-slot {
     min-height: 0;
   }
 

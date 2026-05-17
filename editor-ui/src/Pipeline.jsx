@@ -388,27 +388,62 @@ function usePipeline() {
 
 // ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
 
-function Zone1({ running, imageDone, totalImages, livePreviewStrip }) {
-  const totalLabel = totalImages > 0 ? totalImages : "—";
+function Zone1({ imageDone, totalImages, previewPath, recentDone }) {
+  return (
+    <PipelinePreviewStrip
+      previewPath={previewPath}
+      recentDone={recentDone}
+      imageDone={imageDone}
+      totalImages={totalImages}
+    />
+  );
+}
+
+function PipelinePreviewStrip({ previewPath, recentDone, imageDone, totalImages }) {
+  const totalLabel = totalImages > 0 ? totalImages : "-";
   const processedLabel = `${imageDone}/${totalLabel} processed`;
-  const slots = Array.from({ length: 4 }, (_, index) => livePreviewStrip[index] || null);
+  const slotItems = Array.from({ length: 4 }, () => ({ path: "", name: "" }));
+
+  if (previewPath) {
+    slotItems[0] = {
+      path: previewPath,
+      name: previewPath.replace(/.*[/\\]/, ""),
+    };
+  } else {
+    const fallbackName = recentDone?.[0] || "";
+    if (fallbackName) slotItems[0] = { path: "", name: fallbackName };
+  }
 
   return (
-    <div className="pipeline-zone pipeline-progress-card pipeline-live-stream-block">
+    <div className="pipeline-zone pipeline-progress-card pipeline-preview-strip">
       <div className="pipeline-live-title-row">
         <div className="pipeline-live-title">Live Stream</div>
         <div className="pipeline-live-counter">{processedLabel}</div>
       </div>
-
-      <div className="pipeline-live-grid">
-        {slots.map((item, index) => (
-          <LivePreview
-            key={item ? `${item.name}-${item.path || "name"}` : `empty-${index}`}
-            running={running}
-            item={item}
-          />
+      <div className="pipeline-preview-grid">
+        {slotItems.map((item, idx) => (
+          <PipelinePreviewSlot key={`preview-slot-${idx}`} item={item} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function PipelinePreviewSlot({ item }) {
+  const src = item?.path ? `${BASE}/image?path=${encodeURIComponent(item.path)}` : "";
+  const hasImage = Boolean(src);
+  const fileLabel = item?.name || "";
+
+  return (
+    <div className="pipeline-preview-slot">
+      {hasImage ? (
+        <>
+          <img className="pipeline-preview-image" src={src} alt={fileLabel} />
+          {fileLabel && <div className="pipeline-live-preview-name">{fileLabel}</div>}
+        </>
+      ) : (
+        <div className="pipeline-preview-placeholder">No previews yet</div>
+      )}
     </div>
   );
 }
@@ -424,46 +459,7 @@ function SmStat({ label, value, color }) {
 
 // ── LivePreview ───────────────────────────────────────────────────────────────
 
-function LivePreview({ running, item }) {
-  const [loadedSrc, setLoadedSrc] = useState("");
-  const src = item?.path ? `${BASE}/image?path=${encodeURIComponent(item.path)}` : "";
-  const loaded = Boolean(src) && loadedSrc === src;
-
-  return (
-    <div className="pipeline-live-card pipeline-live-card-preview">
-      <div className="pipeline-live-preview">
-        {src ? (
-          <>
-            {!loaded && (
-              <div className="pipeline-live-empty">
-                <span style={{ fontFamily: "JetBrains Mono" }}>Loading preview...</span>
-              </div>
-            )}
-            <img
-              className="pipeline-preview-image"
-              key={src} src={src} alt={item?.name || ""}
-              onLoad={() => setLoadedSrc(src)} onError={() => setLoadedSrc(src)}
-              style={{ opacity: loaded ? 1 : 0 }}
-            />
-            <div className="pipeline-live-preview-name">
-              {item?.name || ""}
-            </div>
-          </>
-        ) : item?.name ? (
-          <div className="pipeline-live-empty pipeline-live-empty-has-name">
-            <span style={{ fontFamily: "JetBrains Mono" }}>{item.name}</span>
-          </div>
-        ) : (
-          <div className="pipeline-live-empty">
-            <span style={{ fontFamily: "JetBrains Mono" }}>No previews yet</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Zone 2: Per-stage stats bar ───────────────────────────────────────────────
+// Zone 2: Per-stage stats bar
 
 function StatChip({ icon, value, color }) {
   return (
@@ -888,7 +884,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
   const {
     running, done, log, errors, imageDone, imageError,
     totalImages, elapsed, stage, stagesDone,
-    upStats, bgStats, imageProgress, oomGpuCount, livePreviewStrip,
+    upStats, bgStats, imageProgress, oomGpuCount, previewPath, recentDone,
     logRef, errorRef, start, stop,
   } = usePipeline();
 
@@ -1207,9 +1203,9 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
 
               <div className="pipeline-live-area">
                 <Zone1
-                  running={running}
                   imageDone={imageDone} totalImages={totalImages}
-                  livePreviewStrip={livePreviewStrip}
+                  previewPath={previewPath}
+                  recentDone={recentDone}
                 />
               </div>
             </div>
@@ -1234,3 +1230,4 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
     </div>
   );
 }
+
