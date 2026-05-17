@@ -371,171 +371,52 @@ function usePipeline() {
 
 // ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
 
-function Zone1({ running, done, stage, stagesDone, recentDone,
-  imageDone, totalImages, doUpscale, doRembg, inputDir, setInputDir, rembgModel, previewPath }) {
-  const [dragOver, setDragOver] = useState(false);
-  const [droppedFiles, setDroppedFiles] = useState([]);
-  const [browseLoading, setBrowseLoading] = useState(false);
+function Zone1({ running, done, stage, stagesDone, imageDone, totalImages, doUpscale, doRembg, previewPath }) {
+  const totalLabel = totalImages > 0 ? totalImages : "—";
+  const processedLabel = `${imageDone}/${totalLabel} processed`;
 
-  const onDragOver = (e) => { e.preventDefault(); setDragOver(true); };
-  const onDragLeave = (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); };
-  const onDrop = (e) => {
-    e.preventDefault(); setDragOver(false);
-    const files = Array.from(e.dataTransfer.files || []);
-    if (!files.length) return;
-    const names = files.map(f => f.name);
-    setDroppedFiles(names);
-    const p = files[0].path;
-    if (p) {
-      const folder = p.replace(/[/\\][^/\\]+$/, "");
-      setInputDir(folder);
-    } else {
-      browseInput();
-    }
-  };
-
-  const browseInput = async () => {
-    setBrowseLoading(true);
-    try {
-      const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(inputDir)}`);
-      const { path } = await r.json();
-      if (path) { setInputDir(path); setDroppedFiles([]); }
-    } catch { void 0; }
-    setBrowseLoading(false);
-  };
-
-  if (done) return (
-    <div className="pipeline-zone pipeline-progress-card" style={{
-      flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
-      justifyContent: "center", gap: 14, margin: "12px 12px 0 0", borderRadius: 6,
-      border: `1px solid ${C.border}`, background: C.panel
-    }}>
-      <div style={{ fontSize: 32, color: C.green, lineHeight: 1 }}>✓</div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: C.green }}>Pipeline complete</div>
-      <div style={{ display: "flex", gap: 20 }}>
-        <SmStat label="Done" value={imageDone} color={C.green} />
-        <SmStat label="Total" value={totalImages || "—"} color={C.dim} />
-      </div>
-    </div>
-  );
-
-  const stages = [
-    { id: "upscale", label: "Upscaling",  sub: "NCNN Vulkan",              active: stage === "upscale", done: stagesDone.upscale, skip: !doUpscale },
-    { id: "rembg",   label: "Remove BG",  sub: rembgModel || "birefnet-general", active: stage === "rembg",   done: stagesDone.rembg,   skip: !doRembg  },
+  const stageCards = [
+    {
+      id: "upscale",
+      label: "Upscaling",
+      status: !doUpscale ? "skipped" : stagesDone.upscale ? "done" : running && stage === "upscale" ? "active" : running ? "pending" : "ready",
+    },
+    {
+      id: "rembg",
+      label: "Remove BG",
+      status: !doRembg ? "skipped" : stagesDone.rembg ? "done" : running && stage === "rembg" ? "active" : running ? "pending" : "ready",
+    },
   ];
-  const idle = !running;
+
+  const summaryStatus = done ? "done" : running ? "active" : "pending";
+  const summaryText = done ? "complete" : running ? "processed" : "pending";
 
   return (
-    <div
-      className={`pipeline-zone pipeline-progress-card pipeline-live-stream-block ${idle ? "pipeline-drop-zone" : ""}`.trim()}
-      onDragOver={idle ? onDragOver : undefined}
-      onDragLeave={idle ? onDragLeave : undefined}
-      onDrop={idle ? onDrop : undefined}
-      style={{
-      flex: 1, display: "flex", flexDirection: "column",
-      margin: "12px 12px 0 0", borderRadius: 6,
-      border: idle ? `2px dashed ${dragOver ? C.blue : C.border}` : `1px solid ${C.border}`,
-      background: idle && dragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : C.panel,
-      overflow: "hidden", transition: "border-color 0.15s, background 0.15s"
-    }}>
+    <div className="pipeline-zone pipeline-progress-card pipeline-live-stream-block">
       <div className="pipeline-live-title-row">
         <div className="pipeline-live-title">Live Stream</div>
-        <div className="pipeline-live-counter">{imageDone}/{totalImages || "—"} processed</div>
+        <div className="pipeline-live-counter">{processedLabel}</div>
       </div>
 
       <div className="pipeline-live-grid">
         <div className="pipeline-live-card pipeline-live-card-preview">
-          <LivePreview
-            running={running}
-            done={done}
-            previewPath={previewPath}
-            imageDone={imageDone}
-            totalImages={totalImages}
-            compact
-          />
+          <LivePreview running={running} previewPath={previewPath} />
         </div>
-        {stages.map((s, i) => {
-          const cardBg   = s.done ? "var(--green-bg)" : s.active ? "color-mix(in srgb, var(--accent) 10%, transparent)" : C.panel2;
-          const cardBdr  = s.done ? "var(--green-bdr)" : s.active ? "color-mix(in srgb, var(--accent) 40%, transparent)" : C.border;
-          const cardGlow = "none";
-          const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
-          return (
-            <div key={s.id} style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-              <div className={`pipeline-stage-card pipeline-live-card ${s.active ? "pipeline-stage-card-active" : ""} ${s.done ? "pipeline-stage-card-done" : ""} ${s.skip ? "pipeline-stage-card-skipped" : ""}`.trim()} style={{
-                width: "100%", background: cardBg, border: `1px solid ${cardBdr}`,
-                borderRadius: 5, padding: "10px 9px", textAlign: "center",
-                boxShadow: cardGlow
-              }}>
-                <span className={`pipeline-live-card-status ${s.done ? "is-done" : s.active ? "is-active" : s.skip ? "is-skipped" : "is-pending"}`} />
-                {s.done && <div style={{ fontSize: 14, color: C.green, lineHeight: 1, marginBottom: 2 }}>✓</div>}
-                {running && s.active && (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-                    <span style={{ fontSize: 10, color: C.yellow, fontWeight: 600 }}>{s.sub}</span>
-                  </div>
-                )}
-                {!running && !s.done && (
-                  <div style={{ fontSize: 10, color: textColor }}>
-                    {s.skip ? "skipped" : "ready"}
-                  </div>
-                )}
-                {running && !s.active && !s.done && (
-                  <div style={{ fontSize: 10, color: textColor }}>
-                    {s.skip ? "skipped" : s.sub}
-                  </div>
-                )}
-                <div className="pipeline-live-card-label" style={{ fontSize: 9, color: textColor, marginTop: 4, opacity: 0.72, letterSpacing: "0.06em" }}>{s.label}</div>
-              </div>
-            </div>
-          );
-        })}
+
+        {stageCards.map((card) => (
+          <div key={card.id} className={`pipeline-live-card pipeline-live-card-stage is-${card.status}`}>
+            <span className={`pipeline-live-card-status is-${card.status}`} />
+            <div className="pipeline-live-card-state">{card.status}</div>
+            <div className="pipeline-live-card-label">{card.label}</div>
+          </div>
+        ))}
+
         <div className="pipeline-live-card pipeline-live-card-summary">
-          <span className={`pipeline-live-card-status ${done ? "is-done" : running ? "is-active" : "is-pending"}`} />
-          <div style={{ fontSize: 18, fontWeight: 700, color: running ? C.accent : done ? C.green : C.dim, fontFamily: "JetBrains Mono", lineHeight: 1 }}>
-            {totalImages > 0 ? `${imageDone}/${totalImages}` : `${imageDone}/—`}
-          </div>
-          <div className="pipeline-live-card-label" style={{ fontSize: 10, color: C.dim, marginTop: 6, letterSpacing: "0.08em" }}>
-            {done ? "complete" : running ? "processed" : "pending"}
-          </div>
+          <span className={`pipeline-live-card-status is-${summaryStatus}`} />
+          <div className="pipeline-live-card-value">{totalImages > 0 ? `${imageDone}/${totalImages}` : `${imageDone}/—`}</div>
+          <div className="pipeline-live-card-label">{summaryText}</div>
         </div>
       </div>
-
-      {idle && (
-        <div className="pipeline-drop-hint" style={{
-          borderTop: `1px solid ${C.border}`, padding: "8px 12px",
-          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-          flexShrink: 0,
-        }}>
-          <div style={{ fontSize: 10, color: C.dim, lineHeight: 1.5 }}>
-            {droppedFiles.length > 0
-              ? `${droppedFiles.length} dropped file${droppedFiles.length > 1 ? "s" : ""} · ${inputDir || "source set"}`
-              : "Optional: drop a folder here to set input source."}
-          </div>
-          <button className="pipeline-btn pipeline-browse-button pipeline-secondary-button" onClick={browseInput} disabled={browseLoading} style={{
-            background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
-            borderRadius: 4, padding: "6px 14px", fontSize: 11, cursor: "pointer",
-            fontFamily: "inherit", opacity: browseLoading ? 0.6 : 1, flexShrink: 0,
-          }}>
-            {browseLoading ? "…" : "Browse"}
-          </button>
-        </div>
-      )}
-
-      {recentDone.length > 0 && (
-        <div className="pipeline-recent-strip" style={{
-          borderTop: `1px solid ${C.border}`, padding: "5px 12px",
-          display: "flex", gap: 4, overflowX: "hidden", flexShrink: 0, alignItems: "center"
-        }}>
-          <span style={{ fontSize: 8, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>Done:</span>
-          {recentDone.slice(0, 5).map((f, i) => (
-            <div key={i} className="pipeline-recent-item" style={{
-              background: "var(--green-bg)", border: `1px solid var(--green-bdr)`,
-              borderRadius: 3, padding: "2px 6px", fontSize: 8,
-              fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
-              maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
-            }}>✓ {f}</div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -551,73 +432,32 @@ function SmStat({ label, value, color }) {
 
 // ── LivePreview ───────────────────────────────────────────────────────────────
 
-function LivePreview({ running, done, previewPath, imageDone, totalImages, compact = false }) {
+function LivePreview({ running, previewPath }) {
   const [loadedSrc, setLoadedSrc] = useState("");
   const src = previewPath ? `${BASE}/image?path=${encodeURIComponent(previewPath)}` : "";
   const loaded = Boolean(src) && loadedSrc === src;
 
-  if (done && !running && !compact) return (
-    <div className="pipeline-live-preview" style={{
-      flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
-      justifyContent: "center", gap: 14, borderRadius: 6,
-      border: `1px solid ${C.border}`, background: C.panel, minHeight: 0,
-    }}>
-      <div style={{ fontSize: 36, color: C.green }}>✓</div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: C.green }}>Pipeline complete</div>
-      <div style={{ display: "flex", gap: 24 }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: C.green, fontFamily: "JetBrains Mono" }}>{imageDone}</div>
-          <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase" }}>Done</div>
-        </div>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: C.dim, fontFamily: "JetBrains Mono" }}>{totalImages || "—"}</div>
-          <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase" }}>Total</div>
-        </div>
-      </div>
-      {previewPath && (
-        <img className="pipeline-preview-image" src={src} alt="" style={{ maxHeight: 180, maxWidth: "80%", objectFit: "contain", borderRadius: 4, opacity: 0.5 }} />
-      )}
-    </div>
-  );
-
   return (
-    <div className={`pipeline-live-preview ${compact ? "pipeline-live-preview-compact" : ""}`.trim()} style={{
-      flex: 1, position: "relative", borderRadius: 6, overflow: "hidden",
-      background: "var(--img-bg)", border: `1px solid ${C.border}`, minHeight: 0,
-    }}>
+    <div className="pipeline-live-preview">
       {src ? (
         <>
           {!loaded && (
-            <div style={{
-              position: "absolute", inset: 0, display: "flex", alignItems: "center",
-              justifyContent: "center",
-            }}>
-              <span style={{ fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono", letterSpacing: "0.05em" }}>
-                Loading preview...
-              </span>
+            <div className="pipeline-live-empty">
+              <span style={{ fontFamily: "JetBrains Mono" }}>Loading preview...</span>
             </div>
           )}
           <img
             className="pipeline-preview-image"
             key={src} src={src} alt=""
             onLoad={() => setLoadedSrc(src)} onError={() => setLoadedSrc(src)}
-            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block",
-              opacity: loaded ? 1 : 0, transition: "opacity 0.3s ease" }}
+            style={{ opacity: loaded ? 1 : 0 }}
           />
-          <div style={{
-            position: "absolute", bottom: 0, left: 0, right: 0,
-            padding: compact ? "8px 8px 5px" : "16px 10px 6px",
-            background: "linear-gradient(transparent, rgba(0,0,0,0.6))",
-            fontSize: compact ? 8 : 9, color: "rgba(255,255,255,0.55)", fontFamily: "JetBrains Mono",
-            pointerEvents: "none", overflow: "hidden", textOverflow: "ellipsis",
-            whiteSpace: "nowrap", textAlign: "center",
-          }}>
+          <div className="pipeline-live-preview-name">
             {previewPath.replace(/.*[/\\]/, "")}
           </div>
         </>
       ) : (
-        <div className="pipeline-live-empty" style={{ display: "flex", alignItems: "center", justifyContent: "center",
-          height: "100%", gap: 8, color: C.dim2, fontSize: 11 }}>
+        <div className="pipeline-live-empty">
           <span style={{ fontFamily: "JetBrains Mono" }}>
             {running ? "Waiting for first preview..." : "No live preview yet"}
           </span>
@@ -1051,7 +891,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
 
   const {
     running, done, log, errors, imageDone, imageError,
-    totalImages, recentDone, elapsed, stage, stagesDone,
+    totalImages, elapsed, stage, stagesDone,
     upStats, bgStats, imageProgress, oomGpuCount, previewPath,
     logRef, errorRef, start, stop,
   } = usePipeline();
@@ -1373,11 +1213,8 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                 <Zone1
                   running={running} done={done}
                   stage={stage} stagesDone={stagesDone}
-                  recentDone={recentDone}
                   imageDone={imageDone} totalImages={totalImages}
                   doUpscale={doUpscale} doRembg={doRembg}
-                  inputDir={inputDir} setInputDir={setInputDir}
-                  rembgModel={rembgModel}
                   previewPath={previewPath}
                 />
               </div>

@@ -367,11 +367,13 @@
   margin: 0 !important;
 }
 
-.pipeline-live-preview {
-  border-radius: 14px !important;
-  border-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, #171f31 74%, var(--panel)), color-mix(in srgb, #121a2a 84%, var(--panel2))) !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 20%, transparent);
+.pipeline-live-stream-block {
+  margin: 0 !important;
+  border-radius: 18px !important;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, #171f31 72%, var(--panel)), color-mix(in srgb, #121a2a 82%, var(--panel2))) !important;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 16%, transparent);
 }
 
 .pipeline-live-title-row {
@@ -398,62 +400,129 @@
 }
 
 .pipeline-live-grid {
-  --pipeline-live-tile-size: 132px;
+  --pipeline-live-tile-size: 134px;
   display: grid;
   grid-template-columns: repeat(4, var(--pipeline-live-tile-size));
   grid-auto-rows: var(--pipeline-live-tile-size);
   gap: 10px;
-  padding: 10px 12px 12px;
+  padding: 12px;
   align-items: start;
   justify-content: space-between;
 }
 
 .pipeline-live-card {
+  position: relative;
   width: var(--pipeline-live-tile-size);
   height: var(--pipeline-live-tile-size);
   min-width: 0;
   min-height: 0;
-}
-
-.pipeline-live-card-preview {
-  grid-column: auto;
-}
-
-.pipeline-live-card-summary {
-  position: relative;
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  background: color-mix(in srgb, #141c2f 82%, var(--panel2));
+  background: color-mix(in srgb, #131b2d 82%, var(--panel2));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 16%, transparent);
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
   text-align: center;
-  padding: 10px 9px;
+  padding: 12px 10px;
 }
 
-.pipeline-live-preview-compact {
-  height: 100%;
+.pipeline-live-card-preview {
+  padding: 0;
+  overflow: hidden;
+}
+
+.pipeline-live-card-summary {
+  background: color-mix(in srgb, #101a31 84%, var(--panel2));
+}
+
+.pipeline-live-card-stage.is-active {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 14%, #1a2d47), color-mix(in srgb, var(--panel2) 84%, var(--panel)));
+}
+
+.pipeline-live-card-stage.is-done {
+  border-color: color-mix(in srgb, var(--green-bdr) 76%, var(--border));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--green-bg) 62%, var(--panel)), color-mix(in srgb, var(--panel2) 80%, var(--panel)));
+}
+
+.pipeline-live-card-stage.is-skipped {
+  border-color: color-mix(in srgb, var(--yellow-bdr) 56%, var(--border));
+}
+
+.pipeline-live-preview {
+  position: relative;
   width: 100%;
-  min-height: 0;
-  border-radius: 14px !important;
+  height: 100%;
+  border-radius: 14px;
+  background: linear-gradient(180deg, color-mix(in srgb, #171f31 74%, var(--panel)), color-mix(in srgb, #121a2a 84%, var(--panel2)));
+  overflow: hidden;
 }
 
-.pipeline-live-preview-compact .pipeline-preview-image {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: contain !important;
+.pipeline-live-preview .pipeline-preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  transition: opacity 0.22s ease;
 }
 
-.pipeline-live-preview-compact .pipeline-live-empty {
-  font-size: 10px !important;
-  gap: 6px !important;
+.pipeline-live-preview-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 8px 8px 6px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.64));
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.58);
+  font-family: "JetBrains Mono", monospace;
+  text-align: center;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pipeline-live-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 10px;
   color: color-mix(in srgb, var(--dim2) 80%, var(--dim)) !important;
-  font-size: 12px !important;
+  font-size: 10px !important;
   letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+
+.pipeline-live-card-state {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: lowercase;
+  color: color-mix(in srgb, var(--dim) 70%, var(--text) 30%);
+}
+
+.pipeline-live-card-stage.is-active .pipeline-live-card-state {
+  color: color-mix(in srgb, var(--accent) 90%, #c0d2ff);
+}
+
+.pipeline-live-card-stage.is-done .pipeline-live-card-state {
+  color: color-mix(in srgb, var(--green) 92%, #c2f9d8);
+}
+
+.pipeline-live-card-stage.is-skipped .pipeline-live-card-state {
+  color: color-mix(in srgb, var(--yellow) 86%, #ffd998);
+}
+
+.pipeline-live-card-value {
+  font-size: 34px;
+  line-height: 1;
+  font-family: "JetBrains Mono", monospace;
+  color: color-mix(in srgb, var(--accent) 88%, #b8ccff);
 }
 
 .pipeline-status-card-slot {
@@ -924,7 +993,7 @@
 
   .pipeline-live-card,
   .pipeline-live-card-preview,
-  .pipeline-live-preview-compact {
+  .pipeline-live-preview {
     min-height: 0;
   }
 
@@ -1029,7 +1098,7 @@
 
   .pipeline-live-card,
   .pipeline-live-card-preview,
-  .pipeline-live-preview-compact {
+  .pipeline-live-preview {
     min-height: 0;
   }
 
