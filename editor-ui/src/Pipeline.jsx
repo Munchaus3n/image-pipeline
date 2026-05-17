@@ -427,7 +427,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
 
   return (
     <div
-      className={`pipeline-zone pipeline-progress-card pipeline-live-preview ${idle ? "pipeline-drop-zone" : ""}`.trim()}
+      className={`pipeline-zone pipeline-progress-card pipeline-live-stream-block ${idle ? "pipeline-drop-zone" : ""}`.trim()}
       onDragOver={idle ? onDragOver : undefined}
       onDragLeave={idle ? onDragLeave : undefined}
       onDrop={idle ? onDrop : undefined}
@@ -438,46 +438,38 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
       background: idle && dragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : C.panel,
       overflow: "hidden", transition: "border-color 0.15s, background 0.15s"
     }}>
-      <style>{`
-        @keyframes pulseFade { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        @keyframes flowDot   { 0%{transform:translateX(0);opacity:0.15} 50%{transform:translateX(16px);opacity:1} 100%{transform:translateX(32px);opacity:0.15} }
-        @keyframes slideIn   { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
-      `}</style>
-
       <div className="pipeline-live-title-row">
         <div className="pipeline-live-title">Live Stream</div>
-        {running && (
-          <div className="pipeline-live-counter">{imageDone}/{totalImages || "—"} processed</div>
-        )}
+        <div className="pipeline-live-counter">{imageDone}/{totalImages || "—"} processed</div>
       </div>
 
-      <div className="pipeline-live-preview-frame">
-        <LivePreview
-          running={running}
-          done={done}
-          previewPath={previewPath}
-          imageDone={imageDone}
-          totalImages={totalImages}
-        />
-      </div>
-
-      <div className="pipeline-live-stage-strip" style={{ display: "flex", alignItems: "center", padding: "0 16px", gap: 0, minHeight: 124 }}>
+      <div className="pipeline-live-grid">
+        <div className="pipeline-live-card pipeline-live-card-preview">
+          <LivePreview
+            running={running}
+            done={done}
+            previewPath={previewPath}
+            imageDone={imageDone}
+            totalImages={totalImages}
+            compact
+          />
+        </div>
         {stages.map((s, i) => {
           const cardBg   = s.done ? "var(--green-bg)" : s.active ? "color-mix(in srgb, var(--accent) 10%, transparent)" : C.panel2;
           const cardBdr  = s.done ? "var(--green-bdr)" : s.active ? "color-mix(in srgb, var(--accent) 40%, transparent)" : C.border;
-          const cardGlow = s.active ? "0 0 14px color-mix(in srgb, var(--accent) 30%, transparent)" : s.done ? "0 0 8px color-mix(in srgb, var(--green) 20%, transparent)" : "none";
+          const cardGlow = "none";
           const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
           return (
-            <div key={s.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
+            <div key={s.id} style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
               <div className={`pipeline-stage-card pipeline-live-card ${s.active ? "pipeline-stage-card-active" : ""} ${s.done ? "pipeline-stage-card-done" : ""} ${s.skip ? "pipeline-stage-card-skipped" : ""}`.trim()} style={{
-                flex: 1, background: cardBg, border: `1px solid ${cardBdr}`,
-                borderRadius: 5, padding: "14px 10px", textAlign: "center",
-                boxShadow: cardGlow, transition: "all 0.4s ease"
+                width: "100%", background: cardBg, border: `1px solid ${cardBdr}`,
+                borderRadius: 5, padding: "10px 9px", textAlign: "center",
+                boxShadow: cardGlow
               }}>
                 <span className={`pipeline-live-card-status ${s.done ? "is-done" : s.active ? "is-active" : s.skip ? "is-skipped" : "is-pending"}`} />
-                {s.done && <div style={{ fontSize: 20, color: C.green, lineHeight: 1, marginBottom: 4 }}>✓</div>}
+                {s.done && <div style={{ fontSize: 14, color: C.green, lineHeight: 1, marginBottom: 2 }}>✓</div>}
                 {running && s.active && (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, animation: "pulseFade 1.4s ease-in-out infinite" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
                     <Spinner color={C.yellow} size={13} />
                     <span style={{ fontSize: 10, color: C.yellow, fontWeight: 600 }}>{s.sub}</span>
                   </div>
@@ -492,22 +484,20 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
                     {s.skip ? "skipped" : s.sub}
                   </div>
                 )}
-                <div className="pipeline-live-card-label" style={{ fontSize: 9, color: textColor, marginTop: 5, opacity: 0.6, letterSpacing: "0.06em" }}>{s.label}</div>
+                <div className="pipeline-live-card-label" style={{ fontSize: 9, color: textColor, marginTop: 4, opacity: 0.72, letterSpacing: "0.06em" }}>{s.label}</div>
               </div>
-              {i < stages.length - 1 && (
-                <div className="pipeline-stage-connector" style={{ width: 28, height: 2, background: C.dim2, flexShrink: 0, position: "relative", margin: "0 4px" }}>
-                  <div style={{
-                    position: "absolute", top: -4, left: 0, width: 8, height: 8,
-                    borderRadius: "50%", background: s.done ? C.green : C.yellow,
-                    opacity: s.done ? 0.5 : 0.7,
-                    animation: s.active || s.done ? `flowDot 1.4s ease-in-out infinite` : "none",
-                    animationDelay: `${i * 0.46}s`
-                  }} />
-                </div>
-              )}
             </div>
           );
         })}
+        <div className="pipeline-live-card pipeline-live-card-summary">
+          <span className={`pipeline-live-card-status ${done ? "is-done" : running ? "is-active" : "is-pending"}`} />
+          <div style={{ fontSize: 18, fontWeight: 700, color: running ? C.accent : done ? C.green : C.dim, fontFamily: "JetBrains Mono", lineHeight: 1 }}>
+            {totalImages > 0 ? `${imageDone}/${totalImages}` : `${imageDone}/—`}
+          </div>
+          <div className="pipeline-live-card-label" style={{ fontSize: 10, color: C.dim, marginTop: 6, letterSpacing: "0.08em" }}>
+            {done ? "complete" : running ? "processed" : "pending"}
+          </div>
+        </div>
       </div>
 
       {idle && (
@@ -542,7 +532,6 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
               background: "var(--green-bg)", border: `1px solid var(--green-bdr)`,
               borderRadius: 3, padding: "2px 6px", fontSize: 8,
               fontFamily: "JetBrains Mono", color: C.green, flexShrink: 0,
-              animation: "slideIn 0.2s ease",
               maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
             }}>✓ {f}</div>
           ))}
@@ -563,12 +552,12 @@ function SmStat({ label, value, color }) {
 
 // ── LivePreview ───────────────────────────────────────────────────────────────
 
-function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
+function LivePreview({ running, done, previewPath, imageDone, totalImages, compact = false }) {
   const [loadedSrc, setLoadedSrc] = useState("");
   const src = previewPath ? `${BASE}/image?path=${encodeURIComponent(previewPath)}` : "";
   const loaded = Boolean(src) && loadedSrc === src;
 
-  if (done && !running) return (
+  if (done && !running && !compact) return (
     <div className="pipeline-live-preview" style={{
       flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", gap: 14, borderRadius: 6,
@@ -593,20 +582,16 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
   );
 
   return (
-    <div className="pipeline-live-preview" style={{
+    <div className={`pipeline-live-preview ${compact ? "pipeline-live-preview-compact" : ""}`.trim()} style={{
       flex: 1, position: "relative", borderRadius: 6, overflow: "hidden",
       background: "var(--img-bg)", border: `1px solid ${C.border}`, minHeight: 0,
     }}>
-      <style>{`
-        @keyframes previewFadeIn { from{opacity:0} to{opacity:1} }
-        @keyframes loadingPulse  { 0%,100%{opacity:0.4} 50%{opacity:0.8} }
-      `}</style>
       {src ? (
         <>
           {!loaded && (
             <div style={{
               position: "absolute", inset: 0, display: "flex", alignItems: "center",
-              justifyContent: "center", animation: "loadingPulse 1.2s ease-in-out infinite",
+              justifyContent: "center",
             }}>
               <Spinner color={C.dim} size={18} />
             </div>
@@ -620,9 +605,9 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
           />
           <div style={{
             position: "absolute", bottom: 0, left: 0, right: 0,
-            padding: "16px 10px 6px",
+            padding: compact ? "8px 8px 5px" : "16px 10px 6px",
             background: "linear-gradient(transparent, rgba(0,0,0,0.6))",
-            fontSize: 9, color: "rgba(255,255,255,0.55)", fontFamily: "JetBrains Mono",
+            fontSize: compact ? 8 : 9, color: "rgba(255,255,255,0.55)", fontFamily: "JetBrains Mono",
             pointerEvents: "none", overflow: "hidden", textOverflow: "ellipsis",
             whiteSpace: "nowrap", textAlign: "center",
           }}>

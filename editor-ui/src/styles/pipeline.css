@@ -358,9 +358,9 @@
 
 .pipeline-live-area {
   flex: 0 0 auto;
-  min-height: 344px;
-  display: flex;
-  padding-top: 2px;
+  min-height: 0;
+  display: block;
+  padding-top: 0;
 }
 
 .pipeline-live-area .pipeline-zone {
@@ -368,12 +368,10 @@
 }
 
 .pipeline-live-preview {
-  border-radius: 18px !important;
+  border-radius: 14px !important;
   border-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
   background: linear-gradient(180deg, color-mix(in srgb, #171f31 74%, var(--panel)), color-mix(in srgb, #121a2a 84%, var(--panel2))) !important;
-  box-shadow:
-    0 10px 22px rgba(5, 10, 24, 0.2),
-    inset 0 1px 0 color-mix(in srgb, var(--border) 20%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 20%, transparent);
 }
 
 .pipeline-live-title-row {
@@ -381,7 +379,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 11px 14px 9px;
+  padding: 9px 14px 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }
 
@@ -400,20 +398,45 @@
 }
 
 .pipeline-live-grid {
-  gap: 8px !important;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px 12px 12px;
+  align-items: stretch;
 }
 
-.pipeline-live-preview-frame {
-  flex: 1;
-  min-height: 150px;
-  padding: 10px 14px 8px;
+.pipeline-live-card {
+  min-width: 0;
+  min-height: 108px;
+}
+
+.pipeline-live-card-preview {
+  grid-column: span 1;
+  min-height: 122px;
+}
+
+.pipeline-live-card-summary {
+  position: relative;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, #141c2f 82%, var(--panel2));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 16%, transparent);
   display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  padding: 10px 9px;
 }
 
-.pipeline-live-stage-strip {
-  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  min-height: 124px;
-  flex-shrink: 0;
+.pipeline-live-preview-compact {
+  height: 100%;
+  min-height: 122px;
+  border-radius: 14px !important;
+}
+
+.pipeline-live-preview-compact .pipeline-live-empty {
+  font-size: 10px !important;
+  gap: 6px !important;
 }
 
 .pipeline-live-empty {
@@ -669,27 +692,23 @@
 
 .pipeline-stage-card {
   position: relative;
-  border-radius: 18px !important;
+  border-radius: 14px !important;
   border-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
   background: color-mix(in srgb, var(--panel2) 84%, var(--panel)) !important;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 16%, transparent);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease !important;
+  transition: none !important;
 }
 
 .pipeline-stage-card-active {
   border-color: color-mix(in srgb, var(--accent) 58%, var(--border)) !important;
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 18%, #1d2e47), color-mix(in srgb, var(--panel2) 86%, var(--panel))) !important;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent),
-    0 8px 20px color-mix(in srgb, var(--accent) 18%, transparent) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent) !important;
 }
 
 .pipeline-stage-card-done {
   border-color: color-mix(in srgb, var(--green-bdr) 82%, var(--border)) !important;
   background: linear-gradient(145deg, color-mix(in srgb, var(--green-bg) 64%, var(--panel)), color-mix(in srgb, var(--panel2) 80%, var(--panel))) !important;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--green) 18%, transparent),
-    0 8px 20px color-mix(in srgb, var(--green) 12%, transparent) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--green) 14%, transparent) !important;
 }
 
 .pipeline-stage-card-skipped {
@@ -704,14 +723,14 @@
 
 .pipeline-live-card-status {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 12px;
-  height: 12px;
+  top: 8px;
+  right: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--panel2) 88%, #0f1627);
+  border: 1px solid color-mix(in srgb, var(--panel2) 88%, #0f1627);
   background: color-mix(in srgb, var(--dim2) 72%, #818797);
-  box-shadow: 0 0 0 2px color-mix(in srgb, #0e1525 70%, transparent);
+  box-shadow: none;
 }
 
 .pipeline-live-card-status.is-active {
@@ -733,6 +752,7 @@
 .pipeline-live-card-label {
   text-transform: uppercase;
   font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .pipeline-recent-strip {
@@ -882,16 +902,18 @@
   }
 
   .pipeline-live-area {
-    min-height: 316px;
+    min-height: 0;
   }
 
-  .pipeline-live-preview-frame {
-    min-height: 138px;
-    padding: 9px 12px 8px;
+  .pipeline-live-grid {
+    gap: 8px;
+    padding: 9px 10px 10px;
   }
 
-  .pipeline-live-stage-strip {
-    min-height: 116px;
+  .pipeline-live-card,
+  .pipeline-live-card-preview,
+  .pipeline-live-preview-compact {
+    min-height: 112px;
   }
 
   .pipeline-progress-title {
@@ -981,16 +1003,19 @@
   }
 
   .pipeline-live-area {
-    min-height: 286px;
+    min-height: 0;
   }
 
-  .pipeline-live-preview-frame {
-    min-height: 124px;
-    padding: 8px 10px 6px;
+  .pipeline-live-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding: 8px 9px 9px;
   }
 
-  .pipeline-live-stage-strip {
-    min-height: 104px;
+  .pipeline-live-card,
+  .pipeline-live-card-preview,
+  .pipeline-live-preview-compact {
+    min-height: 100px;
   }
 
   .pipeline-progress-stage-pill {
