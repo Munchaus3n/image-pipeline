@@ -467,7 +467,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
   );
 
   if (done) return (
-    <div className="pipeline-zone" style={{
+    <div className="pipeline-zone pipeline-progress-card" style={{
       flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", gap: 14, margin: "12px 12px 0 0", borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel
@@ -487,7 +487,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
   ];
 
   return (
-    <div className="pipeline-zone" style={{
+    <div className="pipeline-zone pipeline-progress-card" style={{
       flex: 1, display: "flex", flexDirection: "column",
       margin: "12px 12px 0 0", borderRadius: 6,
       border: `1px solid ${C.border}`, background: C.panel, overflow: "hidden"
@@ -575,8 +575,8 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
 function SmStat({ label, value, color }) {
   return (
     <div className="pipeline-stat" style={{ textAlign: "center" }}>
-      <div className="pipeline-stat-value" style={{ fontSize: 24, fontWeight: 700, color, fontFamily: "JetBrains Mono", lineHeight: 1 }}>{value}</div>
-      <div className="pipeline-stat-label" style={{ fontSize: 10, color: C.dim, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+      <div className="pipeline-stat-value" style={{ color }}>{value}</div>
+      <div className="pipeline-stat-label">{label}</div>
     </div>
   );
 }
@@ -700,7 +700,7 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, d
   const errs = upStats.err + bgStats.err;
 
   return (
-    <div style={{ marginTop: 8, flexShrink: 0 }}>
+    <div className="pipeline-progress-card" style={{ marginTop: 8, flexShrink: 0 }}>
       <div style={{
         background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4,
         padding: "7px 14px", display: "flex", flexDirection: "column", gap: 5,

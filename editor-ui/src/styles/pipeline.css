@@ -148,10 +148,85 @@
 
 .pipeline-status-area {
   min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .pipeline-ready-card {
-  box-shadow: var(--shadow);
+  min-height: 108px;
+  border-radius: 12px !important;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 90%, var(--bg)), color-mix(in srgb, var(--panel2) 66%, var(--panel))) !important;
+  box-shadow:
+    0 10px 22px rgba(5, 10, 24, 0.22),
+    inset 0 1px 0 color-mix(in srgb, var(--border) 26%, transparent);
+}
+
+.pipeline-progress-card {
+  border-radius: 12px;
+}
+
+.pipeline-progress-card > div {
+  border-radius: 12px !important;
+}
+
+.pipeline-stage-card {
+  border-radius: 12px !important;
+  border-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
+  background: color-mix(in srgb, var(--panel2) 84%, var(--panel)) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 16%, transparent);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease !important;
+}
+
+.pipeline-stage-card-active {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel)) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent),
+    0 8px 20px color-mix(in srgb, var(--accent) 18%, transparent) !important;
+}
+
+.pipeline-stage-card-done {
+  border-color: color-mix(in srgb, var(--green-bdr) 82%, var(--border)) !important;
+  background: color-mix(in srgb, var(--green-bg) 70%, var(--panel)) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--green) 18%, transparent),
+    0 8px 20px color-mix(in srgb, var(--green) 12%, transparent) !important;
+}
+
+.pipeline-stage-card-skipped {
+  border-color: color-mix(in srgb, var(--yellow-bdr) 44%, var(--border)) !important;
+  background: color-mix(in srgb, var(--panel2) 74%, var(--panel)) !important;
+}
+
+.pipeline-stage-connector {
+  background: color-mix(in srgb, var(--border) 86%, var(--dim2)) !important;
+  opacity: 0.86;
+}
+
+.pipeline-stat {
+  min-width: 84px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  background: color-mix(in srgb, var(--panel2) 68%, var(--panel));
+}
+
+.pipeline-stat-value {
+  font-size: 21px !important;
+  font-weight: 700;
+  font-family: "JetBrains Mono", monospace;
+  line-height: 1;
+}
+
+.pipeline-stat-label {
+  margin-top: 4px;
+  font-size: 9px;
+  color: color-mix(in srgb, var(--dim) 90%, var(--text) 10%);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
 .pipeline-bottom-panels {
@@ -203,5 +278,18 @@
   .pipeline-status-area {
     flex-basis: 52% !important;
     min-height: 220px;
+  }
+
+  .pipeline-ready-card {
+    min-height: 94px;
+  }
+
+  .pipeline-stat {
+    min-width: 72px;
+    padding: 5px 8px;
+  }
+
+  .pipeline-stat-value {
+    font-size: 18px !important;
   }
 }
