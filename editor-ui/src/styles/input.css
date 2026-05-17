@@ -1,7 +1,49 @@
 input[type=number] { color-scheme: dark; }
 ::placeholder { color: var(--dim2); opacity: 0.6; }
 
-input:focus, select:focus, textarea:focus {
-  outline: 2px solid var(--accent);
+.inp-btn {
+  transition: transform 0.14s ease, box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.inp-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border)) !important;
+  box-shadow: var(--shadow);
+}
+
+.inp-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.inp-card {
+  border-radius: 8px !important;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--border) 40%, transparent);
+  transition: border-color 0.14s ease, box-shadow 0.2s ease, transform 0.2s ease !important;
+}
+
+.inp-thumb:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.inp-thumb:hover .inp-eye {
+  opacity: 1 !important;
+  transform: translateY(0) scale(1) !important;
+}
+
+.inp-eye {
+  transform: translateY(2px) scale(0.96);
+  transition: opacity 0.14s ease, transform 0.16s ease, box-shadow 0.18s ease !important;
+}
+
+.inp-eye:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent), var(--shadow);
+}
+
+input:focus, input:focus-visible,
+select:focus, select:focus-visible,
+textarea:focus, textarea:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent) !important;
   outline-offset: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
