@@ -29,6 +29,10 @@ session.json
 settings.json
 .smoke-test-sandbox/
 editor-ui/dist/
+node_modules/
+editor-ui/node_modules/
+.vite/
+editor-ui/node_modules/.vite/
 
 # Editor / OS
 .vscode/
