@@ -52,13 +52,13 @@ function Btn({ label, active, color, onClick, style = {}, className = "" }) {
 
 function PillToggle({ value, onChange }) {
   return (
-    <div className="pipeline-toggle" onClick={() => onChange(!value)} style={{
+    <div className={`pipeline-toggle ${value ? "is-on" : "is-off"}`} onClick={() => onChange(!value)} style={{
       width: 40, height: 22, borderRadius: 11, cursor: "pointer", flexShrink: 0,
       background: value ? C.greenBg : C.redBg,
       border: `1px solid ${value ? C.greenBdr : C.redBdr}`,
       position: "relative", transition: "background 0.2s ease, border-color 0.2s ease",
     }}>
-      <div className="pipeline-toggle-thumb" style={{
+      <div className={`pipeline-toggle-thumb ${value ? "is-on" : "is-off"}`} style={{
         width: 16, height: 16, borderRadius: "50%",
         background: value ? C.green : C.red,
         position: "absolute", top: 2,
@@ -1184,6 +1184,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           </div>
 
           <SectionLabel>Processing</SectionLabel>
+          <div className="pipeline-section" style={{ marginBottom: 14 }}>
 
           <Row label="Folder mode">
             <Btn label="Bulk" active={folderMode === "bulk"} onClick={() => setFolderMode("bulk")} />
@@ -1224,8 +1225,9 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
             </>
           )}
 
-          <div style={{ marginTop: 16, marginBottom: 16, borderTop: `1px solid ${C.border}` }} />
+          </div>
           <SectionLabel>Output settings</SectionLabel>
+          <div className="pipeline-section" style={{ marginBottom: 14 }}>
 
           <Row label="Skip upscale if any side ≥">
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1266,16 +1268,14 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           <Row label="Thumbnail (400px)">
             <PillToggle value={thumbnail} onChange={setThumbnail} />
           </Row>
+          </div>
 
+          <SectionLabel>Will run</SectionLabel>
           {/* Will run summary */}
           <div className="pipeline-section" style={{
-            marginTop: 14, background: C.panel2, border: `1px solid ${C.border}`,
+            marginTop: 0, background: C.panel2, border: `1px solid ${C.border}`,
             borderRadius: 4, padding: "9px 12px"
           }}>
-            <div style={{
-              fontSize: 9, color: C.dim, marginBottom: 6,
-              letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700
-            }}>Will run</div>
             {nothingSelected
               ? <div style={{ fontSize: 12, color: C.red }}>✕ Enable at least one stage</div>
               : <>
