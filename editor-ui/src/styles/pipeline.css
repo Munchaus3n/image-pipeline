@@ -284,37 +284,48 @@
 
 .pipeline-header-run-button,
 .pipeline-header-stop-button {
-  min-height: 42px !important;
-  padding: 0 22px !important;
+  min-height: 40px !important;
+  padding: 0 18px !important;
   border-radius: 999px !important;
-  font-size: 13px !important;
+  font-size: 12px !important;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
 .pipeline-header-run-button {
-  background: linear-gradient(180deg, color-mix(in srgb, #6e78ff 88%, #7f6dff), color-mix(in srgb, #5562ee 84%, #735ff3)) !important;
-  border: 1px solid color-mix(in srgb, #8a97ff 58%, #5b66e4) !important;
-  color: #f1f4ff !important;
+  background: linear-gradient(180deg, #6f78ff, #5c69ef) !important;
+  border: 1px solid color-mix(in srgb, #8f9aff 50%, #5b67ea) !important;
+  color: #f8f9ff !important;
   box-shadow:
-    0 10px 22px rgba(76, 92, 255, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    0 4px 12px rgba(76, 92, 255, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .pipeline-header-run-button:disabled {
-  background: color-mix(in srgb, #32374e 86%, var(--panel2)) !important;
+  background: color-mix(in srgb, #2e3449 88%, var(--panel2)) !important;
   border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
-  color: color-mix(in srgb, var(--dim2) 88%, var(--dim)) !important;
+  color: color-mix(in srgb, var(--dim2) 76%, var(--dim)) !important;
   box-shadow: none;
   cursor: not-allowed;
 }
 
 .pipeline-header-stop-button {
-  background: color-mix(in srgb, var(--red-bg) 84%, #301018) !important;
-  border: 1px solid color-mix(in srgb, var(--red-bdr) 92%, transparent) !important;
-  color: color-mix(in srgb, var(--red) 95%, #ffd0d0) !important;
-  box-shadow: 0 10px 22px color-mix(in srgb, var(--red) 16%, transparent);
+  background: color-mix(in srgb, var(--red-bg) 78%, #2b0f17) !important;
+  border: 1px solid color-mix(in srgb, var(--red-bdr) 84%, transparent) !important;
+  color: color-mix(in srgb, var(--red) 90%, #ffd0d0) !important;
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.pipeline-header-run-button:hover:not(:disabled),
+.pipeline-header-stop-button:hover:not(:disabled) {
+  filter: brightness(1.06) !important;
+  transform: translateY(-1px);
+}
+
+.pipeline-header-run-button:active:not(:disabled),
+.pipeline-header-stop-button:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .pipeline-results-area {

@@ -1132,7 +1132,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
         <div className="pipeline-header-actions">
           {!running ? (
             <button
-              className="pipeline-btn pipeline-header-run-button pipeline-run-button"
+              className="pipeline-btn pipeline-header-run-button"
               onClick={handleStart}
               disabled={nothingSelected}
             >
@@ -1140,7 +1140,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
             </button>
           ) : (
             <button
-              className="pipeline-btn pipeline-header-stop-button pipeline-stop-button"
+              className="pipeline-btn pipeline-header-stop-button"
               onClick={stop}
             >
               ■  Stop
