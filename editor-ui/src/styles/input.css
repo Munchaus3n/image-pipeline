@@ -153,3 +153,62 @@ input[type=number] { color-scheme: dark; }
   opacity: 0.85;
   padding-right: 2px;
 }
+
+.input-main {
+  padding: 0 12px 12px;
+}
+
+.input-grid-scroll {
+  padding: 14px 14px 16px !important;
+}
+
+.input-grid {
+  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.input-grid .input-card {
+  border-radius: 20px !important;
+  background: color-mix(in srgb, var(--panel2) 82%, #070a13) !important;
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.18), 0 2px 5px rgba(2, 6, 23, 0.14);
+}
+
+.input-grid .input-thumb:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(2, 6, 23, 0.26), 0 4px 8px rgba(2, 6, 23, 0.2);
+}
+
+.input-checkbox {
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.input-eye-button {
+  backdrop-filter: blur(2px);
+}
+
+.input-thumb-image {
+  filter: saturate(0.9) contrast(1.02);
+}
+
+.input-thumb-fallback {
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+}
+
+.input-excluded-badge {
+  background: color-mix(in srgb, var(--yellow-bg) 90%, #2a1c09) !important;
+  border-color: color-mix(in srgb, var(--yellow-bdr) 88%, #7b5a1a) !important;
+  color: color-mix(in srgb, var(--yellow) 92%, #f0bd48) !important;
+}
+
+.input-filename-bar {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.input-filename {
+  letter-spacing: 0.02em;
+}
+
+.input-folder-name {
+  opacity: 0.82;
+}

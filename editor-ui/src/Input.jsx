@@ -345,8 +345,8 @@ export default function Input({
           ) : (
             <div className="input-grid" style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
-              gap: 8, alignContent: "start",
+              gridTemplateColumns: "repeat(auto-fill, minmax(156px, 1fr))",
+              gap: 12, alignContent: "start",
             }}>
               {visible.map(entry => {
                 const { absPath, name, imageId, relFolder } = entry;
@@ -362,22 +362,22 @@ export default function Input({
                     className="inp-thumb inp-card input-thumb input-card"
                     onClick={e => toggleSelect(imageId, e, visibleIds)}
                     style={{
-                      position: "relative", borderRadius: 5, overflow: "hidden",
-                      border: `2px solid ${isSel ? C.blue : isPreview ? "color-mix(in srgb,var(--accent) 40%,var(--border))" : C.border}`,
+                      position: "relative", borderRadius: 18, overflow: "hidden",
+                      border: `${isSel ? 2 : 1}px solid ${isSel ? C.blue : isPreview ? "color-mix(in srgb,var(--accent) 40%,var(--border))" : "color-mix(in srgb,var(--border) 75%,transparent)"}`,
                       background: C.panel2, cursor: "pointer",
-                      transition: "border-color 0.1s",
+                      transition: "border-color 0.15s, box-shadow 0.2s, transform 0.2s",
                     }}
                   >
                     {/* Checkbox overlay — top-left */}
                     <div
                       className="inp-cb input-checkbox"
                       style={{
-                        position: "absolute", top: 5, left: 5, zIndex: 2,
-                        width: 18, height: 18, borderRadius: 4,
-                        background: isSel ? C.blue : "rgba(0,0,0,0.55)",
-                        border: `1.5px solid ${isSel ? C.blue : "rgba(255,255,255,0.25)"}`,
+                        position: "absolute", top: 8, right: 8, zIndex: 2,
+                        width: 30, height: 30, borderRadius: 999,
+                        background: isSel ? C.blue : "rgba(8,11,19,0.58)",
+                        border: `1.5px solid ${isSel ? C.blue : "rgba(255,255,255,0.15)"}`,
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 10, color: "var(--accent-fg)", fontWeight: 700,
+                        fontSize: 13, color: "var(--accent-fg)", fontWeight: 800,
                         pointerEvents: "none",
                       }}
                     >{isSel ? "✓" : ""}</div>
@@ -387,12 +387,12 @@ export default function Input({
                       className="inp-eye input-eye-button"
                       onClick={e => { e.stopPropagation(); setPreviewPath(isPreview ? null : absPath); setPreviewLoadError(false); }}
                       style={{
-                        position: "absolute", top: 5, right: 5, zIndex: 2,
-                        width: 22, height: 22, borderRadius: 4,
-                        background: isPreview ? C.blue : "rgba(0,0,0,0.60)",
-                        border: `1px solid ${isPreview ? C.blue : "rgba(255,255,255,0.15)"}`,
+                        position: "absolute", right: 10, bottom: 10, zIndex: 3,
+                        width: 20, height: 20, borderRadius: 999,
+                        background: isPreview ? C.blue : "rgba(7,9,16,0.62)",
+                        border: `1px solid ${isPreview ? C.blue : "rgba(255,255,255,0.12)"}`,
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 11, cursor: "pointer",
+                        fontSize: 10, cursor: "pointer",
                         opacity: isPreview ? 1 : 0,
                         transition: "opacity 0.12s",
                       }}
@@ -442,24 +442,24 @@ export default function Input({
                     {/* Excluded badge */}
                     {isExcl && (
                       <div className="input-excluded-badge" style={{
-                        position: "absolute", bottom: 20, left: 4, right: 4,
+                        position: "absolute", top: 12, left: 12,
                         background: "var(--yellow-bg)", color: "var(--yellow)",
                         border: "1px solid var(--yellow-bdr)",
                         fontSize: 8, fontWeight: 700, textAlign: "center",
-                        borderRadius: 3, padding: "1px 0",
-                        letterSpacing: "0.06em", textTransform: "uppercase",
+                        borderRadius: 7, padding: "3px 8px",
+                        letterSpacing: "0.08em", textTransform: "uppercase",
                       }}>Excluded</div>
                     )}
 
                     {/* Filename bar */}
                     <div className="input-filename-bar" style={{
-                      padding: "3px 5px",
+                      padding: "7px 10px",
                       color: isExcl ? C.yellow : C.dim,
                       fontFamily: "JetBrains Mono",
-                      background: C.panel,
+                      background: "color-mix(in srgb, var(--panel) 92%, #000)",
                     }}>
                       <div className="input-filename" style={{
-                        fontSize: 9,
+                        fontSize: 9.5,
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>{name}</div>
                       {relFolder && (
