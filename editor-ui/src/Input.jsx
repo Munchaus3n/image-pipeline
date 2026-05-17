@@ -187,7 +187,7 @@ export default function Input({
   const activeExcludeCount = excludeTags.filter(n => !removedImages.has(n)).length;
 
   return (
-    <div style={{
+    <div className="input-screen" style={{
       display: "flex", flexDirection: "column", height: "100%",
       background: C.bg, color: C.text,
       fontFamily: "'Outfit','DM Sans',system-ui,sans-serif",
@@ -202,13 +202,14 @@ export default function Input({
       `}</style>
 
       {/* ── Top bar ── */}
-      <div style={{
+      <div className="input-toolbar" style={{
         display: "flex", alignItems: "center", gap: 8, padding: "8px 14px",
         borderBottom: `1px solid ${C.border}`, background: C.panel, flexShrink: 0,
       }}>
         {/* Folder input + browse */}
-        <div style={{ display: "flex", gap: 4, flex: "0 0 360px" }}>
+        <div className="input-folder-group" style={{ display: "flex", gap: 4, flex: "0 0 360px" }}>
           <input
+            className="input-path-field"
             value={inputDir}
             onChange={e => setInputDir(e.target.value)}
             placeholder="Select input folder…"
@@ -219,7 +220,7 @@ export default function Input({
               outline: "none", minWidth: 0,
             }}
           />
-          <button className="inp-btn" onClick={browse} disabled={browseLoading} style={{
+          <button className="inp-btn input-browse-button" onClick={browse} disabled={browseLoading} style={{
             background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
             borderRadius: 4, padding: "5px 10px", fontSize: 13,
             cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
@@ -228,6 +229,7 @@ export default function Input({
 
         {/* Search */}
         <input
+          className="input-search-field"
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search by filename…"
@@ -240,7 +242,7 @@ export default function Input({
         />
 
         {/* Image count */}
-        <span style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono", flexShrink: 0 }}>
+        <span className="input-count" style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono", flexShrink: 0 }}>
           {visible.length} image{visible.length !== 1 ? "s" : ""}
           {activeExcludeCount > 0 && (
             <span style={{ color: C.yellow }}> · {activeExcludeCount} excluded</span>
@@ -248,19 +250,19 @@ export default function Input({
         </span>
 
         {/* All / None */}
-        <button className="inp-btn" onClick={selectAll} style={{
+        <button className="inp-btn input-select-button" onClick={selectAll} style={{
           background: "transparent", color: C.dim, border: `1px solid ${C.border}`,
           borderRadius: 4, padding: "4px 10px", fontSize: 11,
           cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
         }}>All</button>
-        <button className="inp-btn" onClick={selectNone} style={{
+        <button className="inp-btn input-select-button" onClick={selectNone} style={{
           background: "transparent", color: C.dim, border: `1px solid ${C.border}`,
           borderRadius: 4, padding: "4px 10px", fontSize: 11,
           cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
         }}>None</button>
 
         {/* Go to Process */}
-        <button className="inp-btn" onClick={onGoToProcess} disabled={!inputDir.trim()} style={{
+        <button className="inp-btn input-next-button" onClick={onGoToProcess} disabled={!inputDir.trim()} style={{
           background: inputDir.trim() ? "var(--green-bg)" : C.dim2,
           color: inputDir.trim() ? C.green : C.dim,
           border: `1px solid ${inputDir.trim() ? "var(--green-bdr)" : C.border}`,
@@ -272,14 +274,14 @@ export default function Input({
 
       {/* ── Selection action bar ── */}
       {selected.size > 0 && (
-        <div style={{
+        <div className="input-selection-bar" style={{
           display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
           background: C.panel2, borderBottom: `1px solid ${C.border}`, flexShrink: 0,
         }}>
-          <span style={{ fontSize: 12, color: C.blue, fontWeight: 600 }}>
+          <span className="input-selection-count" style={{ fontSize: 12, color: C.blue, fontWeight: 600 }}>
             {selected.size} selected
           </span>
-          <button className="inp-btn" onClick={allExcl ? unexcludeSelected : excludeSelected} style={{
+          <button className="inp-btn input-selection-action" onClick={allExcl ? unexcludeSelected : excludeSelected} style={{
             background: allExcl ? C.panel2 : "var(--yellow-bg)",
             color: allExcl ? C.dim : C.yellow,
             border: `1px solid ${allExcl ? C.border : "var(--yellow-bdr)"}`,
@@ -288,12 +290,12 @@ export default function Input({
           }}>
             {allExcl ? "Remove exclusion" : "Exclude from BG"}
           </button>
-          <button className="inp-btn" onClick={removeSelected} style={{
+          <button className="inp-btn input-selection-action" onClick={removeSelected} style={{
             background: "var(--red-bg)", color: C.red, border: `1px solid var(--red-bdr)`,
             borderRadius: 4, padding: "4px 12px", fontSize: 11,
             cursor: "pointer", fontFamily: "inherit",
           }}>Remove from session</button>
-          <button className="inp-btn" onClick={selectNone} style={{
+          <button className="inp-btn input-selection-clear" onClick={selectNone} style={{
             background: "transparent", color: C.dim, border: "none",
             fontSize: 11, cursor: "pointer", fontFamily: "inherit", marginLeft: "auto",
           }}>✕ Clear selection</button>
@@ -301,30 +303,30 @@ export default function Input({
       )}
 
       {/* ── Main area: grid + optional preview sidebar ── */}
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div className="input-main" style={{ flex: 1, display: "flex", minHeight: 0 }}>
 
         {/* Image grid */}
-        <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
+        <div className="input-grid-scroll" style={{ flex: 1, overflowY: "auto", padding: 12 }}>
           {!inputDir.trim() ? (
             /* Empty state */
-            <div style={{
+            <div className="input-empty-state" style={{
               height: "100%", display: "flex", flexDirection: "column",
               alignItems: "center", justifyContent: "center", gap: 14,
             }}>
               <div style={{ fontSize: 36, opacity: 0.50 }}>📁</div>
               <div style={{ fontSize: 13, color: C.dim }}>Select an input folder to browse images</div>
-              <button className="inp-btn" onClick={browse} style={{
+              <button className="inp-btn input-browse-button" onClick={browse} style={{
                 background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
                 borderRadius: 4, padding: "8px 20px", fontSize: 12,
                 cursor: "pointer", fontFamily: "inherit",
               }}>Browse folder</button>
             </div>
           ) : loading ? (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div className="input-loading-state" style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ color: C.dim, fontSize: 12, fontFamily: "JetBrains Mono" }}>Loading images…</span>
             </div>
           ) : loadError ? (
-            <div style={{
+            <div className="input-error-state" style={{
               height: "100%", display: "flex", flexDirection: "column",
               alignItems: "center", justifyContent: "center", gap: 10,
             }}>
@@ -341,7 +343,7 @@ export default function Input({
               <span style={{ color: C.dim, fontSize: 12 }}>No images found{search ? " matching your search" : ""}</span>
             </div>
           ) : (
-            <div style={{
+            <div className="input-grid" style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
               gap: 8, alignContent: "start",
@@ -357,7 +359,7 @@ export default function Input({
                 return (
                   <div
                     key={absPath}
-                    className="inp-thumb inp-card"
+                    className="inp-thumb inp-card input-thumb input-card"
                     onClick={e => toggleSelect(imageId, e, visibleIds)}
                     style={{
                       position: "relative", borderRadius: 5, overflow: "hidden",
@@ -368,6 +370,7 @@ export default function Input({
                   >
                     {/* Checkbox overlay — top-left */}
                     <div
+                      className="inp-cb input-checkbox"
                       style={{
                         position: "absolute", top: 5, left: 5, zIndex: 2,
                         width: 18, height: 18, borderRadius: 4,
@@ -381,7 +384,7 @@ export default function Input({
 
                     {/* Eye icon — top-right, visible on hover only */}
                     <div
-                      className="inp-eye"
+                      className="inp-eye input-eye-button"
                       onClick={e => { e.stopPropagation(); setPreviewPath(isPreview ? null : absPath); setPreviewLoadError(false); }}
                       style={{
                         position: "absolute", top: 5, right: 5, zIndex: 2,
@@ -397,7 +400,7 @@ export default function Input({
 
                     {/* Thumbnail */}
                     {thumbFailed ? (
-                      <div style={{
+                      <div className="input-thumb-fallback" style={{
                         width: "100%", aspectRatio: "1",
                         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                         padding: "8px 6px", gap: 4,
@@ -416,6 +419,7 @@ export default function Input({
                       </div>
                     ) : (
                       <img
+                        className="input-thumb-image"
                         src={`${BASE}/preview?path=${encodeURIComponent(absPath)}&size=200`}
                         alt={name}
                         loading="lazy"
@@ -437,7 +441,7 @@ export default function Input({
 
                     {/* Excluded badge */}
                     {isExcl && (
-                      <div style={{
+                      <div className="input-excluded-badge" style={{
                         position: "absolute", bottom: 20, left: 4, right: 4,
                         background: "var(--yellow-bg)", color: "var(--yellow)",
                         border: "1px solid var(--yellow-bdr)",
@@ -448,18 +452,18 @@ export default function Input({
                     )}
 
                     {/* Filename bar */}
-                    <div style={{
+                    <div className="input-filename-bar" style={{
                       padding: "3px 5px",
                       color: isExcl ? C.yellow : C.dim,
                       fontFamily: "JetBrains Mono",
                       background: C.panel,
                     }}>
-                      <div style={{
+                      <div className="input-filename" style={{
                         fontSize: 9,
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>{name}</div>
                       {relFolder && (
-                        <div style={{
+                        <div className="input-folder-name" style={{
                           marginTop: 1, fontSize: 8, color: C.dim2,
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                         }}>{relFolder}/</div>
@@ -480,13 +484,13 @@ export default function Input({
           const previewExt = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
           const isExcl = excludeTags.includes(imageId);
           return (
-            <div style={{
+            <div className="input-preview" style={{
               width: 220, flexShrink: 0, background: C.panel,
               borderLeft: `1px solid ${C.border}`,
               display: "flex", flexDirection: "column",
             }}>
               {/* Header */}
-              <div style={{
+              <div className="input-preview-header" style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
                 padding: "9px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0,
               }}>
@@ -499,7 +503,7 @@ export default function Input({
 
               {/* Image */}
               {previewLoadError ? (
-                <div style={{
+                <div className="input-preview-image" style={{
                   width: "100%", aspectRatio: "1", flexShrink: 0,
                   background: "var(--img-bg)", color: C.dim,
                   display: "flex", alignItems: "center", justifyContent: "center",
@@ -511,6 +515,7 @@ export default function Input({
                 </div>
               ) : (
                 <img
+                  className="input-preview-image"
                   src={`${BASE}/preview?path=${encodeURIComponent(previewPath)}&size=600`}
                   alt=""
                   onError={() => setPreviewLoadError(true)}
@@ -519,7 +524,7 @@ export default function Input({
               )}
 
               {/* Info + controls */}
-              <div style={{ padding: "12px", flex: 1, overflowY: "auto" }}>
+              <div className="input-preview-body" style={{ padding: "12px", flex: 1, overflowY: "auto" }}>
                 <div style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Filename</div>
                 <div style={{
                   fontSize: 10, color: C.text, fontFamily: "JetBrains Mono",
@@ -536,12 +541,12 @@ export default function Input({
                 )}
 
                 {/* Exclude toggle */}
-                <div style={{
+                <div className="input-preview-control" style={{
                   display: "flex", alignItems: "center", justifyContent: "space-between",
                   marginBottom: 8,
                 }}>
                   <span style={{ fontSize: 11, color: C.dim }}>Exclude from BG</span>
-                  <button className="inp-btn" onClick={() => {
+                  <button className="inp-btn input-preview-control" onClick={() => {
                     if (isExcl) setExcludeTags(prev => prev.filter(x => x !== imageId));
                     else setExcludeTags(prev => [...prev, imageId]);
                   }} style={{
@@ -554,7 +559,7 @@ export default function Input({
                 </div>
 
                 {/* Remove from session */}
-                <button className="inp-btn" onClick={() => {
+                <button className="inp-btn input-preview-remove" onClick={() => {
                   setExcludeTags(prev => prev.filter(x => x !== imageId));
                   setRemovedImages(prev => { const n = new Set(prev); n.add(imageId); return n; });
                   setPreviewPath(null);
