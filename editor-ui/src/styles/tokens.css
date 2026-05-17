@@ -3,62 +3,74 @@
 :root,
 [data-theme="light"] {
   /* Base colors - Light theme */
-  --bg:        hsl(228, 14%, 97%);
+  --bg:        hsl(34, 34%, 96%);
   --panel:     hsl(0, 0%, 100%);
-  --panel2:    hsl(220, 14%, 94%);
-  --border:    hsl(220, 13%, 90%);
-  --text:      hsl(226, 12%, 22%);
-  --dim:       hsl(220, 10%, 46%);
-  --dim2:      hsl(224, 16%, 64%);
+  --panel2:    hsl(34, 26%, 93%);
+  --border:    hsl(220, 18%, 87%);
+  --text:      hsl(222, 33%, 16%);
+  --dim:       hsl(220, 16%, 40%);
+  --dim2:      hsl(221, 14%, 58%);
 
   /* Accent colors */
-  --accent:    hsl(224, 100%, 65%);
+  --accent:    hsl(218, 94%, 56%);
+  --accent-strong: hsl(218, 92%, 49%);
+  --accent-soft: hsl(216, 100%, 95%);
   --accent-fg: hsl(0, 0%, 100%);
-  --green:     hsl(142, 71%, 45%);
-  --green-bg:  hsl(142, 71%, 95%);
-  --green-bdr: hsl(142, 71%, 80%);
-  --red:       hsl(0, 84%, 60%);
-  --red-bg:    hsl(0, 84%, 95%);
-  --red-bdr:   hsl(0, 84%, 80%);
-  --yellow:    hsl(38, 92%, 50%);
-  --yellow-bg: hsl(38, 92%, 95%);
-  --yellow-bdr: hsl(38, 92%, 75%);
-  --magenta:   hsl(290, 75%, 60%);
+  --green:     hsl(152, 67%, 35%);
+  --green-bg:  hsl(148, 55%, 94%);
+  --green-bdr: hsl(151, 43%, 77%);
+  --red:       hsl(2, 78%, 56%);
+  --red-bg:    hsl(3, 100%, 96%);
+  --red-bdr:   hsl(4, 70%, 83%);
+  --yellow:    hsl(36, 93%, 47%);
+  --yellow-bg: hsl(40, 100%, 95%);
+  --yellow-bdr: hsl(38, 73%, 80%);
+  --magenta:   hsl(293, 70%, 54%);
 
   /* Utility */
-  --img-bg:    hsl(220, 14%, 94%);
-  --scrollbar: hsl(220, 13%, 85%);
-  --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04);
+  --img-bg:    hsl(38, 22%, 92%);
+  --scrollbar: hsl(218, 19%, 80%);
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --shadow:    0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 14px rgba(16, 24, 40, 0.06);
+  --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.09), 0 3px 10px rgba(15, 23, 42, 0.06);
 }
 
 [data-theme="dark"] {
   /* Base colors - Dark theme */
-  --bg:        hsl(247, 12%, 14%);
-  --panel:     hsl(247, 18%, 10%);
-  --panel2:    hsl(222, 20%, 16%);
-  --border:    hsl(228, 8%, 12%);
-  --text:      hsl(0, 0%, 95%);
-  --dim:       hsl(0, 0%, 90%);
-  --dim2:      hsl(223, 9%, 48%);
+  --bg:        hsl(222, 27%, 9%);
+  --panel:     hsl(224, 24%, 12%);
+  --panel2:    hsl(222, 19%, 15%);
+  --border:    hsl(221, 15%, 24%);
+  --text:      hsl(220, 31%, 94%);
+  --dim:       hsl(219, 18%, 72%);
+  --dim2:      hsl(221, 12%, 54%);
 
   /* Accent colors */
-  --accent:    hsl(224, 100%, 65%);
+  --accent:    hsl(216, 96%, 63%);
+  --accent-strong: hsl(214, 100%, 70%);
+  --accent-soft: hsl(221, 44%, 18%);
   --accent-fg: hsl(0, 0%, 100%);
-  --green:     hsl(142, 98%, 41%);
-  --green-bg:  hsl(142, 71%, 12%);
-  --green-bdr: hsl(142, 71%, 25%);
-  --red:       hsl(0, 84%, 60%);
-  --red-bg:    hsl(0, 84%, 12%);
-  --red-bdr:   hsl(0, 100%, 68%);
-  --yellow:    hsl(51, 97%, 56%);
-  --yellow-bg: hsl(56, 100%, 12%);
-  --yellow-bdr: hsl(49, 72%, 52%);
-  --magenta:   hsl(290, 75%, 60%);
+  --green:     hsl(148, 69%, 50%);
+  --green-bg:  hsl(149, 53%, 17%);
+  --green-bdr: hsl(149, 45%, 31%);
+  --red:       hsl(4, 90%, 66%);
+  --red-bg:    hsl(2, 46%, 18%);
+  --red-bdr:   hsl(4, 59%, 39%);
+  --yellow:    hsl(42, 95%, 62%);
+  --yellow-bg: hsl(42, 57%, 18%);
+  --yellow-bdr: hsl(41, 57%, 36%);
+  --magenta:   hsl(294, 73%, 65%);
 
   /* Utility */
-  --img-bg:    hsl(228, 20%, 5%);
-  --scrollbar: hsl(222, 20%, 22%);
-  --shadow:    0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.25);
+  --img-bg:    hsl(223, 27%, 8%);
+  --scrollbar: hsl(220, 14%, 31%);
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --shadow:    0 1px 2px rgba(2, 6, 23, 0.55), 0 10px 22px rgba(2, 6, 23, 0.35);
+  --shadow-lg: 0 18px 42px rgba(0, 0, 0, 0.52), 0 5px 16px rgba(2, 6, 23, 0.4);
 }
