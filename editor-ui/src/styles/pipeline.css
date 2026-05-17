@@ -742,40 +742,6 @@
   opacity: 0.72;
 }
 
-.pipeline-live-card-status {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--panel2) 88%, #0f1627);
-  background: color-mix(in srgb, var(--dim2) 72%, #818797);
-  box-shadow: none;
-}
-
-.pipeline-live-card-status.is-active {
-  background: color-mix(in srgb, var(--accent) 94%, #a9c0ff);
-}
-
-.pipeline-live-card-status.is-done {
-  background: color-mix(in srgb, var(--green) 90%, #9df3bd);
-}
-
-.pipeline-live-card-status.is-skipped {
-  background: color-mix(in srgb, var(--yellow) 84%, #ffd98a);
-}
-
-.pipeline-live-card-status.is-pending {
-  background: color-mix(in srgb, var(--dim2) 66%, #8b93a8);
-}
-
-.pipeline-live-card-label {
-  text-transform: uppercase;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
-
 .pipeline-recent-strip {
   border-top-color: color-mix(in srgb, var(--border) 80%, transparent) !important;
   background: color-mix(in srgb, #121a2a 76%, var(--panel2));

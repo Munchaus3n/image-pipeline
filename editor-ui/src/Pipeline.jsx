@@ -388,31 +388,36 @@ function usePipeline() {
 
 // ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
 
-function Zone1({ imageDone, totalImages, previewPath, recentDone }) {
+function Zone1({ imageDone, totalImages, previewPath, livePreviewStrip }) {
   return (
     <PipelinePreviewStrip
       previewPath={previewPath}
-      recentDone={recentDone}
+      livePreviewStrip={livePreviewStrip}
       imageDone={imageDone}
       totalImages={totalImages}
     />
   );
 }
 
-function PipelinePreviewStrip({ previewPath, recentDone, imageDone, totalImages }) {
+function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalImages }) {
   const totalLabel = totalImages > 0 ? totalImages : "-";
   const processedLabel = `${imageDone}/${totalLabel} processed`;
-  const slotItems = Array.from({ length: 4 }, () => ({ path: "", name: "" }));
+  const stripItems = Array.isArray(livePreviewStrip) ? livePreviewStrip : [];
+  let sourceItems = stripItems
+    .map(item => ({ path: item?.path || "", name: item?.name || "" }))
+    .filter(item => item.path || item.name);
 
   if (previewPath) {
-    slotItems[0] = {
+    const previewItem = {
       path: previewPath,
       name: previewPath.replace(/.*[/\\]/, ""),
     };
-  } else {
-    const fallbackName = recentDone?.[0] || "";
-    if (fallbackName) slotItems[0] = { path: "", name: fallbackName };
+    const hasPreviewInStrip = sourceItems.some(item => item.path === previewPath);
+    if (!hasPreviewInStrip) {
+      sourceItems = [previewItem, ...sourceItems.filter(item => item.path !== previewPath)];
+    }
   }
+  const slotItems = Array.from({ length: 4 }, (_, idx) => sourceItems[idx] || { path: "", name: "" });
 
   return (
     <div className="pipeline-zone pipeline-progress-card pipeline-preview-strip">
@@ -884,7 +889,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
   const {
     running, done, log, errors, imageDone, imageError,
     totalImages, elapsed, stage, stagesDone,
-    upStats, bgStats, imageProgress, oomGpuCount, previewPath, recentDone,
+    upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip,
     logRef, errorRef, start, stop,
   } = usePipeline();
 
@@ -1205,7 +1210,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                 <Zone1
                   imageDone={imageDone} totalImages={totalImages}
                   previewPath={previewPath}
-                  recentDone={recentDone}
+                  livePreviewStrip={livePreviewStrip}
                 />
               </div>
             </div>
