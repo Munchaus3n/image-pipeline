@@ -147,6 +147,7 @@ function usePipeline() {
   const [bgStats, setBgStats] = useState({ done: 0, skip: 0, err: 0 });
   const [oomGpuCount, setOomGpuCount] = useState(0);
   const [imageProgress, setImageProgress] = useState({});
+  const [previewPath, setPreviewPath] = useState("");
 
   const abortRef    = useRef(null);
   const logRef      = useRef(null);
@@ -255,6 +256,7 @@ function usePipeline() {
     if (raw.startsWith("__processing__:")) {
       const fullPath = raw.slice(15);
       const fileName = fullPath.replace(/.*[/\\]/, "");
+      setPreviewPath(fullPath);
       if (!sentinelSet.current.has(fileName)) {
         sentinelSet.current.add(fileName);
         setLog(prev => [...prev.slice(-800), { raw: "", kind: "progress", filename: fileName }]);
@@ -302,6 +304,7 @@ function usePipeline() {
     setBgStats({ done: 0, skip: 0, err: 0 });
     setOomGpuCount(0);
     setImageProgress({});
+    setPreviewPath("");
     stageRef.current = "upscale";
     recentLog.current = [];
     doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set(); sentinelSet.current = new Set();
@@ -361,7 +364,7 @@ function usePipeline() {
   return {
     running, done, log, errors, imageDone, imageSkipped, imageError,
     totalImages, recentDone, elapsed, stage, stagesDone,
-    upStats, bgStats, imageProgress, oomGpuCount,
+    upStats, bgStats, imageProgress, oomGpuCount, previewPath,
     logRef, errorRef, start, stop
   };
 }
@@ -369,7 +372,7 @@ function usePipeline() {
 // ── Zone 1: Drop zone / Live stage animation ──────────────────────────────────
 
 function Zone1({ running, done, stage, stagesDone, recentDone,
-  imageDone, totalImages, doUpscale, doRembg, inputDir, setInputDir, rembgModel }) {
+  imageDone, totalImages, doUpscale, doRembg, inputDir, setInputDir, rembgModel, previewPath }) {
   const [dragOver, setDragOver] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -448,7 +451,17 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
         )}
       </div>
 
-      <div className="pipeline-live-grid" style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px", gap: 0, minHeight: 0 }}>
+      <div className="pipeline-live-preview-frame">
+        <LivePreview
+          running={running}
+          done={done}
+          previewPath={previewPath}
+          imageDone={imageDone}
+          totalImages={totalImages}
+        />
+      </div>
+
+      <div className="pipeline-live-stage-strip" style={{ display: "flex", alignItems: "center", padding: "0 16px", gap: 0, minHeight: 124 }}>
         {stages.map((s, i) => {
           const cardBg   = s.done ? "var(--green-bg)" : s.active ? "color-mix(in srgb, var(--accent) 10%, transparent)" : C.panel2;
           const cardBdr  = s.done ? "var(--green-bdr)" : s.active ? "color-mix(in srgb, var(--accent) 40%, transparent)" : C.border;
@@ -617,10 +630,12 @@ function LivePreview({ running, done, previewPath, imageDone, totalImages }) {
           </div>
         </>
       ) : (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+        <div className="pipeline-live-empty" style={{ display: "flex", alignItems: "center", justifyContent: "center",
           height: "100%", gap: 8, color: C.dim2, fontSize: 11 }}>
-          <Spinner color={C.dim2} size={13} />
-          <span style={{ fontFamily: "JetBrains Mono" }}>waiting…</span>
+          {running ? <Spinner color={C.dim2} size={13} /> : null}
+          <span style={{ fontFamily: "JetBrains Mono" }}>
+            {running ? "Waiting for first preview..." : "No live preview yet"}
+          </span>
         </div>
       )}
     </div>
@@ -1052,7 +1067,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
   const {
     running, done, log, errors, imageDone, imageError,
     totalImages, recentDone, elapsed, stage, stagesDone,
-    upStats, bgStats, imageProgress, oomGpuCount,
+    upStats, bgStats, imageProgress, oomGpuCount, previewPath,
     logRef, errorRef, start, stop,
   } = usePipeline();
 
@@ -1378,6 +1393,7 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
                   doUpscale={doUpscale} doRembg={doRembg}
                   inputDir={inputDir} setInputDir={setInputDir}
                   rembgModel={rembgModel}
+                  previewPath={previewPath}
                 />
               </div>
             </div>

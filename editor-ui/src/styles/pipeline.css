@@ -358,7 +358,7 @@
 
 .pipeline-live-area {
   flex: 0 0 auto;
-  min-height: 234px;
+  min-height: 344px;
   display: flex;
   padding-top: 2px;
 }
@@ -401,6 +401,25 @@
 
 .pipeline-live-grid {
   gap: 8px !important;
+}
+
+.pipeline-live-preview-frame {
+  flex: 1;
+  min-height: 150px;
+  padding: 10px 14px 8px;
+  display: flex;
+}
+
+.pipeline-live-stage-strip {
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  min-height: 124px;
+  flex-shrink: 0;
+}
+
+.pipeline-live-empty {
+  color: color-mix(in srgb, var(--dim2) 80%, var(--dim)) !important;
+  font-size: 12px !important;
+  letter-spacing: 0.02em;
 }
 
 .pipeline-status-card-slot {
@@ -862,6 +881,19 @@
     gap: 8px;
   }
 
+  .pipeline-live-area {
+    min-height: 316px;
+  }
+
+  .pipeline-live-preview-frame {
+    min-height: 138px;
+    padding: 9px 12px 8px;
+  }
+
+  .pipeline-live-stage-strip {
+    min-height: 116px;
+  }
+
   .pipeline-progress-title {
     font-size: clamp(16px, 1.55vw, 22px);
   }
@@ -946,6 +978,19 @@
     padding: 12px 13px !important;
     border-radius: 16px !important;
     gap: 7px;
+  }
+
+  .pipeline-live-area {
+    min-height: 286px;
+  }
+
+  .pipeline-live-preview-frame {
+    min-height: 124px;
+    padding: 8px 10px 6px;
+  }
+
+  .pipeline-live-stage-strip {
+    min-height: 104px;
   }
 
   .pipeline-progress-stage-pill {
