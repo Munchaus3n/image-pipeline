@@ -138,7 +138,10 @@
 }
 
 .pipeline-layout {
+  display: grid !important;
+  grid-template-columns: 292px minmax(0, 1fr);
   min-height: 0;
+  gap: 0;
 }
 
 .pipeline-results-area {
@@ -146,15 +149,40 @@
   min-height: 0;
 }
 
+.pipeline-results-column {
+  min-width: 0;
+  min-height: 0;
+}
+
 .pipeline-status-area {
-  min-height: 260px;
+  min-height: clamp(330px, 48vh, 540px);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+.pipeline-live-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.pipeline-live-area .pipeline-zone {
+  margin: 0 !important;
+}
+
+.pipeline-status-card-slot {
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+.pipeline-status-card-slot .pipeline-ready-card,
+.pipeline-status-card-slot .pipeline-progress-card {
+  margin-top: 0 !important;
 }
 
 .pipeline-ready-card {
-  min-height: 108px;
+  min-height: clamp(104px, 13vh, 148px);
   border-radius: 12px !important;
   border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
   background:
@@ -230,7 +258,9 @@
 }
 
 .pipeline-bottom-panels {
-  min-height: 200px;
+  min-height: 220px;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .pipeline-settings-actions {
@@ -263,25 +293,37 @@
 }
 
 @media (max-width: 1280px) {
+  .pipeline-layout {
+    grid-template-columns: 274px minmax(0, 1fr);
+  }
+
   .pipeline-settings-panel {
-    width: 284px !important;
+    width: 274px !important;
     padding: 12px !important;
+  }
+
+  .pipeline-status-area {
+    min-height: clamp(300px, 45vh, 500px);
   }
 }
 
 @media (max-width: 1100px) {
+  .pipeline-layout {
+    grid-template-columns: 252px minmax(0, 1fr);
+  }
+
   .pipeline-settings-panel {
-    width: 258px !important;
+    width: 252px !important;
     padding: 10px !important;
   }
 
   .pipeline-status-area {
-    flex-basis: 52% !important;
-    min-height: 220px;
+    flex-basis: 50% !important;
+    min-height: clamp(280px, 40vh, 440px);
   }
 
   .pipeline-ready-card {
-    min-height: 94px;
+    min-height: 90px;
   }
 
   .pipeline-stat {

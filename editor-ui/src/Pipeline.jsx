@@ -1378,37 +1378,42 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
 
         {/* Right zone */}
         <div className="pipeline-results-area" style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px" }}>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
+          <div className="pipeline-results-column" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
 
             <div className="pipeline-status-area" style={{ flex: "0 0 56%", minHeight: 0, display: "flex", flexDirection: "column" }}>
-              <Zone1
-                running={running} done={done}
-                stage={stage} stagesDone={stagesDone}
-                recentDone={recentDone}
-                imageDone={imageDone} totalImages={totalImages}
-                doUpscale={doUpscale} doRembg={doRembg}
-                inputDir={inputDir} setInputDir={setInputDir}
-                rembgModel={rembgModel}
-              />
-              {(running || done) && (
-                <Zone2
-                  upStats={upStats} bgStats={bgStats}
-                  totalImages={totalImages} elapsed={elapsed}
-                  running={running} done={done} stage={stage}
+              <div className="pipeline-live-area">
+                <Zone1
+                  running={running} done={done}
+                  stage={stage} stagesDone={stagesDone}
+                  recentDone={recentDone}
+                  imageDone={imageDone} totalImages={totalImages}
                   doUpscale={doUpscale} doRembg={doRembg}
-                  stagesDone={stagesDone}
-                  oomGpuCount={oomGpuCount}
+                  inputDir={inputDir} setInputDir={setInputDir}
+                  rembgModel={rembgModel}
                 />
-              )}
-              {!running && !done && (
-                <ReadyCard
-                  nothingSelected={nothingSelected}
-                  doUpscale={doUpscale}
-                  doRembg={doRembg}
-                  activeExcludeCount={activeExcludeCount}
-                  skipCount={skipCount}
-                />
-              )}
+              </div>
+
+              <div className="pipeline-status-card-slot">
+                {(running || done) && (
+                  <Zone2
+                    upStats={upStats} bgStats={bgStats}
+                    totalImages={totalImages} elapsed={elapsed}
+                    running={running} done={done} stage={stage}
+                    doUpscale={doUpscale} doRembg={doRembg}
+                    stagesDone={stagesDone}
+                    oomGpuCount={oomGpuCount}
+                  />
+                )}
+                {!running && !done && (
+                  <ReadyCard
+                    nothingSelected={nothingSelected}
+                    doUpscale={doUpscale}
+                    doRembg={doRembg}
+                    activeExcludeCount={activeExcludeCount}
+                    skipCount={skipCount}
+                  />
+                )}
+              </div>
             </div>
 
             <div className="pipeline-bottom-panels" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 6 }}>
