@@ -353,12 +353,49 @@
 
 .pipeline-live-area {
   flex: 1;
-  min-height: 210px;
+  min-height: 234px;
   display: flex;
+  padding-top: 2px;
 }
 
 .pipeline-live-area .pipeline-zone {
   margin: 0 !important;
+}
+
+.pipeline-live-preview {
+  border-radius: 18px !important;
+  border-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, #171f31 74%, var(--panel)), color-mix(in srgb, #121a2a 84%, var(--panel2))) !important;
+  box-shadow:
+    0 10px 22px rgba(5, 10, 24, 0.2),
+    inset 0 1px 0 color-mix(in srgb, var(--border) 20%, transparent);
+}
+
+.pipeline-live-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 14px 9px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.pipeline-live-title {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--dim) 48%, var(--text) 52%);
+}
+
+.pipeline-live-counter {
+  font-size: 10px;
+  font-family: "JetBrains Mono", monospace;
+  color: color-mix(in srgb, var(--dim) 66%, var(--text) 34%);
+}
+
+.pipeline-live-grid {
+  gap: 8px !important;
 }
 
 .pipeline-status-card-slot {
@@ -607,7 +644,8 @@
 }
 
 .pipeline-stage-card {
-  border-radius: 12px !important;
+  position: relative;
+  border-radius: 18px !important;
   border-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
   background: color-mix(in srgb, var(--panel2) 84%, var(--panel)) !important;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 16%, transparent);
@@ -616,7 +654,7 @@
 
 .pipeline-stage-card-active {
   border-color: color-mix(in srgb, var(--accent) 58%, var(--border)) !important;
-  background: color-mix(in srgb, var(--accent) 13%, var(--panel)) !important;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 18%, #1d2e47), color-mix(in srgb, var(--panel2) 86%, var(--panel))) !important;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent),
     0 8px 20px color-mix(in srgb, var(--accent) 18%, transparent) !important;
@@ -624,7 +662,7 @@
 
 .pipeline-stage-card-done {
   border-color: color-mix(in srgb, var(--green-bdr) 82%, var(--border)) !important;
-  background: color-mix(in srgb, var(--green-bg) 70%, var(--panel)) !important;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--green-bg) 64%, var(--panel)), color-mix(in srgb, var(--panel2) 80%, var(--panel))) !important;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--green) 18%, transparent),
     0 8px 20px color-mix(in srgb, var(--green) 12%, transparent) !important;
@@ -632,12 +670,56 @@
 
 .pipeline-stage-card-skipped {
   border-color: color-mix(in srgb, var(--yellow-bdr) 44%, var(--border)) !important;
-  background: color-mix(in srgb, var(--panel2) 74%, var(--panel)) !important;
+  background: color-mix(in srgb, #131a2b 84%, var(--panel2)) !important;
 }
 
 .pipeline-stage-connector {
-  background: color-mix(in srgb, var(--border) 86%, var(--dim2)) !important;
-  opacity: 0.86;
+  background: color-mix(in srgb, var(--border) 70%, var(--dim2)) !important;
+  opacity: 0.72;
+}
+
+.pipeline-live-card-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--panel2) 88%, #0f1627);
+  background: color-mix(in srgb, var(--dim2) 72%, #818797);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #0e1525 70%, transparent);
+}
+
+.pipeline-live-card-status.is-active {
+  background: color-mix(in srgb, var(--accent) 94%, #a9c0ff);
+}
+
+.pipeline-live-card-status.is-done {
+  background: color-mix(in srgb, var(--green) 90%, #9df3bd);
+}
+
+.pipeline-live-card-status.is-skipped {
+  background: color-mix(in srgb, var(--yellow) 84%, #ffd98a);
+}
+
+.pipeline-live-card-status.is-pending {
+  background: color-mix(in srgb, var(--dim2) 66%, #8b93a8);
+}
+
+.pipeline-live-card-label {
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.pipeline-recent-strip {
+  border-top-color: color-mix(in srgb, var(--border) 80%, transparent) !important;
+  background: color-mix(in srgb, #121a2a 76%, var(--panel2));
+}
+
+.pipeline-recent-item {
+  border-radius: 8px !important;
+  padding: 3px 8px !important;
+  font-size: 9px !important;
 }
 
 .pipeline-stat {

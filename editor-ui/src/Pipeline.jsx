@@ -424,7 +424,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
 
   return (
     <div
-      className={`pipeline-zone pipeline-progress-card ${idle ? "pipeline-drop-zone" : ""}`.trim()}
+      className={`pipeline-zone pipeline-progress-card pipeline-live-preview ${idle ? "pipeline-drop-zone" : ""}`.trim()}
       onDragOver={idle ? onDragOver : undefined}
       onDragLeave={idle ? onDragLeave : undefined}
       onDrop={idle ? onDrop : undefined}
@@ -441,17 +441,14 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
         @keyframes slideIn   { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
       `}</style>
 
-      <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-        {stages.map(s => (
-          <div key={s.id} style={{
-            flex: 1, textAlign: "center", padding: "6px 0",
-            fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700,
-            color: s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim
-          }}>{s.label}</div>
-        ))}
+      <div className="pipeline-live-title-row">
+        <div className="pipeline-live-title">Live Stream</div>
+        {running && (
+          <div className="pipeline-live-counter">{imageDone}/{totalImages || "—"} processed</div>
+        )}
       </div>
 
-      <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px", gap: 0, minHeight: 0 }}>
+      <div className="pipeline-live-grid" style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px", gap: 0, minHeight: 0 }}>
         {stages.map((s, i) => {
           const cardBg   = s.done ? "var(--green-bg)" : s.active ? "color-mix(in srgb, var(--accent) 10%, transparent)" : C.panel2;
           const cardBdr  = s.done ? "var(--green-bdr)" : s.active ? "color-mix(in srgb, var(--accent) 40%, transparent)" : C.border;
@@ -459,11 +456,12 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
           const textColor = s.done ? C.green : s.active ? C.yellow : s.skip ? C.dim2 : C.dim;
           return (
             <div key={s.id} style={{ display: "flex", alignItems: "center", flex: 1 }}>
-              <div className={`pipeline-stage-card ${s.active ? "pipeline-stage-card-active" : ""} ${s.done ? "pipeline-stage-card-done" : ""} ${s.skip ? "pipeline-stage-card-skipped" : ""}`.trim()} style={{
+              <div className={`pipeline-stage-card pipeline-live-card ${s.active ? "pipeline-stage-card-active" : ""} ${s.done ? "pipeline-stage-card-done" : ""} ${s.skip ? "pipeline-stage-card-skipped" : ""}`.trim()} style={{
                 flex: 1, background: cardBg, border: `1px solid ${cardBdr}`,
                 borderRadius: 5, padding: "14px 10px", textAlign: "center",
                 boxShadow: cardGlow, transition: "all 0.4s ease"
               }}>
+                <span className={`pipeline-live-card-status ${s.done ? "is-done" : s.active ? "is-active" : s.skip ? "is-skipped" : "is-pending"}`} />
                 {s.done && <div style={{ fontSize: 20, color: C.green, lineHeight: 1, marginBottom: 4 }}>✓</div>}
                 {running && s.active && (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, animation: "pulseFade 1.4s ease-in-out infinite" }}>
@@ -481,7 +479,7 @@ function Zone1({ running, done, stage, stagesDone, recentDone,
                     {s.skip ? "skipped" : s.sub}
                   </div>
                 )}
-                <div style={{ fontSize: 9, color: textColor, marginTop: 5, opacity: 0.6, letterSpacing: "0.06em" }}>{s.label}</div>
+                <div className="pipeline-live-card-label" style={{ fontSize: 9, color: textColor, marginTop: 5, opacity: 0.6, letterSpacing: "0.06em" }}>{s.label}</div>
               </div>
               {i < stages.length - 1 && (
                 <div className="pipeline-stage-connector" style={{ width: 28, height: 2, background: C.dim2, flexShrink: 0, position: "relative", margin: "0 4px" }}>
