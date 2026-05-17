@@ -130,7 +130,11 @@ export default function Input({
     return entry.name.toLowerCase().includes(q) || entry.relativePath.toLowerCase().includes(q);
   });
 
-  const toggleSelect = useCallback((imageId, e, visibleIds) => {
+  const toggleSelect = useCallback((imageId, absPath, e, visibleIds) => {
+    // Selection is now the primary preview driver.
+    setPreviewPath(absPath);
+    setPreviewLoadError(false);
+
     if (e.shiftKey && lastSelectedRef.current && visibleIds) {
       // Range select from last clicked to current
       const a = visibleIds.indexOf(lastSelectedRef.current);
@@ -360,7 +364,7 @@ export default function Input({
                   <div
                     key={absPath}
                     className="inp-thumb inp-card input-thumb input-card"
-                    onClick={e => toggleSelect(imageId, e, visibleIds)}
+                    onClick={e => toggleSelect(imageId, absPath, e, visibleIds)}
                     style={{
                       position: "relative", borderRadius: 18, overflow: "hidden",
                       border: `${isSel ? 2 : 1}px solid ${isSel ? C.blue : isPreview ? "color-mix(in srgb,var(--accent) 40%,var(--border))" : "color-mix(in srgb,var(--border) 75%,transparent)"}`,
