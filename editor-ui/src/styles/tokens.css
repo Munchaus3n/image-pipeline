@@ -29,6 +29,14 @@
 
   /* Utility */
   --img-bg:    hsl(38, 22%, 92%);
+  --surface-muted: hsl(36, 24%, 94%);
+  --surface-elevated: hsl(0, 0%, 100%);
+  --field-bg: hsl(36, 30%, 98%);
+  --log-bg: hsl(36, 42%, 97%);
+  --log-bg-alt: hsl(35, 30%, 95%);
+  --preview-bg: hsl(34, 24%, 98%);
+  --disabled-bg: hsl(220, 20%, 91%);
+  --disabled-text: hsl(220, 10%, 52%);
   --scrollbar: hsl(218, 19%, 80%);
   --radius-xs: 8px;
   --radius-sm: 12px;
@@ -66,6 +74,14 @@
 
   /* Utility */
   --img-bg:    hsl(223, 27%, 8%);
+  --surface-muted: hsl(223, 20%, 14%);
+  --surface-elevated: hsl(224, 24%, 12%);
+  --field-bg: hsl(223, 25%, 10%);
+  --log-bg: hsl(224, 29%, 9%);
+  --log-bg-alt: hsl(223, 22%, 12%);
+  --preview-bg: hsl(223, 22%, 13%);
+  --disabled-bg: hsl(223, 16%, 22%);
+  --disabled-text: hsl(221, 10%, 56%);
   --scrollbar: hsl(220, 14%, 31%);
   --radius-xs: 8px;
   --radius-sm: 12px;

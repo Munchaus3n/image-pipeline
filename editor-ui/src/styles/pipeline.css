@@ -1,7 +1,7 @@
 ﻿/* Pipeline micro-polish using stable class hooks */
 .pipeline-settings-panel {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, var(--bg)), color-mix(in srgb, var(--panel) 88%, #0a1020));
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, var(--bg)), color-mix(in srgb, var(--panel) 82%, var(--surface-muted)));
   box-shadow:
     inset -1px 0 0 color-mix(in srgb, var(--border) 92%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--border) 18%, transparent);
@@ -126,7 +126,7 @@
 .pipeline-path-field {
   min-height: 34px;
   border-radius: 9px !important;
-  background: color-mix(in srgb, #0a1222 82%, var(--panel2)) !important;
+  background: var(--field-bg) !important;
   border-color: color-mix(in srgb, var(--border) 84%, transparent) !important;
   padding: 0 11px !important;
   font-size: 11px !important;
@@ -157,7 +157,7 @@
 
 .pipeline-row select,
 .pipeline-row input[type="number"] {
-  background: color-mix(in srgb, #0f1829 78%, var(--panel2)) !important;
+  background: var(--field-bg) !important;
   border-color: color-mix(in srgb, var(--border) 84%, transparent) !important;
   border-radius: 8px !important;
   color: var(--text) !important;
@@ -224,12 +224,12 @@
 }
 
 .pipeline-toggle.is-on {
-  background: color-mix(in srgb, var(--accent) 34%, #12273e) !important;
-  border-color: color-mix(in srgb, var(--accent) 50%, #2b3f64) !important;
+  background: color-mix(in srgb, var(--accent) 26%, var(--surface-muted)) !important;
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border)) !important;
 }
 
 .pipeline-toggle.is-off {
-  background: color-mix(in srgb, #141a25 86%, var(--panel2)) !important;
+  background: color-mix(in srgb, var(--field-bg) 92%, var(--panel2)) !important;
   border-color: color-mix(in srgb, var(--border) 92%, transparent) !important;
 }
 
@@ -264,7 +264,7 @@
   gap: 12px;
   padding: 8px 16px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  background: color-mix(in srgb, var(--bg) 92%, #05070f);
+  background: color-mix(in srgb, var(--bg) 90%, var(--surface-muted));
 }
 
 .pipeline-header-title {
@@ -303,15 +303,15 @@
 }
 
 .pipeline-header-run-button:disabled {
-  background: color-mix(in srgb, #2e3449 88%, var(--panel2)) !important;
+  background: var(--disabled-bg) !important;
   border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
-  color: color-mix(in srgb, var(--dim2) 76%, var(--dim)) !important;
+  color: var(--disabled-text) !important;
   box-shadow: none;
   cursor: not-allowed;
 }
 
 .pipeline-header-stop-button {
-  background: color-mix(in srgb, var(--red-bg) 78%, #2b0f17) !important;
+  background: color-mix(in srgb, var(--red-bg) 84%, var(--surface-muted)) !important;
   border: 1px solid color-mix(in srgb, var(--red-bdr) 84%, transparent) !important;
   color: color-mix(in srgb, var(--red) 90%, #ffd0d0) !important;
   box-shadow: 0 4px 10px color-mix(in srgb, var(--red) 12%, transparent);
@@ -371,7 +371,7 @@
   margin: 0 !important;
   border-radius: 18px !important;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, #171f31 72%, var(--panel)), color-mix(in srgb, #121a2a 82%, var(--panel2))) !important;
+  background: linear-gradient(180deg, var(--surface-elevated), color-mix(in srgb, var(--surface-elevated) 80%, var(--surface-muted))) !important;
   overflow: hidden;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 16%, transparent);
 }
@@ -418,7 +418,7 @@
   min-height: 0;
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  background: color-mix(in srgb, #131b2d 82%, var(--panel2));
+  background: var(--preview-bg);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 16%, transparent);
   display: flex;
   flex-direction: column;
@@ -491,7 +491,7 @@
   min-height: clamp(188px, 25vh, 268px);
   border-radius: 26px !important;
   border-color: color-mix(in srgb, var(--border) 80%, transparent) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, #1a2030 78%, var(--panel)), color-mix(in srgb, #141b2b 84%, var(--panel2))) !important;
+  background: linear-gradient(180deg, var(--surface-elevated), color-mix(in srgb, var(--surface-elevated) 78%, var(--surface-muted))) !important;
   box-shadow:
     0 14px 34px rgba(5, 10, 24, 0.24),
     inset 0 1px 0 color-mix(in srgb, var(--border) 24%, transparent);
@@ -592,7 +592,7 @@
   border-radius: 24px !important;
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent) !important;
   background:
-    linear-gradient(180deg, color-mix(in srgb, #1b2234 78%, var(--panel)), color-mix(in srgb, #141b2c 84%, var(--panel2))) !important;
+    linear-gradient(180deg, var(--surface-elevated), color-mix(in srgb, var(--surface-elevated) 76%, var(--surface-muted))) !important;
   box-shadow:
     0 14px 32px rgba(5, 10, 24, 0.22),
     inset 0 1px 0 color-mix(in srgb, var(--border) 22%, transparent);
@@ -668,7 +668,7 @@
 .pipeline-progress-bar {
   height: 8px;
   border-radius: 999px;
-  background: color-mix(in srgb, #12192b 86%, var(--panel2));
+  background: color-mix(in srgb, var(--surface-muted) 82%, var(--panel2));
   border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   overflow: hidden;
 }
@@ -694,7 +694,7 @@
   padding: 8px 10px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
-  background: color-mix(in srgb, #151d30 70%, var(--panel2));
+  background: color-mix(in srgb, var(--surface-muted) 76%, var(--panel2));
 }
 
 .pipeline-progress-stats .pipeline-stat-value {
@@ -789,7 +789,7 @@
 }
 
 .pipeline-log-console {
-  background: linear-gradient(180deg, color-mix(in srgb, #070b14 90%, var(--panel)), color-mix(in srgb, #050910 95%, var(--panel2)));
+  background: linear-gradient(180deg, var(--log-bg), var(--log-bg-alt));
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
   padding: 8px 12px;
   font-size: 10px;
@@ -799,7 +799,7 @@
 }
 
 .pipeline-error-list {
-  background: linear-gradient(180deg, color-mix(in srgb, #0d1321 86%, var(--panel)), color-mix(in srgb, #0a1020 92%, var(--panel2)));
+  background: linear-gradient(180deg, var(--log-bg), color-mix(in srgb, var(--log-bg-alt) 88%, var(--panel2)));
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   padding: 8px 10px;
   font-size: 10px;
@@ -859,13 +859,13 @@
 
 .pipeline-settings-panel .pipeline-secondary-button,
 .pipeline-settings-actions .pipeline-secondary-button {
-  background: color-mix(in srgb, #151f32 65%, var(--panel2)) !important;
+  background: color-mix(in srgb, var(--surface-muted) 78%, var(--panel2)) !important;
   color: color-mix(in srgb, var(--dim) 64%, var(--text) 36%) !important;
 }
 
 .pipeline-will-run-block {
   border-color: color-mix(in srgb, var(--border) 76%, transparent) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, #121a2d 62%, var(--panel2)), color-mix(in srgb, #0e1627 70%, var(--panel2))) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-muted) 52%, var(--panel2)), color-mix(in srgb, var(--surface-muted) 62%, var(--panel2))) !important;
   padding: 10px 12px !important;
 }
 
