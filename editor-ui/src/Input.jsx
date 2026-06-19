@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 
 const BASE = "/api";
 
@@ -39,6 +39,8 @@ export default function Input({
   excludeTags, setExcludeTags,
   removedImages, setRemovedImages,
   onGoToProcess,
+  recentInputDirs = [],
+  rememberInputDir,
 }) {
   const [loading,          setLoading]          = useState(false);
   const [loadError,        setLoadError]        = useState(null);
@@ -48,52 +50,59 @@ export default function Input({
   const [previewLoadError, setPreviewLoadError] = useState(false);
   const [browseLoading,    setBrowseLoading]    = useState(false);
   const [thumbLoadErrors,  setThumbLoadErrors]  = useState(new Set());
+  const [includeSubfolders, setIncludeSubfolders] = useState(false);
+  const [truncated,        setTruncated]        = useState(false);
   const lastSelectedRef = useRef(null);  // for shift-click range
   const loadedDirRef = useRef("");
 
-  // Auto-load images whenever inputDir changes — also resets all session state
-  useEffect(() => {
-    if (!inputDir.trim()) {
-      setThumbs([]); setSelected(new Set());
-      setExcludeTags([]); setRemovedImages(new Set());
-      setLoadError(null);
-      setThumbLoadErrors(new Set());
-      loadedDirRef.current = "";
+  const clearLoadedImages = useCallback(() => {
+    setThumbs([]); setSelected(new Set());
+    setExcludeTags([]); setRemovedImages(new Set());
+    setLoadError(null);
+    setThumbLoadErrors(new Set());
+    setTruncated(false);
+    loadedDirRef.current = "";
+  }, [setExcludeTags, setRemovedImages, setThumbs]);
+
+  const loadImages = useCallback(async ({ resetSession = false } = {}) => {
+    const folder = inputDir.trim();
+    if (!folder) {
+      clearLoadedImages();
       return;
     }
-    const t = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const r = await fetch(`${BASE}/images?folder=${encodeURIComponent(inputDir.trim())}`);
-        if (!r.ok) {
-          const err = await r.json().catch(() => ({}));
-          setLoadError(err.detail || `Server error ${r.status}`);
-          setThumbs([]);
-        } else {
-          const data = await r.json();
-          const loadedDir = inputDir.trim();
-          if (loadedDirRef.current !== loadedDir) {
-            setSelected(new Set());
-            setExcludeTags([]);
-            setRemovedImages(new Set());
-            setPreviewPath(null);
-            setPreviewLoadError(false);
-            setThumbLoadErrors(new Set());
-            setLoadError(null);
-            lastSelectedRef.current = null;
-            loadedDirRef.current = loadedDir;
-          }
-          if (Array.isArray(data?.images)) setThumbs(data.images.slice(0, 500));
-          else setThumbs([]);
-        }
-      } catch {
-        setLoadError("Could not reach the API server.");
+    setLoading(true);
+    try {
+      const r = await fetch(
+        `${BASE}/images?folder=${encodeURIComponent(folder)}&recursive=${includeSubfolders ? "true" : "false"}&limit=500`
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        setLoadError(err.detail || `Server error ${r.status}`);
         setThumbs([]);
+      } else {
+        const data = await r.json();
+        if (resetSession || loadedDirRef.current !== folder) {
+          setSelected(new Set());
+          setExcludeTags([]);
+          setRemovedImages(new Set());
+          setPreviewPath(null);
+          setPreviewLoadError(false);
+          setThumbLoadErrors(new Set());
+          setLoadError(null);
+          lastSelectedRef.current = null;
+          loadedDirRef.current = folder;
+        }
+        setTruncated(!!data?.truncated);
+        if (Array.isArray(data?.images)) setThumbs(data.images);
+        else setThumbs([]);
+        rememberInputDir?.(folder);
       }
-      finally { setLoading(false); }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [inputDir, setExcludeTags, setRemovedImages, setThumbs]);
+    } catch {
+      setLoadError("Could not reach the API server.");
+      setThumbs([]);
+    }
+    finally { setLoading(false); }
+  }, [clearLoadedImages, includeSubfolders, inputDir, rememberInputDir, setExcludeTags, setRemovedImages, setThumbs]);
 
   const browse = useCallback(async () => {
     setBrowseLoading(true);
@@ -101,12 +110,18 @@ export default function Input({
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(inputDir)}`);
       if (!r.ok) throw new Error("Browse failed");
       const { path } = await r.json();
-      if (path) { setInputDir(path); setSelected(new Set()); setPreviewPath(null); setPreviewLoadError(false); }
+      if (path) {
+        setInputDir(path);
+        rememberInputDir?.(path);
+        clearLoadedImages();
+        setPreviewPath(null);
+        setPreviewLoadError(false);
+      }
     } catch {
       void 0;
     }
     setBrowseLoading(false);
-  }, [inputDir, setInputDir]);
+  }, [clearLoadedImages, inputDir, rememberInputDir, setInputDir]);
 
   const imageEntries = useMemo(() => thumbs.map(absPath => {
     const name = absPath.replace(/.*[/\\]/, "");
@@ -211,11 +226,12 @@ export default function Input({
         borderBottom: `1px solid ${C.border}`, background: C.panel, flexShrink: 0,
       }}>
         {/* Folder input + browse */}
-        <div className="input-folder-group" style={{ display: "flex", gap: 4, flex: "0 0 360px" }}>
+        <div className="input-folder-group" style={{ display: "flex", gap: 4, flex: "0 0 560px" }}>
           <input
             className="input-path-field"
             value={inputDir}
-            onChange={e => setInputDir(e.target.value)}
+            onChange={e => { setInputDir(e.target.value); clearLoadedImages(); }}
+            onBlur={() => rememberInputDir?.(inputDir)}
             placeholder="Select input folder…"
             style={{
               flex: 1, background: C.panel2, color: C.text,
@@ -224,11 +240,41 @@ export default function Input({
               outline: "none", minWidth: 0,
             }}
           />
+          {recentInputDirs.length > 0 && (
+            <select
+              value=""
+              onChange={e => {
+                if (!e.target.value) return;
+                setInputDir(e.target.value);
+                rememberInputDir?.(e.target.value);
+                clearLoadedImages();
+              }}
+              title="Recent input folders"
+              style={{
+                width: 34, background: C.panel2, color: C.dim,
+                border: `1px solid ${C.border}`, borderRadius: 4,
+                fontSize: 10, cursor: "pointer", flexShrink: 0,
+              }}
+            >
+              <option value="">↕</option>
+              {recentInputDirs.map(path => <option key={path} value={path}>{path}</option>)}
+            </select>
+          )}
           <button className="inp-btn input-browse-button" onClick={browse} disabled={browseLoading} style={{
             background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
             borderRadius: 4, padding: "5px 10px", fontSize: 13,
             cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
           }}>{browseLoading ? "…" : "…"}</button>
+          <button className="inp-btn input-load-button" onClick={() => loadImages({ resetSession: true })} disabled={loading || !inputDir.trim()} style={{
+            background: inputDir.trim() ? C.panel2 : "transparent", color: inputDir.trim() ? C.text : C.dim2,
+            border: `1px solid ${C.border}`, borderRadius: 4, padding: "5px 10px", fontSize: 11,
+            cursor: inputDir.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", flexShrink: 0,
+          }}>{loading ? "Loading" : "Load"}</button>
+          <button className="inp-btn input-refresh-button" onClick={() => loadImages()} disabled={loading || !inputDir.trim()} style={{
+            background: "transparent", color: inputDir.trim() ? C.dim : C.dim2,
+            border: `1px solid ${C.border}`, borderRadius: 4, padding: "5px 8px", fontSize: 11,
+            cursor: inputDir.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", flexShrink: 0,
+          }}>Refresh</button>
         </div>
 
         {/* Search */}
@@ -248,10 +294,19 @@ export default function Input({
         {/* Image count */}
         <span className="input-count" style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono", flexShrink: 0 }}>
           {visible.length} image{visible.length !== 1 ? "s" : ""}
+          {truncated && <span style={{ color: C.yellow }}> · first 500</span>}
           {activeExcludeCount > 0 && (
             <span style={{ color: C.yellow }}> · {activeExcludeCount} excluded</span>
           )}
         </span>
+        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: C.dim, flexShrink: 0 }}>
+          <input
+            type="checkbox"
+            checked={includeSubfolders}
+            onChange={e => { setIncludeSubfolders(e.target.checked); clearLoadedImages(); }}
+          />
+          Subfolders
+        </label>
 
         {/* All / None */}
         <button className="inp-btn input-select-button" onClick={selectAll} style={{
@@ -341,6 +396,11 @@ export default function Input({
               <div style={{ fontSize: 11, color: C.dim, textAlign: "center" }}>
                 Check that the folder path is correct and try again.
               </div>
+            </div>
+          ) : !loadedDirRef.current ? (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
+              <span style={{ color: C.dim, fontSize: 12 }}>Folder selected. Click Load to scan images.</span>
+              <span style={{ color: C.dim2, fontSize: 11 }}>Refresh reloads the same folder without changing the path.</span>
             </div>
           ) : visible.length === 0 ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>

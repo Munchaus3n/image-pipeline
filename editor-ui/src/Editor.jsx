@@ -195,6 +195,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
   const [canvasSizeState, setCanvasSizeState] = useState(1440);
   const [sourceStage, setSourceStage] = useState("");
+  const [sessionOutputDir, setSessionOutputDir] = useState("");
   const [activeSnapZone, setActiveSnapZone] = useState(null); // tracks last snapped guide zone
   const [showRefOnCanvas, setShowRefOnCanvas] = useState(true);
   const [refOpacity, setRefOpacity] = useState(0.22);
@@ -274,8 +275,9 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     }
     return srcFolder;
   }, [srcFolder]);
-  const activeOutputDir = useMemo(() => outputDir.trim() || outputRoot, [outputDir, outputRoot]);
   const requestedOutputDir = useMemo(() => outputDir.trim(), [outputDir]);
+  const effectiveOutputDir = useMemo(() => requestedOutputDir || sessionOutputDir, [requestedOutputDir, sessionOutputDir]);
+  const activeOutputDir = useMemo(() => effectiveOutputDir || outputRoot, [effectiveOutputDir, outputRoot]);
   const currentOutputIdentity = useMemo(
     () => normalizeOutputIdentity(requestedOutputDir),
     [requestedOutputDir],
@@ -286,7 +288,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   // allDone has no state/callback deps — clearSession is a stable import
   const allDone = useCallback(async () => {
     setItems([]); setSelId(null);
-    setStatus(`all images processed.\noutput → ${activeOutputDir}/Editor/final/`);
+    setStatus(`all images processed.\noutput → ${activeOutputDir}/Editor/`);
     await clearSession().catch(() => {});
   }, [activeOutputDir]);
 
@@ -456,13 +458,20 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
 
       if (session.exists) {
         const sessionOutputDir = (session.output_dir ?? "").trim();
-        const outputMismatch = normalizeOutputIdentity(sessionOutputDir) !== currentOutputIdentity;
+        const outputMismatch = requestedOutputDir && normalizeOutputIdentity(sessionOutputDir) !== currentOutputIdentity;
         const currentOutputLabel = currentOutput || "./output";
 
         if (outputMismatch) {
           setStatus(`Ignored stale session output (${sessionOutputDir || "./output"}); using current output (${currentOutputLabel}).`);
           await clearSession().catch(() => {});
+        } else if (session.completed) {
+          sessionRunIdRef.current = session.run_id || `pipeline-${Date.now()}`;
+          setSessionOutputDir(sessionOutputDir);
+          setSourceStage(session.source_stage || "");
+          await initFromFolder(session.src_root, 0, guidesForInit);
+          return;
         } else {
+          setSessionOutputDir(sessionOutputDir);
           resumePromptActiveRef.current = true;
           const resume = await askConfirm(
             "Resume previous editor session?",
@@ -486,6 +495,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
         }
       }
 
+      setSessionOutputDir("");
       const src = await getSource(currentOutput);
       if (!stillCurrent()) return;
       if (!src?.found || !src?.folder) {
@@ -684,13 +694,13 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
       src_root: srcFolder,
       queue_index: nextQueueIndex,
       template,
-      output_dir: requestedOutputDir,
+      output_dir: effectiveOutputDir,
       input_dir: sourceStage === "input" ? srcFolder : "",
       source_stage: sourceStage,
       run_id: sessionRunIdRef.current || `editor-${Date.now()}`,
       timestamp: Date.now(),
     });
-  }, [srcFolder, template, requestedOutputDir, sourceStage]);
+  }, [effectiveOutputDir, srcFolder, template, sourceStage]);
 
   const doSave = useCallback(async () => {
     if (!items.length) return;
@@ -967,6 +977,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
                 try {
                   const { path } = await browseFolder(srcFolder);
                   if (!path) return;
+                  setSessionOutputDir("");
                   await initFromFolder(path, 0);
                 } catch {
                   setStatus("folder picker unavailable\ncheck that api.py is running");

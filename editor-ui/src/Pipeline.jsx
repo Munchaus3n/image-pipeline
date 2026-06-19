@@ -69,18 +69,26 @@ function PillToggle({ value, onChange }) {
   );
 }
 
-function FolderInput({ value, onChange, placeholder }) {
+function FolderInput({ value, onChange, placeholder, recent = [], onRemember }) {
   const browse = useCallback(async () => {
     try {
       const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(value)}`);
       const { path } = await r.json();
-      if (path) onChange(path);
+      if (path) {
+        onChange(path);
+        onRemember?.(path);
+      }
     } catch { void 0; }
-  }, [value, onChange]);
+  }, [value, onChange, onRemember]);
 
   return (
     <div className="pipeline-folder-input" style={{ display: "flex", gap: 4, width: "100%" }}>
-      <input className="pipeline-path-field" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      <input
+        className="pipeline-path-field"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onBlur={() => onRemember?.(value)}
+        placeholder={placeholder}
         style={{
           flex: 1, background: C.panel2, color: C.text,
           border: `1px solid ${C.border}`, borderRadius: 4,
@@ -88,6 +96,25 @@ function FolderInput({ value, onChange, placeholder }) {
           outline: "none", minWidth: 0
         }}
       />
+      {recent.length > 0 && (
+        <select
+          value=""
+          onChange={e => {
+            if (!e.target.value) return;
+            onChange(e.target.value);
+            onRemember?.(e.target.value);
+          }}
+          style={{
+            width: 34, background: C.panel2, color: C.dim,
+            border: `1px solid ${C.border}`, borderRadius: 8,
+            fontSize: 10, cursor: "pointer", flexShrink: 0,
+          }}
+          title="Recent folders"
+        >
+          <option value="">↕</option>
+          {recent.map(path => <option key={path} value={path}>{path}</option>)}
+        </select>
+      )}
       <button className="pipeline-btn pipeline-browse-button pipeline-secondary-button" onClick={browse} style={{
         background: C.panel2, color: C.dim,
         border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 9px",
@@ -789,7 +816,21 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
 
 // BUG-18 FIX (receiver side): added onGoToTemplates to prop signature.
 // main.jsx passes this prop but the old signature omitted it, so it was silently ignored.
-export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone, inputDir, setInputDir, outputDir, setOutputDir, excludeTags, removedImages }) {
+export default function Pipeline({
+  onGoToEditor,
+  onGoToTemplates,
+  onPipelineDone,
+  inputDir,
+  setInputDir,
+  outputDir,
+  setOutputDir,
+  excludeTags,
+  removedImages,
+  recentInputDirs = [],
+  recentOutputDirs = [],
+  rememberInputDir,
+  rememberOutputDir,
+}) {
   const [folderMode, setFolderMode] = useState("bulk");
   const [doUpscale, setDoUpscale] = useState(true);
   const [scale, setScale] = useState("2");
@@ -837,20 +878,6 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
       })
       .catch(() => {});
   }, []);
-
-  // Restore saved paths exactly once on mount.
-  // User edits (including intentionally clearing to blank) must win afterward.
-  useEffect(() => {
-    fetch(`${BASE}/settings`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data?.settings) return;
-        const s = data.settings;
-        setInputDir(typeof s.output?.input_dir === "string" ? s.output.input_dir : "");
-        setOutputDir(typeof s.output?.output_dir === "string" ? s.output.output_dir : "");
-      })
-      .catch(() => {});
-  }, [setInputDir, setOutputDir]);
 
   // Load non-path settings on mount only.
   // This avoids overwriting in-session edits when the window regains focus
@@ -901,10 +928,21 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
     }
     if (doneNotifiedRef.current) return;
     doneNotifiedRef.current = true;
-    onPipelineDone?.({
-      canvasSize: parseInt(canvasSize, 10) || 1440,
-      thumbnail,
-    });
+    (async () => {
+      let session = null;
+      try {
+        const r = await fetch(`${BASE}/session`);
+        const data = r.ok ? await r.json() : null;
+        session = data?.exists ? data : null;
+      } catch {
+        void 0;
+      }
+      onPipelineDone?.({
+        canvasSize: parseInt(canvasSize, 10) || 1440,
+        thumbnail,
+        session,
+      });
+    })();
   }, [done, onPipelineDone, canvasSize, thumbnail]);
 
   const handleStart = useCallback(() => {
@@ -916,23 +954,30 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
       excludeList: activeExclude, skipList, rembgModel, resume: false,
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
     });
+    rememberInputDir?.(inputDir);
+    rememberOutputDir?.(outputDir);
     setShowResume(false);
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx]);
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx, rememberInputDir, rememberOutputDir]);
 
   const handleResume = useCallback(() => {
     if (!resumeSession?.src_root) return;
-    setInputDir(resumeSession.src_root);
+    const resumeInputDir = resumeSession.input_dir || resumeSession.src_root;
+    const resumeOutputDir = resumeSession.output_dir ?? outputDir;
+    setInputDir(resumeInputDir);
+    setOutputDir(resumeOutputDir);
     const skipList = removedImages ? [...removedImages] : [];
     const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
     const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
     start({
       folderMode, doUpscale, scale, doRembg,
-      inputDir: resumeSession.src_root,
-      outputDir, excludeList: activeExclude, skipList, rembgModel, resume: true,
+      inputDir: resumeInputDir,
+      outputDir: resumeOutputDir, excludeList: activeExclude, skipList, rembgModel, resume: true,
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
     });
+    rememberInputDir?.(resumeInputDir);
+    rememberOutputDir?.(resumeOutputDir);
     setShowResume(false);
-  }, [resumeSession, setInputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx]);
+  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx, rememberInputDir, rememberOutputDir]);
 
   const handleStartFresh = useCallback(async () => {
     try { await fetch(`${BASE}/session`, { method: "DELETE" }); } catch { void 0; }
@@ -974,6 +1019,14 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
               onClick={stop}
             >
               ■  Stop
+            </button>
+          )}
+          {done && !running && (
+            <button
+              className="pipeline-btn pipeline-secondary-button"
+              onClick={() => onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail })}
+            >
+              Open Editor →
             </button>
           )}
         </div>
@@ -1024,11 +1077,23 @@ export default function Pipeline({ onGoToEditor, onGoToTemplates, onPipelineDone
           <SectionLabel>Folders</SectionLabel>
           <div className="pipeline-section" style={{ marginBottom: 8 }}>
             <FieldLabel>Input folder</FieldLabel>
-            <FolderInput value={inputDir} onChange={setInputDir} placeholder="default: ./input" />
+            <FolderInput
+              value={inputDir}
+              onChange={setInputDir}
+              placeholder="default: ./input"
+              recent={recentInputDirs}
+              onRemember={rememberInputDir}
+            />
           </div>
           <div className="pipeline-section" style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
             <FieldLabel>Output folder</FieldLabel>
-            <FolderInput value={outputDir} onChange={setOutputDir} placeholder="default: ./output" />
+            <FolderInput
+              value={outputDir}
+              onChange={setOutputDir}
+              placeholder="default: ./output"
+              recent={recentOutputDirs}
+              onRemember={rememberOutputDir}
+            />
           </div>
 
           <SectionLabel>Processing</SectionLabel>

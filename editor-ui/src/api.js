@@ -65,8 +65,9 @@ export const getSource  = (outputDir = "") =>
 export const browseFolder = (initial = "") =>
   get(`/browse?initial=${encodeURIComponent(initial)}`);
 
-// Returns { images: [...abs paths], count }
-export const getImages  = (folder)     => get(`/images?folder=${encodeURIComponent(folder)}`);
+// Returns { images: [...abs paths], count, truncated }
+export const getImages  = (folder, { recursive = true, limit = 0 } = {}) =>
+  get(`/images?folder=${encodeURIComponent(folder)}&recursive=${recursive ? "true" : "false"}&limit=${encodeURIComponent(limit)}`);
 
 // URL to use directly in <img src="...">
 export const imageUrl   = (absPath)    => `${BASE}/image?path=${encodeURIComponent(absPath)}`;

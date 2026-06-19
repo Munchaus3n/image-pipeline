@@ -15,22 +15,54 @@ const TABS = [
   { id: "settings", label: "Settings" },
 ];
 
+const RECENT_LIMIT = 8;
+
+function recentFolders(path, current = []) {
+  const value = String(path || "").trim();
+  if (!value) return current;
+  return [value, ...current.filter((item) => item !== value)].slice(0, RECENT_LIMIT);
+}
+
+async function saveOutputSettingsPatch(patch) {
+  const r = await fetch("/api/settings");
+  const data = r.ok ? await r.json() : { settings: {} };
+  const current = data?.settings ?? {};
+  await fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      settings: {
+        ...current,
+        output: { ...(current.output ?? {}), ...patch },
+      },
+    }),
+  });
+}
+
 export function Root() {
   const [screen, setScreen] = useState("input");
   const [theme, setTheme] = useState("dark");
   const [mountedScreens, setMountedScreens] = useState(() => new Set(["input"]));
+  const [inputDir, setInputDir] = useState("");
+  const [outputDir, setOutputDir] = useState("");
+  const [recentInputDirs, setRecentInputDirs] = useState([]);
+  const [recentOutputDirs, setRecentOutputDirs] = useState([]);
 
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.settings?.appearance?.theme) setTheme(data.settings.appearance.theme);
+        const settings = data?.settings;
+        if (!settings) return;
+        if (settings.appearance?.theme) setTheme(settings.appearance.theme);
+        if (typeof settings.output?.input_dir === "string") setInputDir(settings.output.input_dir);
+        if (typeof settings.output?.output_dir === "string") setOutputDir(settings.output.output_dir);
+        if (Array.isArray(settings.output?.recent_input_dirs)) setRecentInputDirs(settings.output.recent_input_dirs);
+        if (Array.isArray(settings.output?.recent_output_dirs)) setRecentOutputDirs(settings.output.recent_output_dirs);
       })
       .catch(() => {});
   }, []);
 
-  const [inputDir, setInputDir] = useState("");
-  const [outputDir, setOutputDir] = useState("");
   const [excludeTags, setExcludeTags] = useState([]);
   const [thumbs, setThumbs] = useState([]);
   const [removedImages, setRemovedImages] = useState(new Set());
@@ -47,6 +79,22 @@ export function Root() {
       return updated;
     });
     setScreen(next);
+  }, []);
+
+  const rememberInputDir = useCallback((path) => {
+    setRecentInputDirs((prev) => {
+      const next = recentFolders(path, prev);
+      saveOutputSettingsPatch({ recent_input_dirs: next }).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const rememberOutputDir = useCallback((path) => {
+    setRecentOutputDirs((prev) => {
+      const next = recentFolders(path, prev);
+      saveOutputSettingsPatch({ recent_output_dirs: next }).catch(() => {});
+      return next;
+    });
   }, []);
 
   // BUG-11 FIX: theme toggle must read current settings, patch appearance.theme, then save full settings.
@@ -141,6 +189,8 @@ export function Root() {
               removedImages={removedImages}
               setRemovedImages={setRemovedImages}
               onGoToProcess={() => openScreen("pipeline")}
+              recentInputDirs={recentInputDirs}
+              rememberInputDir={rememberInputDir}
             />
           </div>
         )}
@@ -155,6 +205,10 @@ export function Root() {
               setOutputDir={setOutputDir}
               excludeTags={excludeTags}
               removedImages={removedImages}
+              recentInputDirs={recentInputDirs}
+              recentOutputDirs={recentOutputDirs}
+              rememberInputDir={rememberInputDir}
+              rememberOutputDir={rememberOutputDir}
               onGoToEditor={(s) => {
                 setEditorSettings(s);
                 setEditorKey((k) => k + 1);
