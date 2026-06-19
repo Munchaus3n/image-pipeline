@@ -285,6 +285,36 @@ def run_static_checks(repo_root: Path, results: list[CheckResult]) -> None:
     else:
         results.append(CheckResult("PASS", "rembg fallback manual hidden", "No choices=['auto','manual'] pattern found."))
 
+    source_editor_final_refs = [
+        str(p.relative_to(repo_root))
+        for p in [api_py, editor_jsx]
+        if "Editor/final" in read_text(p)
+    ]
+    results.append(CheckResult(
+        "PASS" if not source_editor_final_refs else "FAIL",
+        "Editor final output root",
+        "No active source references <output>/Editor/final."
+        if not source_editor_final_refs else f"Found stale Editor/final references: {', '.join(source_editor_final_refs)}",
+    ))
+
+    handoff_needed = ["completed:   bool = False", "_write_pipeline_session(0, completed=True)", "session.completed"]
+    missing_handoff = [token for token in handoff_needed if token not in joined_source]
+    results.append(CheckResult(
+        "PASS" if not missing_handoff else "FAIL",
+        "Completed pipeline handoff",
+        "Completed session handoff markers found."
+        if not missing_handoff else f"Missing handoff marker(s): {', '.join(missing_handoff)}",
+    ))
+
+    input_explicit_needed = ["const loadImages =", "recursive=${includeSubfolders", "&limit=500"]
+    missing_input_explicit = [token for token in input_explicit_needed if token not in input_txt]
+    results.append(CheckResult(
+        "PASS" if not missing_input_explicit else "FAIL",
+        "Input explicit folder loading",
+        "Input loading is explicit, bounded, and user-controlled."
+        if not missing_input_explicit else f"Missing Input explicit load marker(s): {', '.join(missing_input_explicit)}",
+    ))
+
     if later_updates.exists():
         note_ok = "Preview cache packaging migration" in read_text(later_updates)
         results.append(CheckResult(

@@ -615,9 +615,12 @@ def batch_remove_bg(
             and _is_oom_error(str(e))
         ):
             warn("GPU OOM during model load — falling back to CPU for entire batch.")
-            session = new_session(REMBG_MODEL,
-                                  providers=["CPUExecutionProvider"],
-                                  sess_options=sess_opts)
+            try:
+                session = new_session(REMBG_MODEL,
+                                      providers=["CPUExecutionProvider"],
+                                      sess_options=sess_opts)
+            except Exception as cpu_e:
+                raise RuntimeError(f"GPU OOM fallback to CPU failed during model load: {cpu_e}") from cpu_e
         else:
             raise
     ok("Model loaded.")
@@ -686,10 +689,19 @@ def batch_remove_bg(
                     print(f"__err_oom_gpu__:{src.name}", flush=True)
                     warn(f"GPU OOM on {src.name} — switching to CPU for remainder of batch.")
                     if cpu_session is None:
-                        cpu_session = new_session(
-                            REMBG_MODEL,
-                            providers=["CPUExecutionProvider"],
-                        )
+                        try:
+                            cpu_session = new_session(
+                                REMBG_MODEL,
+                                providers=["CPUExecutionProvider"],
+                            )
+                        except Exception as cpu_e:
+                            err(f"CPU fallback failed after GPU OOM on {src.name}: {cpu_e}")
+                            print(f"__err_rembg__:{src.name}", flush=True)
+                            if corrupted_dir:
+                                _copy_corrupted(src, upscale_root, corrupted_dir)
+                                warn(f"  â†’ copied to corrupted/{src.name}")
+                            progress.advance(task)
+                            continue
                     session = cpu_session  # permanent switch for all remaining images
                     success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL)
 

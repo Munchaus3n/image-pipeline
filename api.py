@@ -162,11 +162,20 @@ def _clean(raw: bytes) -> list[str]:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def images_in_folder(folder: Path) -> list[Path]:
-    return sorted(
-        p for p in folder.rglob("*")
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
-    )
+def images_in_folder(folder: Path, *, recursive: bool = True, limit: int = 0) -> tuple[list[Path], bool]:
+    walker = folder.rglob("*") if recursive else folder.iterdir()
+    images: list[Path] = []
+    capped = limit > 0
+    max_items = limit + 1 if capped else 0
+    for p in walker:
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
+            images.append(p)
+            if capped and len(images) >= max_items:
+                break
+    truncated = capped and len(images) > limit
+    if truncated:
+        images = images[:limit]
+    return sorted(images), truncated
 
 def detect_source_folder(
     output_root: Path | None = None, *, allow_input_fallback: bool = True
@@ -212,7 +221,16 @@ def _relative_or_hashed(src: Path, src_root: Path) -> Path:
 def mirror_save_path(src: Path, src_root: Path, output_base: Path | None = None, stage: str = "final") -> Path:
     base = output_base or _output_base_from_src_root(src_root)
     rel = _relative_or_hashed(src, src_root)
+    if stage in ("", "final"):
+        return base / "Editor" / rel
     return base / "Editor" / stage / rel
+
+def mirror_thumbnail_path(save_path: Path, output_base: Path, thumb_size: int) -> Path:
+    try:
+        rel = save_path.relative_to(output_base / "Editor")
+    except ValueError:
+        rel = save_path.name
+    return output_base / "Editor" / "thumbnails" / str(thumb_size) / rel
 
 def mirror_skip_path(src: Path, src_root: Path, output_base: Path | None = None) -> Path:
     return mirror_save_path(src, src_root, output_base=output_base, stage="skipped")
@@ -416,6 +434,7 @@ class SessionData(BaseModel):
     source_stage: str = ""
     run_id:      str = ""
     timestamp:   int = 0
+    completed:   bool = False
 
 class PipelineConfig(BaseModel):
     folder_mode:    Literal["bulk", "clean"]
@@ -609,7 +628,7 @@ def get_source(output_dir: str = ""):
             "reason": "no_output_for_custom",
             "output_dir": str(base),
         }
-    images = images_in_folder(folder)
+    images, _ = images_in_folder(folder)
     return {
         "folder": str(folder),
         "label": label,
@@ -622,12 +641,23 @@ def get_source(output_dir: str = ""):
 
 
 @app.get("/images")
-def list_images(folder: str = Query(...)):
+def list_images(
+    folder: str = Query(...),
+    recursive: bool = Query(True),
+    limit: int = Query(0, ge=0, le=5000),
+):
     path = _resolve_safe_path(folder, must_exist=True, allow_file=False, allow_dir=True)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Folder not found: {folder}")
-    images = images_in_folder(path)
-    return {"folder": str(path), "images": [str(p) for p in images], "count": len(images)}
+    images, truncated = images_in_folder(path, recursive=recursive, limit=limit)
+    return {
+        "folder": str(path),
+        "images": [str(p) for p in images],
+        "count": len(images),
+        "truncated": truncated,
+        "recursive": recursive,
+        "limit": limit,
+    }
 
 
 @app.get("/image")
@@ -756,15 +786,15 @@ def save_composition(req: SaveRequest):
     src_root = Path(req.src_root) if req.src_root.strip() else None
     if req.output_dir.strip():
         output_base = _resolve_safe_path(req.output_dir, must_exist=False, allow_file=False, allow_dir=True)
-        if src_root:
-            save_path = mirror_save_path(ref_path, src_root, output_base=output_base, stage="final").with_suffix(".png")
-        else:
-            save_path = (output_base / "Editor" / "final" / _hashed_rel_fallback(ref_path)).with_suffix(".png")
+    elif src_root:
+        output_base = _output_base_from_src_root(src_root)
     else:
-        if src_root:
-            save_path = mirror_save_path(ref_path, src_root, stage="final").with_suffix(".png")
-        else:
-            save_path = (OUTPUT_ROOT / "Editor" / "final" / _hashed_rel_fallback(ref_path)).with_suffix(".png")
+        output_base = OUTPUT_ROOT
+
+    if src_root:
+        save_path = mirror_save_path(ref_path, src_root, output_base=output_base, stage="final").with_suffix(".png")
+    else:
+        save_path = (output_base / "Editor" / _hashed_rel_fallback(ref_path)).with_suffix(".png")
     if req.is_combo:
         save_path = save_path.with_name(save_path.stem + "_combo.png")
 
@@ -774,9 +804,8 @@ def save_composition(req: SaveRequest):
     # Thumbnail: fire-and-forget on thread pool.
     thumb_path = None
     if req.thumbnail:
-        thumb_dir  = save_path.parent / str(thumb_size)
-        thumb_dir.mkdir(parents=True, exist_ok=True)
-        thumb_file = thumb_dir / save_path.name
+        thumb_file = mirror_thumbnail_path(save_path, output_base, thumb_size)
+        thumb_file.parent.mkdir(parents=True, exist_ok=True)
         thumb_path = str(thumb_file)
 
         _canvas_snap = canvas.copy()
@@ -838,7 +867,7 @@ def get_session():
         src_root = Path(data["src_root"])
         if not src_root.exists():
             return {"exists": False}
-        images = images_in_folder(src_root)
+        images, _ = images_in_folder(src_root)
         idx    = int(data.get("queue_index", 0))
         if idx >= len(images):
             return {"exists": False}
@@ -877,6 +906,7 @@ _DEFAULT_SETTINGS = {
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
                      "thumbnail_size": 400, "folder_mode": "bulk", "input_dir": "", "output_dir": "",
+                     "recent_input_dirs": [], "recent_output_dirs": [],
                      "do_upscale": True, "do_rembg": True, "upscale_scale": "2"},
     "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#f5f5f1", "theme": "light"},
     "guides":       {"use_custom": False, "custom": {}},
@@ -1046,7 +1076,7 @@ async def run_pipeline(cfg: PipelineConfig):
 
         # Session checkpoint writer shared by initial save + per-image progress.
         # `template` is editor-owned; pipeline always writes it as empty.
-        def _write_pipeline_session(index: int):
+        def _write_pipeline_session(index: int, *, completed: bool = False):
             payload = SessionData(
                 src_root=str(session_src_root),
                 queue_index=index,
@@ -1056,6 +1086,7 @@ async def run_pipeline(cfg: PipelineConfig):
                 source_stage=session_source_stage,
                 run_id=session_run_id,
                 timestamp=session_timestamp,
+                completed=completed,
             ).model_dump()
             SESSION_FILE.write_text(
                 json.dumps(payload, ensure_ascii=False),
@@ -1105,7 +1136,7 @@ async def run_pipeline(cfg: PipelineConfig):
 
             await proc.wait()
             if proc.returncode == 0:
-                SESSION_FILE.unlink(missing_ok=True)
+                _write_pipeline_session(0, completed=True)
             yield {"data": f"__done__ exit={proc.returncode}"}
         except Exception as e:
             yield {"data": f"__error__ {e}"}
