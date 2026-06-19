@@ -13,7 +13,7 @@ Manual verification checklist for path flow, pipeline fallbacks, and editor outp
 3. Open Editor.
 4. Confirm source is loaded from `./output/processed` or `./output/upscaled` if rembg is off.
 5. Save and skip one image each.
-6. Confirm files are written under `./output/Editor/final` and `./output/Editor/skipped`.
+6. Confirm files are written under `./output/Editor/` and `./output/Editor/skipped`.
 
 ## 2) Custom input + default output
 1. Set a custom input folder, leave output folder empty.
@@ -26,7 +26,7 @@ Manual verification checklist for path flow, pipeline fallbacks, and editor outp
 2. Run pipeline.
 3. Open Editor from Process screen and also by switching to the Editor tab directly.
 4. Confirm Editor source resolves to `<customOutput>/processed` when rembg is enabled.
-5. Save/skip and confirm writes go to `<customOutput>/Editor/final` and `<customOutput>/Editor/skipped`.
+5. Save/skip and confirm writes go to `<customOutput>/Editor/` and `<customOutput>/Editor/skipped`.
 
 ## 4) Upscale only
 1. Enable upscale, disable rembg.
@@ -53,7 +53,7 @@ Manual verification checklist for path flow, pipeline fallbacks, and editor outp
 
 ## 8) Save final editor image
 1. Save one normal item and one combo item.
-2. Confirm outputs land in `Editor/final` with expected names.
+2. Confirm outputs land directly in `Editor/` with expected names.
 3. Confirm combo output gets `*_combo.png`.
 4. Confirm thumbnails are generated when enabled.
 

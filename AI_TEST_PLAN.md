@@ -16,9 +16,13 @@
 8. Run upscale-only; confirm Editor loads exact `<output>/upscaled`.
 9. Run rembg-only; confirm Editor loads exact `<output>/processed`.
 10. Run two batches with different output folders; confirm Editor does not load the first run’s source.
-11. Save one image; confirm final output lands under `<output>/Editor/final`.
+11. Save one image; confirm final output lands under `<output>/Editor/`.
 12. Skip one image; confirm skipped output lands under `<output>/Editor/skipped`.
 13. Trigger/observe GPU OOM fallback if hardware allows; otherwise verify clear fallback logs are emitted by code inspection.
 
 ## Current Results
-- Pending implementation.
+- Passed: `python scripts/safe_smoke_test.py`.
+- Passed: `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py`.
+- Passed: `git diff --check`.
+- Not run: `npm run build` and `npm run lint` because `editor-ui/node_modules` is absent in this checkout.
+- Not run: manual app/GPU regression, because no local API/frontend session was started.

@@ -20,16 +20,16 @@
   - `<output>/processed`
   - `<output>/corrupted`
 - Editor outputs:
-  - target final convention: `<output>/Editor/final/<relative image>.png`
+  - target final convention: `<output>/Editor/<relative image>.png`
   - target skipped convention: `<output>/Editor/skipped/<relative image>`
-  - thumbnails remain a subfolder under final output unless changed later.
+  - target thumbnail convention: `<output>/Editor/thumbnails/<size>/<relative image>.png`
 
 ## Data Flow
 1. Settings may seed default `input_dir` and `output_dir`.
 2. Input screen edits `inputDir` and loads images from `/api/images`.
 3. Process screen sends paths/options to `/api/pipeline/run`.
 4. API launches `pipeline.py` and writes pipeline session metadata while processing.
-5. Editor asks `/api/session` first, then `/api/source` only as fallback detection.
+5. Editor asks `/api/session` first; completed pipeline sessions are authoritative handoffs, and `/api/source` is only fallback detection.
 6. Editor saves via `/api/save` and skips via `/api/skip`.
 
 ## Source Of Truth

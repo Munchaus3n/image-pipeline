@@ -5,7 +5,8 @@
 
 ## Current State
 - Docs created before code changes.
-- Workflow stabilization is the only scope.
+- Workflow stabilization phases 1-5 are implemented.
+- Validation is pending.
 - No Electron packaging work has been started.
 
 ## Next Agent Instructions
@@ -19,5 +20,6 @@
 - Do not let Settings overwrite active path state after mount.
 - Do not auto-scan large folders on input typing.
 - Do not delete the successful pipeline session before Editor consumes it.
+- Do not reintroduce `<output>/Editor/final`; final exports go directly under `<output>/Editor/`.
 - Do not let Editor fall back to stale default output when a custom output was just processed.
 - Keep browser/Vite dev mode compatible.
