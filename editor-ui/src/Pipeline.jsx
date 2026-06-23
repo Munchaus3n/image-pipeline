@@ -168,7 +168,6 @@ function usePipeline() {
   const [recentDone, setRecentDone] = useState([]);
   const [elapsed, setElapsed] = useState(0);
   const [stage, setStage] = useState(null);
-  const [stagesDone, setStagesDone] = useState({ upscale: false, rembg: false });
   const [upStats, setUpStats] = useState({ done: 0, skip: 0, err: 0 });
   const [bgStats, setBgStats] = useState({ done: 0, skip: 0, err: 0 });
   const [oomGpuCount, setOomGpuCount] = useState(0);
@@ -320,7 +319,6 @@ function usePipeline() {
       setStage("upscale");
     } else if (/Stage 2|Background Removal/.test(raw)) {
       stageRef.current = "rembg";
-      setStagesDone(s => ({ ...s, upscale: true }));
       setStage("rembg");
     }
 
@@ -340,7 +338,7 @@ function usePipeline() {
     setImageDone(0); setImageSkipped(0); setImageError(0);
     setTotalImages(0); setRecentDone([]);
     setElapsed(0); setDone(false); setRunning(true);
-    setStage(null); setStagesDone({ upscale: false, rembg: false });
+    setStage(null);
     setUpStats({ done: 0, skip: 0, err: 0 });
     setBgStats({ done: 0, skip: 0, err: 0 });
     setOomGpuCount(0);
@@ -380,7 +378,6 @@ function usePipeline() {
           const msg = line.slice(6);
           if (msg.startsWith("__done__")) {
             appendLine(msg.includes("exit=0") ? "✓ Pipeline complete." : "✗ Pipeline exited with errors.");
-            setStagesDone({ upscale: true, rembg: true });
             setStage("done"); setDone(true); setRunning(false);
           } else if (msg.startsWith("__error__")) {
             appendLine(`Error: ${msg.replace("__error__ ", "")}`);
@@ -406,7 +403,7 @@ function usePipeline() {
 
   return {
     running, done, log, errors, imageDone, imageSkipped, imageError,
-    totalImages, recentDone, elapsed, stage, stagesDone,
+    totalImages, recentDone, elapsed, stage,
     upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip,
     logRef, errorRef, start, stop
   };
@@ -523,7 +520,7 @@ function StageRow({ label, stats, total, active, stageDone, color }) {
   );
 }
 
-function Zone2({ upStats, bgStats, totalImages, elapsed, running, done, stage, doUpscale, doRembg, stagesDone = {}, oomGpuCount = 0 }) {
+function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale, doRembg, oomGpuCount = 0 }) {
   const fmt = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   const n = Math.max(0, totalImages || 0);
 
@@ -814,11 +811,8 @@ function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-// BUG-18 FIX (receiver side): added onGoToTemplates to prop signature.
-// main.jsx passes this prop but the old signature omitted it, so it was silently ignored.
 export default function Pipeline({
   onGoToEditor,
-  onGoToTemplates,
   onPipelineDone,
   inputDir,
   setInputDir,
@@ -897,7 +891,7 @@ export default function Pipeline({
 
   const {
     running, done, log, errors, imageDone, imageError,
-    totalImages, elapsed, stage, stagesDone,
+    totalImages, elapsed, stage,
     upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip,
     logRef, errorRef, start, stop,
   } = usePipeline();
@@ -1233,9 +1227,8 @@ export default function Pipeline({
                   <Zone2
                     upStats={upStats} bgStats={bgStats}
                     totalImages={totalImages} elapsed={elapsed}
-                    running={running} done={done} stage={stage}
+                    done={done} stage={stage}
                     doUpscale={doUpscale} doRembg={doRembg}
-                    stagesDone={stagesDone}
                     oomGpuCount={oomGpuCount}
                   />
                 )}

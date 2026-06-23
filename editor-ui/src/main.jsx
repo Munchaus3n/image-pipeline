@@ -197,7 +197,6 @@ export function Root() {
 
         {mountedScreens.has("pipeline") && (
           <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "pipeline" ? "flex" : "none", flexDirection: "column" }}>
-            {/* BUG-18 FIX: Pipeline now receives onGoToTemplates and no longer ignores it. */}
             <Pipeline
               inputDir={inputDir}
               setInputDir={setInputDir}
@@ -217,7 +216,6 @@ export function Root() {
               onPipelineDone={(s) => {
                 setEditorSettings(s);
               }}
-              onGoToTemplates={() => openScreen("templates")}
             />
           </div>
         )}
