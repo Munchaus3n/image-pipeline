@@ -1,18 +1,19 @@
 # AI Handoff
 
 ## Current Branch
-- `design/lovable-redesign-clean`
+- `local/real-processing-validation`
 
 ## Current State
 - Docs created before code changes.
 - Workflow stabilization phases 1-5 are implemented.
-- Validation is pending.
+- Real local workflow validation completed on 2026-06-23 with FastAPI, Vite, Real-ESRGAN upscale-only, rembg-only, and one both-stages run.
+- One validation issue was fixed: upscale-only completion logs now point to `<output>/upscaled`.
 - No Electron packaging work has been started.
 
 ## Next Agent Instructions
 - Continue phases in `AI_FIX_PLAN.md`.
 - Update `AI_PROGRESS.md` after each phase.
-- Keep changes small and commit by phase.
+- Keep changes small; do not commit unless explicitly asked.
 - Do not add Electron files or dependencies.
 - Prefer deleting/adjusting existing workflow code over adding abstractions.
 

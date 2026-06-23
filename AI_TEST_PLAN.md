@@ -28,4 +28,7 @@
 - Passed after sandbox retry: `npm.cmd run build`.
 - Passed after lint-only fix: `npm.cmd run lint`.
 - Passed: live API/Vite workflow check for Input Load, Refresh, recent folder persistence, Process path preservation, completed session handoff, final save, skipped save, and second output folder run.
-- Note: live workflow check used a controlled no-op pipeline run to validate workflow state and export paths without invoking GPU/model processing.
+- Passed: real local processing validation with isolated PNG inputs, Real-ESRGAN upscale-only, rembg-only on CPU-forced `bria-rmbg`, and one both-stages run.
+- Passed: Editor final save to `<output>/Editor/`, skipped save to `<output>/Editor/skipped/`, thumbnail save to `<output>/Editor/thumbnails/400/`, and second output folder identity.
+- Not observed: GPU/DirectML/CUDA OOM. Live run used existing settings with `force_cpu=true` for rembg, so OOM fallback did not trigger.
+- Fixed during validation: upscale-only pipeline completion message now points to `<output>/upscaled` instead of `<output>/processed`.

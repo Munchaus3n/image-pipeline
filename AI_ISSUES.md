@@ -2,7 +2,12 @@
 
 ## Open Issues
 1. UI design cleanup should wait until workflow bugs are stable.
-2. Full manual regression is still pending on a real local image set.
+
+## Validation Notes
+- Real local workflow regression completed on 2026-06-23 with isolated PNG inputs.
+- Real-ESRGAN upscale-only, rembg-only on CPU-forced `bria-rmbg`, and one both-stages run passed.
+- No stale output folder reuse, `<output>/Editor/final` regression, or completed-session handoff failure was found.
+- GPU/DirectML/CUDA OOM was not observed during validation, so live fallback behavior remains untriggered in this pass.
 
 ## Already Partly Addressed Before This Pass
 - `pipeline.py` has DirectML/CUDA/CPU provider selection.

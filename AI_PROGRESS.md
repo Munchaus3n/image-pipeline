@@ -75,3 +75,32 @@
 - Skipped save passed at `<output-a>/Editor/skipped/b.png`.
 - Second run with a different output folder passed; completed session and save path moved to `<output-b>/Editor/a.png`.
 - Test settings/session were restored and temporary validation folders were removed.
+
+## 2026-06-23 Real Processing Validation
+
+### Automated Checks
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` first hit sandbox `__pycache__` write denial, then passed with local write approval.
+- `cd editor-ui && npm.cmd install` passed; npm still reports 4 audit vulnerabilities (1 low, 2 moderate, 1 high), not fixed in this scoped pass.
+- `cd editor-ui && npm.cmd run build` first hit sandbox `spawn EPERM`, then passed with local process/write approval.
+- `cd editor-ui && npm.cmd run lint` passed.
+
+### Real Local Workflow
+- Started local FastAPI with `python api.py` and Vite with `npm.cmd run dev -- --host 127.0.0.1`; both responded on `127.0.0.1`.
+- Used isolated real PNG inputs under `%TEMP%\image-pipeline-real-validation-20260623-134905\input`, including one nested image.
+- Input explicit Load/Refresh passed through `/images`: non-recursive count `2`, refresh count `2`, recursive/Subfolders count `3`.
+- Recent input/output folder persistence passed through `/settings` round-trip.
+- Real upscale-only run passed with Real-ESRGAN NCNN: session kept exact `input_dir`, `output_dir`, `src_root=<output-a>\upscaled`, `source_stage=upscaled`, `completed=true`, `total=3`.
+- Editor source handoff passed by loading the exact completed `src_root` with 3 images.
+- Editor final save passed at `%TEMP%\image-pipeline-real-validation-20260623-134905\output-a\Editor\alpha.png`.
+- Editor skipped save passed at `%TEMP%\image-pipeline-real-validation-20260623-134905\output-a\Editor\skipped\beta.png`.
+- Editor thumbnail passed at `%TEMP%\image-pipeline-real-validation-20260623-134905\output-a\Editor\thumbnails\400\alpha.png`.
+- Second real upscale-only run with a different output folder passed; session moved to `<output-b>\upscaled` and save moved to `<output-b>\Editor\alpha.png`.
+- Real rembg-only run passed on CPU-forced `bria-rmbg`; model loaded and wrote `<output-rembg>\processed\alpha.png`.
+- Real both-stages run passed on one image; session handoff used `<output-both>\processed`.
+- No GPU/DirectML/CUDA OOM occurred during this run, so OOM fallback was not triggered live.
+- Test servers were stopped and original `settings.json` / `session.json` state was restored.
+
+### Fixes From Validation
+- Fixed `pipeline.py` completion output for upscale-only runs so it reports `<output>\upscaled` instead of misleading users toward `<output>\processed`.
+- Re-ran `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` and `python scripts\safe_smoke_test.py`; both passed after the fix.

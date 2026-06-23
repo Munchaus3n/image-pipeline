@@ -940,8 +940,11 @@ def main():
     corrupted_count = sum(1 for p in corrupted_files if p.is_file())
 
     console.print()
+    ready_dir = rembg_dir if do_rembg else upscale_dir
+    ready_label = "Cutouts" if do_rembg else "Images"
+
     console.print(Panel(
-        f"[green]Done.[/green]  Cutouts ready in [cyan]{rembg_dir}[/cyan]\n"
+        f"[green]Done.[/green]  {ready_label} ready in [cyan]{ready_dir}[/cyan]\n"
         + (f"[yellow]⚠  {corrupted_count} image(s) failed → [dim]{corrupted_dir}[/dim][/yellow]\n"
            if corrupted_count else "")
         + "[dim]Open placement editor to compose and export.[/dim]",
