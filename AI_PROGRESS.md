@@ -52,3 +52,26 @@
 - `git diff --check` passed.
 - Frontend build/lint not run because `editor-ui/node_modules` is absent in this checkout.
 - Manual app/GPU regression remains pending on a local running app session.
+
+## 2026-06-23
+
+### Validation Pass
+- Synced `design/lovable-redesign-clean`; branch was current with `origin/design/lovable-redesign-clean`.
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `npm.cmd install` passed and installed 151 packages; npm reported 4 audit vulnerabilities (1 low, 2 moderate, 1 high), not fixed in this scoped validation pass.
+- `npm.cmd run build` initially failed inside the sandbox with Vite `spawn EPERM`; rerun outside the sandbox passed.
+- `npm.cmd run lint` initially failed on unused `Pipeline.jsx` props/state; fixed only those lint failures.
+- Final `npm.cmd run lint` passed.
+
+### Live App Workflow Check
+- Started `api.py` and Vite dev server; `/config` returned 200 and Vite index returned 200.
+- Input folder load passed through `/images` with `recursive=false`, `limit=500`, `count=2`, `truncated=false`.
+- Refresh passed by reloading the same selected folder with the same count.
+- Recent folder persistence passed through `settings.json` round-trip for input/output recent folder arrays.
+- Process path preservation passed using a controlled no-op pipeline run: completed session retained exact `input_dir`, `output_dir`, `src_root`, and `completed=true`.
+- Automatic Editor handoff passed by loading the completed session `src_root` and resolving a 2-image queue.
+- Final save passed at `<output-a>/Editor/a.png`.
+- Skipped save passed at `<output-a>/Editor/skipped/b.png`.
+- Second run with a different output folder passed; completed session and save path moved to `<output-b>/Editor/a.png`.
+- Test settings/session were restored and temporary validation folders were removed.

@@ -1,7 +1,8 @@
 # AI Test Plan
 
 ## Automated Checks
-- `python scripts/safe_smoke_test.py --static-only`
+- `python scripts/safe_smoke_test.py`
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py`
 - `npm run build` from `editor-ui`
 - `npm run lint` from `editor-ui`
 
@@ -23,6 +24,8 @@
 ## Current Results
 - Passed: `python scripts/safe_smoke_test.py`.
 - Passed: `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py`.
-- Passed: `git diff --check`.
-- Not run: `npm run build` and `npm run lint` because `editor-ui/node_modules` is absent in this checkout.
-- Not run: manual app/GPU regression, because no local API/frontend session was started.
+- Passed: `npm.cmd install`.
+- Passed after sandbox retry: `npm.cmd run build`.
+- Passed after lint-only fix: `npm.cmd run lint`.
+- Passed: live API/Vite workflow check for Input Load, Refresh, recent folder persistence, Process path preservation, completed session handoff, final save, skipped save, and second output folder run.
+- Note: live workflow check used a controlled no-op pipeline run to validate workflow state and export paths without invoking GPU/model processing.
