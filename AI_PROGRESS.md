@@ -104,3 +104,16 @@
 ### Fixes From Validation
 - Fixed `pipeline.py` completion output for upscale-only runs so it reports `<output>\upscaled` instead of misleading users toward `<output>\processed`.
 - Re-ran `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` and `python scripts\safe_smoke_test.py`; both passed after the fix.
+
+## User Feedback 2026-06-26
+
+### Planning Update
+- Added user-feedback bug/design planning only; no fixes were implemented.
+- Classified new feedback as behavior bugs, UX cleanup, design cleanup, and product decisions.
+- Reordered next phases so behavior bugs come before Process design implementation.
+- Defined implementation batches:
+  - Batch 1: stale Input thumbnails, exclusion selection bug, exact theme persistence.
+  - Batch 2: Editor queue ordering/labels, snap/alignment reset, thumbnail convention.
+  - Batch 3: Load/Refresh simplification, unified log/error panel, progress/ETA model, Open Editor styling.
+  - Batch 4: Editor design cleanup.
+- Electron remains explicitly postponed.

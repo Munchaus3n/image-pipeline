@@ -1,13 +1,16 @@
 # AI Handoff
 
-## Current Branch
-- `local/real-processing-validation`
+## Current Source Branch
+- `design/lovable-redesign-clean`
+- Local work should happen on task branches, including `local/user-feedback-bug-design-plan` for this planning pass.
 
 ## Current State
 - Docs created before code changes.
 - Workflow stabilization phases 1-5 are implemented.
 - Real local workflow validation completed on 2026-06-23 with FastAPI, Vite, Real-ESRGAN upscale-only, rembg-only, and one both-stages run.
 - One validation issue was fixed: upscale-only completion logs now point to `<output>/upscaled`.
+- User feedback from 2026-06-26 is documented in `AI_ISSUES.md`, `AI_DESIGN_PLAN.md`, `AI_FIX_PLAN.md`, and `AI_PROGRESS.md`.
+- Next implementation should start with Batch 1 behavior bugs before Process design work.
 - No Electron packaging work has been started.
 
 ## Next Agent Instructions
@@ -16,6 +19,7 @@
 - Keep changes small; do not commit unless explicitly asked.
 - Do not add Electron files or dependencies.
 - Prefer deleting/adjusting existing workflow code over adding abstractions.
+- Do not start Process redesign before Batch 1 behavior bugs are fixed.
 
 ## Watchpoints
 - Do not let Settings overwrite active path state after mount.
