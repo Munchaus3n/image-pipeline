@@ -53,10 +53,10 @@
 
 ## Updated Next Phases
 
-### Batch 1 - Behavior Bugs
-- Fix stale Input thumbnails.
-- Fix exclusion selection bug.
-- Fix exact light/dark theme persistence.
+### Batch 1 - Behavior Bugs - Completed 2026-06-26
+- Fixed stale Input thumbnails.
+- Fixed exclusion selection bug.
+- Fixed exact light/dark theme persistence.
 - Do not redesign Process yet.
 
 ### Batch 2 - Editor Queue And Output Decisions

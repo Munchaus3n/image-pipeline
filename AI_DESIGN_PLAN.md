@@ -49,11 +49,11 @@
 
 ## Next Small Implementation Batches
 
-### Batch 1 - Critical Behavior Bugs
-- Fix stale Input thumbnails after same-folder file changes.
-- Fix exclusion selection identity/counting so only intended images are excluded.
-- Fix theme persistence so light/dark mode restores exactly across launches.
-- Validation: targeted UI/API checks plus `python scripts\safe_smoke_test.py`, Python compile, Vite build, and lint.
+### Batch 1 - Critical Behavior Bugs - Completed 2026-06-26
+- Fixed stale Input thumbnails after same-folder file changes.
+- Fixed exclusion selection identity/counting so only intended images are excluded.
+- Fixed theme persistence so light/dark mode restores exactly across launches.
+- Validation passed: targeted UI/API checks plus `python scripts\safe_smoke_test.py`, Python compile, Vite build, and lint.
 
 ### Batch 2 - Editor Queue And Output Decisions
 - Make Editor queue ordering stable and folder-by-folder.

@@ -32,3 +32,15 @@
 - Passed: Editor final save to `<output>/Editor/`, skipped save to `<output>/Editor/skipped/`, thumbnail save to `<output>/Editor/thumbnails/400/`, and second output folder identity.
 - Not observed: GPU/DirectML/CUDA OOM. Live run used existing settings with `force_cpu=true` for rembg, so OOM fallback did not trigger.
 - Fixed during validation: upscale-only pipeline completion message now points to `<output>/upscaled` instead of `<output>/processed`.
+
+## Batch 1 Results - 2026-06-26
+- Passed: `python scripts\safe_smoke_test.py`.
+- Passed: `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py`.
+- Passed: `cd editor-ui && npm.cmd install`; npm reported existing audit warnings (1 low, 2 moderate, 1 high), not fixed in this scoped pass.
+- Passed: `cd editor-ui && npm.cmd run build`.
+- Passed: `cd editor-ui && npm.cmd run lint`.
+- Passed: local FastAPI/Vite startup; `/settings`, Vite index, and Vite `/api/settings` proxy returned 200.
+- Passed: real same-folder reload after deleting one PNG and adding another PNG; latest `/api/images` omitted the deleted image and included the new image.
+- Passed: same-filename nested ID check with `nested-a/same.png` and `nested-b/same.png` as distinct relative IDs.
+- Passed: theme settings round-trip for exact `light` and `dark` values.
+- Not browser-automated: visual confirmation of thumbnail repaint and localStorage persistence was validated by code path plus build/lint and API settings round-trip; no browser automation dependency was added.

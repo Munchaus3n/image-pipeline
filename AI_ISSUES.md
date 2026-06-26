@@ -6,9 +6,9 @@
 ## User Feedback 2026-06-26
 
 ### Behavior Bug
-1. Stale Input thumbnails can remain when photos change inside the same selected folder.
-2. Exclude-from-background-removal selection can exclude more than selected or miss selected images.
-3. Light/dark mode can flip between app launches; theme must persist exactly.
+1. Fixed 2026-06-26: stale Input thumbnails can remain when photos change inside the same selected folder.
+2. Fixed 2026-06-26: exclude-from-background-removal selection can exclude more than selected or miss selected images.
+3. Fixed 2026-06-26: light/dark mode can flip between app launches; theme must persist exactly.
 4. Editor item queue should be stable and folder-by-folder, not random.
 5. Editor item labels should include folder/context, not filename only.
 6. Snap/alignment color/state does not reset after completing an image.
@@ -36,6 +36,8 @@
 3. Decide whether Process live preview is reliable enough to keep.
 
 ## Validation Notes
+- Batch 1 behavior fixes were completed on 2026-06-26 on `local/batch1-input-exclude-theme`.
+- Batch 1 validation passed safe smoke, Python compile, `npm.cmd install`, frontend build, frontend lint, same-folder image mutation probe, nested same-filename ID probe, and theme settings round-trip.
 - Real local workflow regression completed on 2026-06-23 with isolated PNG inputs.
 - Real-ESRGAN upscale-only, rembg-only on CPU-forced `bria-rmbg`, and one both-stages run passed.
 - No stale output folder reuse, `<output>/Editor/final` regression, or completed-session handoff failure was found.

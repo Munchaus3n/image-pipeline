@@ -117,3 +117,28 @@
   - Batch 3: Load/Refresh simplification, unified log/error panel, progress/ETA model, Open Editor styling.
   - Batch 4: Editor design cleanup.
 - Electron remains explicitly postponed.
+
+## 2026-06-26 Batch 1 Behavior Fixes
+
+### Code Changes
+- Fixed stale Input thumbnails after same-folder refresh by cache-busting `/api/preview` URLs on each load/refresh.
+- Fixed same-folder refresh state by pruning selected, excluded, removed, and preview state to the latest loaded image IDs.
+- Fixed exclusion exactness by deriving one relative image ID helper and only applying exclusions to currently visible selected IDs.
+- Fixed duplicate exclusions from the preview sidebar.
+- Fixed theme persistence by initializing from `localStorage`, syncing saved API settings back to `localStorage`, and preserving Settings-screen theme changes locally.
+- No Electron work, dependency additions, processing logic changes, or broad redesign were made.
+
+### Automated Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+
+### Local App Validation
+- Started FastAPI with `python api.py` and Vite with `npm.cmd run dev -- --host 127.0.0.1`; `/settings`, Vite index, and Vite `/api/settings` proxy returned 200.
+- Created a real local PNG folder with 4 images, including `nested-a/same.png` and `nested-b/same.png`.
+- Reloaded the same folder after deleting `remove.png` and adding `added.png`; `/api/images` returned 4 current images, `removedGone=true`, and `addedPresent=true`.
+- Confirmed distinct relative IDs for same-named nested files: `nested-a/same.png` and `nested-b/same.png`.
+- Confirmed settings theme round-trip: saved `light`, read back `light`; saved `dark`, read back `dark`.
+- Stopped validation servers and removed temporary validation folders/logs.

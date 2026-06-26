@@ -16,6 +16,27 @@ const TABS = [
 ];
 
 const RECENT_LIMIT = 8;
+const THEME_STORAGE_KEY = "image-pipeline-theme";
+
+function normalizeTheme(value) {
+  return value === "light" || value === "dark" ? value : "";
+}
+
+function loadStoredTheme() {
+  try {
+    return normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY)) || "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+function saveStoredTheme(value) {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, value);
+  } catch {
+    void 0;
+  }
+}
 
 function recentFolders(path, current = []) {
   const value = String(path || "").trim();
@@ -41,7 +62,7 @@ async function saveOutputSettingsPatch(patch) {
 
 export function Root() {
   const [screen, setScreen] = useState("input");
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState(loadStoredTheme);
   const [mountedScreens, setMountedScreens] = useState(() => new Set(["input"]));
   const [inputDir, setInputDir] = useState("");
   const [outputDir, setOutputDir] = useState("");
@@ -54,7 +75,11 @@ export function Root() {
       .then((data) => {
         const settings = data?.settings;
         if (!settings) return;
-        if (settings.appearance?.theme) setTheme(settings.appearance.theme);
+        const savedTheme = normalizeTheme(settings.appearance?.theme);
+        if (savedTheme) {
+          setTheme(savedTheme);
+          saveStoredTheme(savedTheme);
+        }
         if (typeof settings.output?.input_dir === "string") setInputDir(settings.output.input_dir);
         if (typeof settings.output?.output_dir === "string") setOutputDir(settings.output.output_dir);
         if (Array.isArray(settings.output?.recent_input_dirs)) setRecentInputDirs(settings.output.recent_input_dirs);
@@ -97,10 +122,10 @@ export function Root() {
     });
   }, []);
 
-  // BUG-11 FIX: theme toggle must read current settings, patch appearance.theme, then save full settings.
-  const handleThemeToggle = async () => {
-    const newTheme = theme === "dark" ? "light" : "dark";
-    setTheme(newTheme);
+  const persistTheme = useCallback(async (newTheme) => {
+    const normalized = normalizeTheme(newTheme) || "dark";
+    setTheme(normalized);
+    saveStoredTheme(normalized);
     try {
       const r = await fetch("/api/settings");
       const data = r.ok ? await r.json() : { settings: {} };
@@ -111,14 +136,26 @@ export function Root() {
         body: JSON.stringify({
           settings: {
             ...current,
-            appearance: { ...(current.appearance ?? {}), theme: newTheme },
+            appearance: { ...(current.appearance ?? {}), theme: normalized },
           },
         }),
       });
     } catch {
       void 0;
     }
-  };
+  }, []);
+
+  // BUG-11 FIX: theme toggle must read current settings, patch appearance.theme, then save full settings.
+  const handleThemeToggle = useCallback(() => {
+    persistTheme(theme === "dark" ? "light" : "dark");
+  }, [persistTheme, theme]);
+
+  const handleSettingsThemeChange = useCallback((newTheme) => {
+    const normalized = normalizeTheme(newTheme);
+    if (!normalized) return;
+    setTheme(normalized);
+    saveStoredTheme(normalized);
+  }, []);
 
   return (
     <div
@@ -240,7 +277,7 @@ export function Root() {
 
         {mountedScreens.has("settings") && (
           <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "settings" ? "flex" : "none", flexDirection: "column" }}>
-            <Settings onThemeChange={setTheme} />
+            <Settings onThemeChange={handleSettingsThemeChange} />
           </div>
         )}
       </main>

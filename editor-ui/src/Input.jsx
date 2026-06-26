@@ -33,6 +33,26 @@ function relativePathFromInput(absPath, inputDir) {
   return "";
 }
 
+function imageIdForPath(absPath, inputDir) {
+  return normalizeImageId(relativePathFromInput(absPath, inputDir) || absPath);
+}
+
+function pruneSetToIds(values, validIds) {
+  const next = new Set();
+  values.forEach((value) => {
+    if (validIds.has(value)) next.add(value);
+  });
+  return next;
+}
+
+function sameSet(a, b) {
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
+}
+
 export default function Input({
   inputDir, setInputDir,
   thumbs, setThumbs,
@@ -52,6 +72,7 @@ export default function Input({
   const [thumbLoadErrors,  setThumbLoadErrors]  = useState(new Set());
   const [includeSubfolders, setIncludeSubfolders] = useState(false);
   const [truncated,        setTruncated]        = useState(false);
+  const [previewVersion,   setPreviewVersion]   = useState(0);
   const lastSelectedRef = useRef(null);  // for shift-click range
   const loadedDirRef = useRef("");
 
@@ -59,8 +80,12 @@ export default function Input({
     setThumbs([]); setSelected(new Set());
     setExcludeTags([]); setRemovedImages(new Set());
     setLoadError(null);
+    setPreviewPath(null);
+    setPreviewLoadError(false);
     setThumbLoadErrors(new Set());
     setTruncated(false);
+    setPreviewVersion(v => v + 1);
+    lastSelectedRef.current = null;
     loadedDirRef.current = "";
   }, [setExcludeTags, setRemovedImages, setThumbs]);
 
@@ -71,6 +96,10 @@ export default function Input({
       return;
     }
     setLoading(true);
+    setLoadError(null);
+    setPreviewLoadError(false);
+    setThumbLoadErrors(new Set());
+    setPreviewVersion(v => v + 1);
     try {
       const r = await fetch(
         `${BASE}/images?folder=${encodeURIComponent(folder)}&recursive=${includeSubfolders ? "true" : "false"}&limit=500`
@@ -81,7 +110,10 @@ export default function Input({
         setThumbs([]);
       } else {
         const data = await r.json();
-        if (resetSession || loadedDirRef.current !== folder) {
+        const nextImages = Array.isArray(data?.images) ? data.images : [];
+        const nextIds = new Set(nextImages.map(absPath => imageIdForPath(absPath, folder)));
+        const shouldResetSession = resetSession || loadedDirRef.current !== folder;
+        if (shouldResetSession) {
           setSelected(new Set());
           setExcludeTags([]);
           setRemovedImages(new Set());
@@ -91,10 +123,28 @@ export default function Input({
           setLoadError(null);
           lastSelectedRef.current = null;
           loadedDirRef.current = folder;
+        } else {
+          setSelected(prev => {
+            const next = pruneSetToIds(prev, nextIds);
+            return sameSet(prev, next) ? prev : next;
+          });
+          setExcludeTags(prev => {
+            const next = [...new Set(prev)].filter(id => nextIds.has(id));
+            return next.length === prev.length && next.every((id, i) => id === prev[i]) ? prev : next;
+          });
+          setRemovedImages(prev => {
+            const next = pruneSetToIds(prev, nextIds);
+            return sameSet(prev, next) ? prev : next;
+          });
+          setPreviewPath(prev => {
+            if (!prev) return prev;
+            const previewId = imageIdForPath(prev, folder);
+            return nextIds.has(previewId) ? prev : null;
+          });
+          lastSelectedRef.current = null;
         }
         setTruncated(!!data?.truncated);
-        if (Array.isArray(data?.images)) setThumbs(data.images);
-        else setThumbs([]);
+        setThumbs(nextImages);
         rememberInputDir?.(folder);
       }
     } catch {
@@ -103,6 +153,10 @@ export default function Input({
     }
     finally { setLoading(false); }
   }, [clearLoadedImages, includeSubfolders, inputDir, rememberInputDir, setExcludeTags, setRemovedImages, setThumbs]);
+
+  const previewUrl = useCallback((path, size) => (
+    `${BASE}/preview?path=${encodeURIComponent(path)}&size=${size}&v=${previewVersion}`
+  ), [previewVersion]);
 
   const browse = useCallback(async () => {
     setBrowseLoading(true);
@@ -126,7 +180,7 @@ export default function Input({
   const imageEntries = useMemo(() => thumbs.map(absPath => {
     const name = absPath.replace(/.*[/\\]/, "");
     const relativePath = relativePathFromInput(absPath, inputDir);
-    const imageId = normalizeImageId(relativePath || absPath);
+    const imageId = imageIdForPath(absPath, inputDir);
     const relFolder = relativePath.includes("/") ? relativePath.slice(0, relativePath.lastIndexOf("/")) : "";
     return { absPath, name, relativePath, imageId, relFolder };
   }), [thumbs, inputDir]);
@@ -178,8 +232,11 @@ export default function Input({
 
   const excludeSelected = () => {
     setExcludeTags(prev => {
+      const visibleIdSet = new Set(visible.map(entry => entry.imageId));
       const next = [...prev];
-      selected.forEach(n => { if (!next.includes(n)) next.push(n); });
+      selected.forEach(n => {
+        if (visibleIdSet.has(n) && !next.includes(n)) next.push(n);
+      });
       return next;
     });
   };
@@ -484,7 +541,7 @@ export default function Input({
                     ) : (
                       <img
                         className="input-thumb-image"
-                        src={`${BASE}/preview?path=${encodeURIComponent(absPath)}&size=200`}
+                        src={previewUrl(absPath, 200)}
                         alt={name}
                         loading="lazy"
                         onLoad={() => setThumbLoadErrors(prev => {
@@ -580,7 +637,7 @@ export default function Input({
               ) : (
                 <img
                   className="input-preview-image"
-                  src={`${BASE}/preview?path=${encodeURIComponent(previewPath)}&size=600`}
+                  src={previewUrl(previewPath, 600)}
                   alt=""
                   onError={() => setPreviewLoadError(true)}
                   style={{ width: "100%", aspectRatio: "1", objectFit: "contain", background: "var(--img-bg)", flexShrink: 0 }}
@@ -613,7 +670,7 @@ export default function Input({
                   <span className="input-preview-toggle-label" style={{ fontSize: 11, color: C.dim }}>Exclude from BG removal</span>
                   <button className="inp-btn input-preview-toggle-button" onClick={() => {
                     if (isExcl) setExcludeTags(prev => prev.filter(x => x !== imageId));
-                    else setExcludeTags(prev => [...prev, imageId]);
+                    else setExcludeTags(prev => prev.includes(imageId) ? prev : [...prev, imageId]);
                   }} style={{
                     background: isExcl ? "var(--yellow-bg)" : C.panel2,
                     color: isExcl ? C.yellow : C.dim,
