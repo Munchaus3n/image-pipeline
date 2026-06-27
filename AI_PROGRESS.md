@@ -233,3 +233,23 @@
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
 - Existing local Vite servers responded on `127.0.0.1:5173`, `5174`, and `5175`; API was not running, so browser/proxy validation was not completed in this pass.
+
+## 2026-06-27 Input Visual Match
+
+### Code Changes
+- Added a Lovable-style `Input · Review` header with image/exclusion summary and a strong `Go to Process` action.
+- Restyled the Input path/search row, browse/reload controls, subfolders toggle, and All/None controls without changing API calls or explicit loading behavior.
+- Restyled image cards, selected state, excluded state, preview eye control, fallback/no-preview cards, filenames, and folder labels using token-based CSS.
+- Restyled selection toolbar and right preview/details panel while preserving exact selection, exclusion, remove, preview, and stale-refresh behavior.
+- Added a tiny Process header polish so the completed-run `Open Editor` action matches the header action button family.
+- No Electron work, dependency additions, processing logic changes, workflow behavior changes, or Editor output convention changes were made.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` passed against the already-running API.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing Vite server at `http://127.0.0.1:5173` returned 200, and Vite proxy `http://127.0.0.1:5173/api/settings` returned 200.
+- Full click-by-click browser visual QA was not screenshot-captured because no browser automation dependency is installed and none was added.

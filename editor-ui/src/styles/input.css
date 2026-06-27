@@ -389,3 +389,466 @@ input[type=number] { color-scheme: dark; }
     padding: 12px 10px 10px !important;
   }
 }
+
+/* Visual pass: Lovable-style Input · Review screen. */
+.input-screen {
+  background:
+    radial-gradient(840px 280px at 18% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 62%),
+    var(--bg) !important;
+}
+
+.input-page-header {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  backdrop-filter: blur(10px);
+  flex-shrink: 0;
+}
+
+.input-page-title-group {
+  min-width: 0;
+}
+
+.input-page-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.input-page-subtitle {
+  margin: 6px 0 0;
+  color: color-mix(in srgb, var(--dim) 82%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.input-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.input-header-count {
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 11px !important;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.input-toolbar {
+  margin: 22px 28px 14px !important;
+  padding: 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(360px, 1.5fr) minmax(220px, 0.8fr) auto auto auto !important;
+  align-items: center !important;
+  gap: 10px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.input-folder-group {
+  flex: initial !important;
+  min-width: 0;
+  height: 44px;
+  align-items: stretch;
+  gap: 8px !important;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-elevated) 86%, var(--panel));
+  box-shadow: var(--shadow);
+}
+
+.input-path-field {
+  min-height: 42px !important;
+  border: 0 !important;
+  background: transparent !important;
+  border-radius: 12px 0 0 12px !important;
+  font-family: var(--font-mono) !important;
+  color: color-mix(in srgb, var(--text) 88%, var(--dim)) !important;
+}
+
+.input-folder-group select {
+  width: 38px !important;
+  min-height: 42px;
+  border-width: 0 0 0 1px !important;
+  border-color: var(--border) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.input-search-field {
+  min-height: 44px !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--border) !important;
+  background: color-mix(in srgb, var(--surface-elevated) 86%, var(--panel)) !important;
+  box-shadow: var(--shadow);
+}
+
+.input-toolbar .input-browse-button {
+  min-height: 42px !important;
+  border-width: 0 0 0 1px !important;
+  border-color: var(--border) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--dim) !important;
+  box-shadow: none !important;
+}
+
+.input-toolbar .input-load-button {
+  min-height: 42px !important;
+  border-width: 0 0 0 1px !important;
+  border-color: var(--border) !important;
+  border-radius: 0 11px 11px 0 !important;
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  color: var(--accent) !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: none !important;
+}
+
+.input-toolbar .input-load-button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent) !important;
+}
+
+.input-subfolders-toggle,
+.input-toolbar .input-select-button {
+  min-height: 36px;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  background: color-mix(in srgb, var(--surface-elevated) 74%, transparent) !important;
+  color: color-mix(in srgb, var(--dim) 86%, var(--text)) !important;
+  padding: 0 12px !important;
+  font-size: 10px !important;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.input-subfolders-toggle input {
+  accent-color: var(--accent);
+}
+
+.input-page-actions .input-next-button {
+  min-height: 40px !important;
+  border-radius: 10px !important;
+  padding: 0 18px !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.input-page-actions .input-next-button:disabled {
+  box-shadow: none;
+}
+
+.input-selection-bar {
+  margin: 0 28px 14px !important;
+  min-height: 48px;
+  border-radius: 12px !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-elevated)) !important;
+  box-shadow: var(--shadow);
+}
+
+.input-selection-count {
+  min-width: auto;
+  color: var(--accent) !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.input-selection-action,
+.input-selection-clear {
+  min-height: 34px;
+  border-radius: 9px !important;
+  font-size: 11px !important;
+  font-weight: 700;
+}
+
+.input-selection-clear {
+  color: var(--dim) !important;
+}
+
+.input-main {
+  padding: 0 28px 24px !important;
+  gap: 18px;
+}
+
+.input-grid-scroll {
+  padding: 0 0 4px !important;
+}
+
+.input-grid {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)) !important;
+  gap: 16px !important;
+}
+
+.input-empty-state,
+.input-loading-state,
+.input-error-state,
+.input-pending-state,
+.input-zero-state {
+  min-height: 360px;
+  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-elevated) 70%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
+}
+
+.input-grid .input-card {
+  border-radius: 14px !important;
+  border: 1px solid var(--border) !important;
+  background: color-mix(in srgb, var(--surface-elevated) 78%, var(--panel)) !important;
+  box-shadow: var(--shadow);
+}
+
+.input-grid .input-card.is-preview {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border)) !important;
+}
+
+.input-grid .input-card.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border)) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent), var(--shadow-lg);
+}
+
+.input-grid .input-card.is-excluded {
+  opacity: 0.78;
+}
+
+.input-grid .input-thumb:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border)) !important;
+  box-shadow: var(--shadow-lg);
+}
+
+.input-thumb-image,
+.input-thumb-fallback {
+  border-top-left-radius: 13px;
+  border-top-right-radius: 13px;
+}
+
+.input-thumb-fallback {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--img-bg) 84%, transparent), color-mix(in srgb, var(--panel2) 74%, transparent)) !important;
+}
+
+.input-checkbox {
+  top: 10px !important;
+  right: 10px !important;
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 7px !important;
+  background: color-mix(in srgb, var(--panel) 76%, transparent) !important;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
+  color: var(--accent-fg) !important;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(5px);
+}
+
+.input-card.is-selected .input-checkbox {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+.input-eye-button {
+  width: 26px !important;
+  height: 26px !important;
+  right: 10px !important;
+  bottom: 10px !important;
+  background: color-mix(in srgb, var(--panel) 78%, transparent) !important;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
+  color: var(--text);
+  backdrop-filter: blur(5px);
+}
+
+.input-card.is-preview .input-eye-button {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-fg);
+}
+
+.input-excluded-badge {
+  top: 10px !important;
+  left: 10px !important;
+  border-radius: 7px !important;
+  padding: 4px 7px !important;
+  font-size: 8px !important;
+  box-shadow: var(--shadow);
+}
+
+.input-filename-bar {
+  min-height: 43px;
+  padding: 8px 10px !important;
+  background: color-mix(in srgb, var(--surface-elevated) 88%, var(--panel)) !important;
+  border-top: 1px solid var(--border);
+}
+
+.input-filename {
+  color: color-mix(in srgb, var(--text) 82%, var(--dim)) !important;
+  font-size: 10px !important;
+}
+
+.input-card.is-excluded .input-filename {
+  color: var(--yellow) !important;
+}
+
+.input-folder-name {
+  color: var(--dim2) !important;
+  font-size: 8px !important;
+}
+
+.input-preview {
+  width: 320px !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-elevated) 82%, var(--panel)) !important;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.input-preview-header {
+  min-height: 52px;
+  padding: 0 16px !important;
+  background: color-mix(in srgb, var(--panel) 68%, transparent);
+}
+
+.input-preview-header span {
+  font-size: 11px !important;
+  letter-spacing: 0.16em !important;
+}
+
+.input-preview-header button {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px !important;
+}
+
+.input-preview-image {
+  width: calc(100% - 28px) !important;
+  margin: 14px 14px 0;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--preview-bg) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.input-preview-body {
+  padding: 16px 14px 14px !important;
+}
+
+.input-preview-label {
+  color: var(--dim2) !important;
+  font-size: 9px !important;
+  font-weight: 800;
+  letter-spacing: 0.14em !important;
+}
+
+.input-preview-value {
+  color: var(--text) !important;
+  font-size: 10px !important;
+  line-height: 1.65 !important;
+}
+
+.input-preview-control {
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: color-mix(in srgb, var(--panel2) 52%, transparent);
+}
+
+.input-preview-toggle-label {
+  color: color-mix(in srgb, var(--text) 82%, var(--dim)) !important;
+  font-weight: 600;
+}
+
+.input-preview-toggle-button {
+  border-radius: 9px !important;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.input-preview-remove {
+  min-height: 44px !important;
+  border-radius: 12px !important;
+  border-color: color-mix(in srgb, var(--red-bdr) 78%, var(--border)) !important;
+  color: var(--red) !important;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 1180px) {
+  .input-page-header {
+    padding: 0 18px;
+  }
+
+  .input-toolbar {
+    margin: 16px 18px 12px !important;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 0.65fr) auto auto auto !important;
+  }
+
+  .input-main {
+    padding: 0 18px 18px !important;
+  }
+
+  .input-preview {
+    width: 280px !important;
+  }
+}
+
+@media (max-width: 960px) {
+  .input-page-header {
+    min-height: auto;
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 14px;
+  }
+
+  .input-page-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .input-toolbar {
+    grid-template-columns: 1fr !important;
+  }
+
+  .input-folder-group {
+    width: 100%;
+  }
+
+  .input-subfolders-toggle,
+  .input-toolbar .input-select-button {
+    width: fit-content;
+  }
+
+  .input-main {
+    flex-direction: column;
+  }
+
+  .input-preview {
+    width: 100% !important;
+    max-height: 460px;
+  }
+}

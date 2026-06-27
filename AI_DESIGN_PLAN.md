@@ -77,11 +77,11 @@
 - Removed System/GPU card direction from the shell baseline; do not add replacement hardware/status cards.
 - Kept all screen behavior, API calls, processing logic, and output conventions unchanged.
 
-### Next - Input Visual Pass
-- Bring Input screen spacing, cards, toolbar controls, buttons, empty/loading/error states, image grid cards, and preview panel into the shell design language.
-- Keep explicit loading, refresh behavior, image IDs, exclusions, recent folders, and navigation behavior unchanged.
+### Input Visual Pass - Completed 2026-06-27
+- Brought Input header, path/search row, toolbar controls, selection bar, image grid cards, empty/loading/error states, and preview panel into the shell design language.
+- Kept explicit loading, refresh behavior, image IDs, exclusions, recent folders, and navigation behavior unchanged.
 
-### Later - Process Visual Pass
+### Next - Process Visual Pass
 - Apply the shell design language to the Process screen after Input visuals are stable.
 - Keep current path/session/output behavior and pipeline API calls unchanged.
 

@@ -898,10 +898,17 @@
 }
 
 .pipeline-open-editor-button {
-  background: color-mix(in srgb, var(--accent) 18%, var(--panel2)) !important;
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--border)) !important;
-  color: color-mix(in srgb, var(--accent) 82%, var(--text)) !important;
-  font-weight: 700;
+  min-height: 40px !important;
+  padding: 0 18px !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-elevated)) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border)) !important;
+  color: color-mix(in srgb, var(--accent) 84%, var(--text)) !important;
+  font-size: 12px !important;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 @media (max-width: 1280px) {

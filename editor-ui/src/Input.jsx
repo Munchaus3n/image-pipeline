@@ -266,7 +266,7 @@ export default function Input({
     <div className="input-screen" style={{
       display: "flex", flexDirection: "column", height: "100%",
       background: C.bg, color: C.text,
-      fontFamily: "'Outfit','DM Sans',system-ui,sans-serif",
+      fontFamily: "var(--font-sans)",
     }}>
       <style>{`
         ::-webkit-scrollbar{width:4px;height:4px} ::-webkit-scrollbar-track{background:transparent}
@@ -278,6 +278,30 @@ export default function Input({
       `}</style>
 
       {/* ── Top bar ── */}
+      <div className="input-page-header">
+        <div className="input-page-title-group">
+          <h1 className="input-page-title">Input · Review</h1>
+          <p className="input-page-subtitle">Select source images, review exclusions, then continue to processing.</p>
+        </div>
+        <div className="input-page-actions">
+          <span className="input-count input-header-count">
+            {visible.length} image{visible.length !== 1 ? "s" : ""}
+            {truncated && <span style={{ color: C.yellow }}> · first 500</span>}
+            {activeExcludeCount > 0 && (
+              <span style={{ color: C.yellow }}> · {activeExcludeCount} excluded</span>
+            )}
+          </span>
+          <button className="inp-btn input-next-button" onClick={onGoToProcess} disabled={!inputDir.trim()} style={{
+            background: inputDir.trim() ? "var(--accent)" : C.panel2,
+            color: inputDir.trim() ? "var(--accent-fg)" : C.dim2,
+            border: `1px solid ${inputDir.trim() ? "color-mix(in srgb, var(--accent) 72%, white 8%)" : C.border}`,
+            borderRadius: 4, padding: "6px 18px", fontSize: 12, fontWeight: 600,
+            cursor: inputDir.trim() ? "pointer" : "not-allowed",
+            fontFamily: "inherit", flexShrink: 0,
+          }}>Go to Process →</button>
+        </div>
+      </div>
+
       <div className="input-toolbar" style={{
         display: "flex", alignItems: "center", gap: 8, padding: "8px 14px",
         borderBottom: `1px solid ${C.border}`, background: C.panel, flexShrink: 0,
@@ -348,15 +372,7 @@ export default function Input({
           }}
         />
 
-        {/* Image count */}
-        <span className="input-count" style={{ fontSize: 11, color: C.dim, fontFamily: "JetBrains Mono", flexShrink: 0 }}>
-          {visible.length} image{visible.length !== 1 ? "s" : ""}
-          {truncated && <span style={{ color: C.yellow }}> · first 500</span>}
-          {activeExcludeCount > 0 && (
-            <span style={{ color: C.yellow }}> · {activeExcludeCount} excluded</span>
-          )}
-        </span>
-        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: C.dim, flexShrink: 0 }}>
+        <label className="input-subfolders-toggle" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: C.dim, flexShrink: 0 }}>
           <input
             type="checkbox"
             checked={includeSubfolders}
@@ -376,16 +392,6 @@ export default function Input({
           borderRadius: 4, padding: "4px 10px", fontSize: 11,
           cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
         }}>None</button>
-
-        {/* Go to Process */}
-        <button className="inp-btn input-next-button" onClick={onGoToProcess} disabled={!inputDir.trim()} style={{
-          background: inputDir.trim() ? "var(--accent)" : C.panel2,
-          color: inputDir.trim() ? "var(--accent-fg)" : C.dim2,
-          border: `1px solid ${inputDir.trim() ? "color-mix(in srgb, var(--accent) 72%, white 8%)" : C.border}`,
-          borderRadius: 4, padding: "6px 18px", fontSize: 12, fontWeight: 600,
-          cursor: inputDir.trim() ? "pointer" : "not-allowed",
-          fontFamily: "inherit", flexShrink: 0,
-        }}>Go to Process →</button>
       </div>
 
       {/* ── Selection action bar ── */}
@@ -455,12 +461,12 @@ export default function Input({
               </div>
             </div>
           ) : !loadedDirRef.current ? (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
+            <div className="input-pending-state" style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
               <span style={{ color: C.dim, fontSize: 12 }}>Folder selected. Click Load / Refresh Folder to scan images.</span>
               <span style={{ color: C.dim2, fontSize: 11 }}>Images never auto-load while typing or changing folders.</span>
             </div>
           ) : visible.length === 0 ? (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div className="input-zero-state" style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ color: C.dim, fontSize: 12 }}>No images found{search ? " matching your search" : ""}</span>
             </div>
           ) : (
@@ -480,7 +486,7 @@ export default function Input({
                 return (
                   <div
                     key={absPath}
-                    className="inp-thumb inp-card input-thumb input-card"
+                    className={`inp-thumb inp-card input-thumb input-card${isSel ? " is-selected" : ""}${isExcl ? " is-excluded" : ""}${isPreview ? " is-preview" : ""}`}
                     onClick={e => toggleSelect(imageId, absPath, e, visibleIds)}
                     style={{
                       position: "relative", borderRadius: 18, overflow: "hidden",
