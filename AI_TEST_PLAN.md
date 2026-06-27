@@ -49,9 +49,9 @@ Use `npm.cmd` on PowerShell if `npm.ps1` is blocked by execution policy.
 ## Manual/Browser Checks
 These remain manual because no browser automation dependency is allowed:
 1. Start `api.py` and the Vite dev server.
-2. Select an input folder and confirm no images load until `Load / Refresh Folder` is clicked.
-3. Click `Load / Refresh Folder`; confirm list appears and count is bounded/clear.
-4. Click `Load / Refresh Folder` after folder contents change; confirm stale thumbnails disappear.
+2. Select an input folder and confirm no images load until `Load` is clicked.
+3. Click `Load`; confirm list appears and count is bounded/clear.
+4. Click `Load` after folder contents change; confirm stale thumbnails disappear.
 5. Use recent input/output dropdowns after browsing or typing paths.
 6. Confirm Process preserves selected input/output paths.
 7. Run custom output batches and confirm Editor loads exact completed `src_root`.
@@ -72,13 +72,15 @@ These remain browser/manual checks unless a future browser automation dependency
 ## Input Visual Checks
 These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
 1. Open Input in light mode and inspect the `Input · Review` header, count/excluded summary, path/search row, and `Go to Process` action.
-2. Confirm `Browse`, `Load / Refresh Folder`, `Subfolders`, `All`, and `None` controls use the shared visual language.
+2. Confirm `Browse`, `Load`, `Subfolders`, `All`, and `None` controls use the shared visual language.
 3. Load a small image folder and confirm grid cards, selected states, excluded states, fallback cards, filenames, and folder labels remain readable.
 4. Select several images, use `Exclude from BG`, `Remove from session`, and `Clear`; confirm behavior and styling remain correct.
 5. Open the right preview/details panel and confirm preview unavailable, exclusion toggle/status, and remove action render clearly.
 6. Refresh the same folder and confirm stale thumbnails do not return.
 7. Toggle dark mode and confirm the Input screen remains intentional and readable.
 8. Navigate to Process and confirm completed-run `Open Editor` styling matches header actions when visible.
+9. Confirm the Process Resume prompt uses a top-right `×` dismiss button.
+10. Resume if possible and confirm live preview collapses when no real preview paths are available, without large empty placeholders.
 
 ## Dangerous/Real Pipeline Checks
 These are intentionally not automated by `safe_smoke_test.py`:
@@ -97,5 +99,6 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-27 Batch 3 automated validation: static smoke, Python compile, frontend install, frontend build, and frontend lint. API-mode smoke was skipped because no local API server was listening and this pass avoided process termination.
 - Passed 2026-06-27 visual foundation automated validation: static smoke, Python compile, frontend install, frontend build, and frontend lint. API-mode smoke was skipped because `127.0.0.1:7421` was not reachable; existing Vite servers responded locally, but full browser visual inspection was not captured.
 - Passed 2026-06-27 Input visual automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
+- Passed 2026-06-27 Input/Process polish follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no browser automation, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

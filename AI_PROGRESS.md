@@ -253,3 +253,23 @@
 - `cd editor-ui && npm.cmd run lint` passed.
 - Existing Vite server at `http://127.0.0.1:5173` returned 200, and Vite proxy `http://127.0.0.1:5173/api/settings` returned 200.
 - Full click-by-click browser visual QA was not screenshot-captured because no browser automation dependency is installed and none was added.
+
+## 2026-06-27 Input/Process Polish Follow-Up
+
+### Code Changes
+- Changed the visible Input reload action label from `Load / Refresh Folder` to `Load`; behavior remains explicit load/refresh on click with no auto-load on typing or folder changes.
+- Tightened the Input right preview panel so the contained image, filename/details, exclusion control, and remove button fit more comfortably.
+- Restyled the Input selection toolbar with grouped warning/destructive/subtle actions while preserving Batch 1 selection, exclusion, and remove behavior.
+- Polished the Process `Open Editor` header action so it matches the Run Pipeline action family more closely.
+- Replaced the Resume prompt text dismiss action with an accessible top-right `×` icon button.
+- Collapsed the Process live preview area when no real preview paths exist; normal live preview behavior is unchanged for fresh runs and resumed runs that generate `__processing__` events.
+- No Electron work, dependency additions, processing logic changes, API contract changes, or Editor output convention changes were made.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` passed against the already-running API.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.

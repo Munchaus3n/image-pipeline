@@ -279,6 +279,7 @@
 .pipeline-header-actions {
   display: flex;
   align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -909,6 +910,47 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.pipeline-open-editor-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 17%, var(--surface-elevated)) !important;
+  filter: brightness(1.04) !important;
+  transform: translateY(-1px);
+}
+
+.pipeline-resume-card {
+  position: relative;
+  padding: 12px 36px 10px 10px !important;
+}
+
+.pipeline-resume-dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel2) 72%, transparent);
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.pipeline-resume-dismiss:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel2));
 }
 
 @media (max-width: 1280px) {

@@ -2,6 +2,7 @@
 
 ## Open Issues
 1. UI design cleanup should wait until workflow bugs are stable.
+2. Resume live previews may remain absent when a resumed run produces no new `__processing__` preview paths; the UI now collapses the empty live preview area instead of showing large empty placeholders.
 
 ## User Feedback 2026-06-26
 

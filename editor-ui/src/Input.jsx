@@ -355,7 +355,7 @@ export default function Input({
             background: inputDir.trim() ? C.panel2 : "transparent", color: inputDir.trim() ? C.text : C.dim2,
             border: `1px solid ${C.border}`, borderRadius: 4, padding: "5px 10px", fontSize: 11,
             cursor: inputDir.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", flexShrink: 0,
-          }}>{loading ? "Loading" : "Load / Refresh Folder"}</button>
+          }}>{loading ? "Loading" : "Load"}</button>
         </div>
 
         {/* Search */}
@@ -403,24 +403,26 @@ export default function Input({
           <span className="input-selection-count" style={{ fontSize: 12, color: C.blue, fontWeight: 600 }}>
             {selected.size} selected
           </span>
-          <button className="inp-btn input-selection-action" onClick={allExcl ? unexcludeSelected : excludeSelected} style={{
-            background: allExcl ? C.panel2 : "var(--yellow-bg)",
-            color: allExcl ? C.dim : C.yellow,
-            border: `1px solid ${allExcl ? C.border : "var(--yellow-bdr)"}`,
-            borderRadius: 4, padding: "4px 12px", fontSize: 11,
-            cursor: "pointer", fontFamily: "inherit",
-          }}>
-            {allExcl ? "Remove exclusion" : "Exclude from BG"}
-          </button>
-          <button className="inp-btn input-selection-action" onClick={removeSelected} style={{
-            background: "var(--red-bg)", color: C.red, border: `1px solid var(--red-bdr)`,
-            borderRadius: 4, padding: "4px 12px", fontSize: 11,
-            cursor: "pointer", fontFamily: "inherit",
-          }}>Remove from session</button>
-          <button className="inp-btn input-selection-clear" onClick={selectNone} style={{
-            background: "transparent", color: C.dim, border: "none",
-            fontSize: 11, cursor: "pointer", fontFamily: "inherit", marginLeft: "auto",
-          }}>Clear</button>
+          <div className="input-selection-actions">
+            <button className="inp-btn input-selection-action input-selection-warning" onClick={allExcl ? unexcludeSelected : excludeSelected} style={{
+              background: allExcl ? C.panel2 : "var(--yellow-bg)",
+              color: allExcl ? C.dim : C.yellow,
+              border: `1px solid ${allExcl ? C.border : "var(--yellow-bdr)"}`,
+              borderRadius: 4, padding: "4px 12px", fontSize: 11,
+              cursor: "pointer", fontFamily: "inherit",
+            }}>
+              {allExcl ? "Remove exclusion" : "Exclude from BG"}
+            </button>
+            <button className="inp-btn input-selection-action input-selection-danger" onClick={removeSelected} style={{
+              background: "var(--red-bg)", color: C.red, border: `1px solid var(--red-bdr)`,
+              borderRadius: 4, padding: "4px 12px", fontSize: 11,
+              cursor: "pointer", fontFamily: "inherit",
+            }}>Remove from session</button>
+            <button className="inp-btn input-selection-clear" onClick={selectNone} style={{
+              background: "transparent", color: C.dim, border: "none",
+              fontSize: 11, cursor: "pointer", fontFamily: "inherit", marginLeft: "auto",
+            }}>Clear</button>
+          </div>
         </div>
       )}
 
@@ -462,7 +464,7 @@ export default function Input({
             </div>
           ) : !loadedDirRef.current ? (
             <div className="input-pending-state" style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
-              <span style={{ color: C.dim, fontSize: 12 }}>Folder selected. Click Load / Refresh Folder to scan images.</span>
+              <span style={{ color: C.dim, fontSize: 12 }}>Folder selected. Click Load to scan images.</span>
               <span style={{ color: C.dim2, fontSize: 11 }}>Images never auto-load while typing or changing folders.</span>
             </div>
           ) : visible.length === 0 ? (

@@ -15,6 +15,7 @@
 - Batch 3 Process/Input UX cleanup is fixed and validated: single explicit reload action, unified Activity panel, stage-step progress/ETA, Open Editor styling, hidden empty previews, and removed duplicate `Will run` block.
 - Visual foundation shell is implemented: compact Lovable-style sidebar, light/dark tokens, workflow step cards, secondary tabs, and styled theme toggle.
 - Input visual pass is implemented: `Input · Review` header, path/search controls, image grid cards, selection toolbar, and preview/details panel now match the shell direction.
+- Input/Process polish follow-up is implemented: visible `Load` label, compact Input preview panel, cleaner selection toolbar, Process Open Editor polish, Resume prompt `×` dismiss, and collapsed empty live preview area.
 - Next implementation should be the Process visual pass only.
 - No Electron packaging work has been started.
 
@@ -34,3 +35,4 @@
 - Do not reintroduce `<output>/Editor/thumbnails/400`; thumbnails go directly under `<output>/Editor/thumbnails/`.
 - Do not let Editor fall back to stale default output when a custom output was just processed.
 - Keep browser/Vite dev mode compatible.
+- Resume live preview depends on real `__processing__` preview paths; when a resumed run has none, the preview area intentionally collapses instead of showing empty placeholders.

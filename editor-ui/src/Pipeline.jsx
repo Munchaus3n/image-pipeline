@@ -947,6 +947,7 @@ export default function Pipeline({
   const nothingSelected = !doUpscale && !doRembg;
   const skipCount = removedImages?.size ?? 0;
   const activeExcludeCount = excludeTags.filter(n => !removedImages?.has(n)).length;
+  const hasLivePreviewItems = Boolean(previewPath) || (Array.isArray(livePreviewStrip) && livePreviewStrip.some(item => item?.path));
 
   return (
     <div className="pipeline-screen" style={{
@@ -1001,12 +1002,19 @@ export default function Pipeline({
         }}>
           <div className="pipeline-settings-scroll">
           {showResume && resumeSession && (
-            <div style={{
+            <div className="pipeline-resume-card" style={{
               marginBottom: 12,
               background: "color-mix(in srgb, var(--accent) 10%, transparent)",
               border: `1px solid color-mix(in srgb, var(--accent) 35%, transparent)`,
               borderRadius: 6, padding: "10px 10px 8px",
             }}>
+              <button
+                className="pipeline-resume-dismiss"
+                onClick={() => setShowResume(false)}
+                aria-label="Dismiss resume prompt"
+              >
+                ×
+              </button>
               <div style={{ fontSize: 11, color: C.text, fontWeight: 600, marginBottom: 4 }}>
                 Resume previous session?
               </div>
@@ -1026,10 +1034,6 @@ export default function Pipeline({
                   borderRadius: 6, padding: "6px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
                 }}>Start fresh</button>
               </div>
-              <button className="pipeline-btn pipeline-secondary-button" onClick={() => setShowResume(false)} style={{
-                marginTop: 6, background: "transparent", border: "none", color: C.dim2,
-                padding: 0, fontSize: 10, cursor: "pointer", fontFamily: "inherit",
-              }}>dismiss</button>
             </div>
           )}
 
@@ -1190,13 +1194,15 @@ export default function Pipeline({
                 )}
               </div>
 
-              <div className="pipeline-live-area">
-                <Zone1
-                  imageDone={imageDone} totalImages={totalImages}
-                  previewPath={previewPath}
-                  livePreviewStrip={livePreviewStrip}
-                />
-              </div>
+              {hasLivePreviewItems && (
+                <div className="pipeline-live-area">
+                  <Zone1
+                    imageDone={imageDone} totalImages={totalImages}
+                    previewPath={previewPath}
+                    livePreviewStrip={livePreviewStrip}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="pipeline-bottom-panels" style={{ flex: "1 1 auto", minHeight: 210, display: "flex", flexDirection: "column", gap: 8 }}>
