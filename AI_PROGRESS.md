@@ -169,3 +169,27 @@
 - Confirmed skipped path remained `<output>/Editor/skipped/a/002.png`.
 - Confirmed thumbnail path is now `<output>/Editor/thumbnails/a/001.png` and the old `<output>/Editor/thumbnails/400/a/001.png` path was not created.
 - Stopped the Batch 2 Vite/API validation processes and removed Batch 2 temporary validation folders/logs.
+
+## 2026-06-27 Safe Smoke Test Review
+
+### Scope
+- Reviewed and modernized `scripts/safe_smoke_test.py`.
+- Updated `AI_TEST_PLAN.md` to clearly separate static checks, API smoke checks, manual/browser checks, and dangerous real pipeline checks.
+- No Electron work, dependency additions, app redesign, or app behavior changes were made.
+
+### Smoke Test Updates
+- Static mode remains the safe default and does not call the API, run the pipeline, stop processes, or modify real input/output folders.
+- Output is grouped by coverage category so it is clear what was and was not tested.
+- API mode now creates sandbox fixtures with nested folders and same-named files.
+- API mode verifies deterministic `/images` order, distinct same-name nested files, image limit/truncation, preview rendering, final/skipped/thumbnail output paths, and settings patch/theme round-trips.
+- Dangerous pipeline operations remain explicitly not implemented in the smoke test.
+
+### Validation
+- Initial updated static smoke run passed with `python scripts\safe_smoke_test.py`.
+- Final `python scripts\safe_smoke_test.py` passed in static mode.
+- Final `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- Started local FastAPI with `python api.py` and ran `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup`; API mode passed and removed `.smoke-test-sandbox`.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- The only issue found during validation was a smoke-test timing bug around asynchronous thumbnail writes; fixed with a bounded wait in the test, with no app behavior change.

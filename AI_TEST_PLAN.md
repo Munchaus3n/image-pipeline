@@ -1,60 +1,78 @@
 # AI Test Plan
 
-## Automated Checks
-- `python scripts/safe_smoke_test.py`
-- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py`
-- `npm run build` from `editor-ui`
-- `npm run lint` from `editor-ui`
+## Smoke Test Modes
 
-## Manual Regression
-1. Start `api.py` and `editor-ui` dev server.
-2. Select an input folder; confirm no images load until Load is clicked.
+### Static Mode
+Run:
+`python scripts\safe_smoke_test.py`
+
+Static mode is the safe default. It does not call the API, run the pipeline, stop processes, or modify real input/output folders.
+
+It checks:
+- Required source files exist.
+- Removed preflight routes and broad process-kill patterns are absent.
+- Electron remains postponed in frontend package metadata.
+- Supported image extensions stay aligned between `api.py` and `pipeline.py`.
+- Generated local files such as `session.json` and `.cache/` remain ignored.
+- Input loading remains explicit/bounded and still uses relative image IDs.
+- Editor queue sorting/relative labels remain present.
+- Old output conventions are not reintroduced: no `<output>/Editor/final` and no `thumbnails/400`.
+- Completed pipeline session handoff markers remain present.
+- Settings POST still uses patch/merge behavior.
+- Theme persistence hooks remain present.
+
+### API Mode
+Run with local API already running:
+`python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup`
+
+API mode creates sandbox fixtures under `.smoke-test-sandbox` by default and removes them when `--cleanup` is used.
+
+It checks:
+- `/images` returns deterministic folder-by-folder natural order for `a/001.png`, `a/002.png`, `b/001.png`, `b/002.png`, `nested-a/same.png`, and `nested-b/same.png`.
+- Same-named nested files remain present and distinguishable.
+- `/images` honors `limit` and reports `truncated=true`.
+- `/preview` can render a valid sandbox PNG.
+- `/save` writes final output to `<output>/Editor/<relative image>.png`.
+- `/save` writes thumbnails to `<output>/Editor/thumbnails/<relative image>.png` and does not create `thumbnails/400`.
+- `/skip` writes skipped output to `<output>/Editor/skipped/<relative image>`.
+- `/settings` theme patches round-trip for `light` and `dark` while preserving top-level settings sections.
+- `settings.json` is restored after settings API checks.
+
+### Frontend Build Checks
+Run from `editor-ui`:
+- `npm install`
+- `npm run build`
+- `npm run lint`
+
+Use `npm.cmd` on PowerShell if `npm.ps1` is blocked by execution policy.
+
+## Manual/Browser Checks
+These remain manual because no browser automation dependency is allowed:
+1. Start `api.py` and the Vite dev server.
+2. Select an input folder and confirm no images load until Load is clicked.
 3. Click Load; confirm list appears and count is bounded/clear.
-4. Click Refresh without changing the folder; confirm list reloads.
+4. Click Refresh after folder contents change; confirm stale thumbnails disappear.
 5. Use recent input/output dropdowns after browsing or typing paths.
-6. Run with custom input and default output; confirm Process uses the selected input.
-7. Run with custom input and custom output; confirm Editor loads exact `<output>/processed` when rembg is enabled.
-8. Run upscale-only; confirm Editor loads exact `<output>/upscaled`.
-9. Run rembg-only; confirm Editor loads exact `<output>/processed`.
-10. Run two batches with different output folders; confirm Editor does not load the first run’s source.
-11. Save one image; confirm final output lands under `<output>/Editor/`.
-12. Skip one image; confirm skipped output lands under `<output>/Editor/skipped`.
-13. Save with thumbnails enabled; confirm thumbnail lands under `<output>/Editor/thumbnails/<relative image>.png` with no `thumbnails/400/` nesting.
-14. Trigger/observe GPU OOM fallback if hardware allows; otherwise verify clear fallback logs are emitted by code inspection.
+6. Confirm Process preserves selected input/output paths.
+7. Run custom output batches and confirm Editor loads exact completed `src_root`.
+8. Confirm Editor queue labels are compact and source-relative.
+9. Snap/align an image, save, and confirm the next image has no stale snap highlight.
+10. Repeat snap reset check with Skip.
+11. Run two batches with different output folders; confirm Editor does not reuse the first output.
+
+## Dangerous/Real Pipeline Checks
+These are intentionally not automated by `safe_smoke_test.py`:
+- Real Real-ESRGAN upscale runs.
+- Real rembg/model loading runs.
+- GPU/DirectML/CUDA OOM fallback.
+- Pipeline cancellation/stop behavior.
+- Wipe-input behavior.
+
+Run these only during explicit real local workflow validation with disposable input/output folders.
 
 ## Current Results
-- Passed: `python scripts/safe_smoke_test.py`.
-- Passed: `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py`.
-- Passed: `npm.cmd install`.
-- Passed after sandbox retry: `npm.cmd run build`.
-- Passed after lint-only fix: `npm.cmd run lint`.
-- Passed: live API/Vite workflow check for Input Load, Refresh, recent folder persistence, Process path preservation, completed session handoff, final save, skipped save, and second output folder run.
-- Passed: real local processing validation with isolated PNG inputs, Real-ESRGAN upscale-only, rembg-only on CPU-forced `bria-rmbg`, and one both-stages run.
-- Passed: Editor final save to `<output>/Editor/`, skipped save to `<output>/Editor/skipped/`, thumbnail save to `<output>/Editor/thumbnails/`, and second output folder identity.
-- Not observed: GPU/DirectML/CUDA OOM. Live run used existing settings with `force_cpu=true` for rembg, so OOM fallback did not trigger.
-- Fixed during validation: upscale-only pipeline completion message now points to `<output>/upscaled` instead of `<output>/processed`.
-
-## Batch 1 Results - 2026-06-26
-- Passed: `python scripts\safe_smoke_test.py`.
-- Passed: `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py`.
-- Passed: `cd editor-ui && npm.cmd install`; npm reported existing audit warnings (1 low, 2 moderate, 1 high), not fixed in this scoped pass.
-- Passed: `cd editor-ui && npm.cmd run build`.
-- Passed: `cd editor-ui && npm.cmd run lint`.
-- Passed: local FastAPI/Vite startup; `/settings`, Vite index, and Vite `/api/settings` proxy returned 200.
-- Passed: real same-folder reload after deleting one PNG and adding another PNG; latest `/api/images` omitted the deleted image and included the new image.
-- Passed: same-filename nested ID check with `nested-a/same.png` and `nested-b/same.png` as distinct relative IDs.
-- Passed: theme settings round-trip for exact `light` and `dark` values.
-- Not browser-automated: visual confirmation of thumbnail repaint and localStorage persistence was validated by code path plus build/lint and API settings round-trip; no browser automation dependency was added.
-
-## Batch 2 Results - 2026-06-27
-- Passed: `python scripts\safe_smoke_test.py`.
-- Passed: `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py`.
-- Passed: `cd editor-ui && npm.cmd install`; npm reported existing audit warnings (1 low, 2 moderate, 1 high), not fixed in this scoped pass.
-- Passed: `cd editor-ui && npm.cmd run build`.
-- Passed: `cd editor-ui && npm.cmd run lint`.
-- Passed: local FastAPI/Vite startup; Vite used `5174` because `5173` was already occupied, and `/api/settings` proxy returned 200.
-- Passed: nested queue order probe returned `a/001.png`, `a/002.png`, `b/001.png`, `b/002.png`.
-- Passed: final save remained `<output>/Editor/a/001.png`.
-- Passed: skipped save remained `<output>/Editor/skipped/a/002.png`.
-- Passed: thumbnail save moved to `<output>/Editor/thumbnails/a/001.png`; old `<output>/Editor/thumbnails/400/a/001.png` was not created.
-- Not browser-automated: snap highlight reset was validated by code path plus build/lint; no browser automation dependency was added.
+- Passed: Batch 1 real workflow validation for stale Input thumbnails, exclusion identity, and theme persistence.
+- Passed: Batch 2 validation for Editor queue order/labels, snap reset code path, final/skipped output paths, and flattened thumbnail path.
+- Passed 2026-06-27 smoke-test review: updated static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend build, and frontend lint.
+- Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
+- Remaining smoke-test gaps are intentional: no browser automation, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

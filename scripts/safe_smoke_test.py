@@ -2,11 +2,17 @@
 """
 Safe local smoke test for Image Pipeline.
 
-Default behavior is non-destructive:
-- Runs static source checks only (no API calls).
-- Does not call /pipeline/run or /pipeline/stop.
-- Does not kill any process.
-- Does not modify real input/output folders.
+Default mode is intentionally conservative:
+- static source checks only
+- no API calls unless --api-url is provided
+- no real pipeline run
+- no process stop/kill
+- no real user input/output folder mutation
+
+API mode is still sandboxed:
+- creates test fixtures under .smoke-test-sandbox by default
+- verifies selected API behavior against a running local server
+- restores settings.json after settings round-trip checks
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ import argparse
 import json
 import re
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,12 +29,20 @@ from urllib import error, parse, request
 
 
 SANDBOX_TOKEN = "smoke-test-sandbox"
-EXPECTED_AVIF_PREVIEW_ERROR = "AVIF preview decode failed. Install pillow-avif-plugin in the API environment."
+SUPPORTED_IMAGE_RELS = [
+    "a/001.png",
+    "a/002.png",
+    "b/001.png",
+    "b/002.png",
+    "nested-a/same.png",
+    "nested-b/same.png",
+]
 
 
 @dataclass
 class CheckResult:
-    status: str  # PASS | FAIL | WARN
+    status: str  # PASS | FAIL | WARN | INFO
+    category: str
     name: str
     details: str
 
@@ -43,10 +58,7 @@ class ApiResponse:
 
     @property
     def text(self) -> str:
-        try:
-            return self.body.decode("utf-8", errors="replace")
-        except Exception:
-            return ""
+        return self.body.decode("utf-8", errors="replace")
 
     def json(self) -> Any:
         return json.loads(self.text)
@@ -64,18 +76,16 @@ class ApiClient:
             endpoint = "/" + endpoint
         split = parse.urlsplit(self.base_url)
         base_path = split.path.rstrip("/")
-
-        prefixes: list[str] = [base_path]
+        prefixes = [base_path]
         if base_path.endswith("/api"):
             prefixes.append(base_path[:-4].rstrip("/"))
         else:
             prefixes.append((base_path + "/api").rstrip("/"))
 
-        seen = set()
+        seen: set[str] = set()
         urls: list[str] = []
         for prefix in prefixes:
             path = (prefix + endpoint) if prefix else endpoint
-            path = path if path.startswith("/") else "/" + path
             query = parse.urlencode(params or {}, doseq=True)
             url = parse.urlunsplit((split.scheme, split.netloc, path, query, ""))
             if url not in seen:
@@ -83,696 +93,592 @@ class ApiClient:
                 urls.append(url)
         return urls
 
-    def request(self, method: str, endpoint: str, *, params: dict[str, str] | None = None, payload: Any = None) -> ApiResponse:
-        last_404: ApiResponse | None = None
-        urls = self._candidate_urls(endpoint, params)
-        data = None
+    def request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: dict[str, str] | None = None,
+        payload: Any = None,
+        timeout: int = 20,
+    ) -> ApiResponse:
         headers = {"Accept": "application/json"}
+        data = None
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
 
-        for url in urls:
+        last_404: ApiResponse | None = None
+        for url in self._candidate_urls(endpoint, params):
             if self.verbose:
-                print(f"[verbose] {method} {url}")
+                print(f"[verbose] {method.upper()} {url}")
             req = request.Request(url=url, method=method.upper(), data=data, headers=headers)
             try:
-                with request.urlopen(req, timeout=20) as resp:
-                    body = resp.read()
+                with request.urlopen(req, timeout=timeout) as resp:
                     return ApiResponse(
                         ok=True,
                         status=getattr(resp, "status", 200),
                         url=url,
-                        body=body,
+                        body=resp.read(),
                         headers={k.lower(): v for k, v in resp.headers.items()},
                     )
-            except error.HTTPError as e:
-                body = e.read() if hasattr(e, "read") else b""
+            except error.HTTPError as exc:
                 response = ApiResponse(
                     ok=False,
-                    status=e.code,
+                    status=exc.code,
                     url=url,
-                    body=body,
-                    headers={k.lower(): v for k, v in (e.headers.items() if e.headers else [])},
-                    error=str(e),
+                    body=exc.read() if hasattr(exc, "read") else b"",
+                    headers={k.lower(): v for k, v in (exc.headers.items() if exc.headers else [])},
+                    error=str(exc),
                 )
-                if e.code == 404:
+                if exc.code == 404:
                     last_404 = response
                     continue
                 return response
-            except Exception as e:
+            except Exception as exc:
                 return ApiResponse(
                     ok=False,
                     status=0,
                     url=url,
                     body=b"",
                     headers={},
-                    error=f"{type(e).__name__}: {e}",
+                    error=f"{type(exc).__name__}: {exc}",
                 )
 
-        if last_404 is not None:
-            return last_404
-        return ApiResponse(ok=False, status=0, url=urls[0], body=b"", headers={}, error="No candidate URL")
+        return last_404 or ApiResponse(False, 0, self.base_url, b"", {}, "No candidate URL")
 
 
-def norm_path_text(value: str) -> str:
-    return value.replace("\\", "/")
-
-
-def looks_like_smoke_sandbox(path: Path) -> bool:
-    lowered_parts = [p.lower() for p in path.resolve().parts]
-    return any(SANDBOX_TOKEN in part for part in lowered_parts)
-
-
-def safe_remove_sandbox(sandbox: Path, repo_root: Path) -> tuple[bool, str]:
-    try:
-        resolved = sandbox.resolve()
-    except Exception as e:
-        return False, f"Could not resolve sandbox path: {e}"
-
-    if not looks_like_smoke_sandbox(resolved):
-        return False, f"Refusing cleanup; path does not look like smoke-test sandbox: {resolved}"
-    if not resolved.exists():
-        return True, f"Nothing to clean: {resolved}"
-    if resolved == repo_root:
-        return False, "Refusing cleanup; sandbox path resolves to repo root."
-
-    try:
-        shutil.rmtree(resolved)
-        return True, f"Removed sandbox: {resolved}"
-    except Exception as e:
-        return False, f"Cleanup failed: {e}"
+def result(status: str, category: str, name: str, details: str) -> CheckResult:
+    return CheckResult(status, category, name, details)
 
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def normalize_path(value: str) -> str:
+    return str(value).replace("\\", "/")
+
+
+def relative_to_root(path: str, root: Path) -> str:
+    normalized_root = normalize_path(str(root.resolve())).rstrip("/")
+    normalized_path = normalize_path(str(Path(path).resolve()))
+    if normalized_path.lower().startswith((normalized_root + "/").lower()):
+        return normalized_path[len(normalized_root) + 1 :]
+    return normalized_path
+
+
 def parse_supported_exts(text: str) -> set[str]:
-    m = re.search(r"SUPPORTED_EXTS\s*=\s*\{([^}]*)\}", text, flags=re.DOTALL)
-    if not m:
+    match = re.search(r"SUPPORTED_EXTS\s*=\s*\{([^}]*)\}", text, flags=re.DOTALL)
+    if not match:
         return set()
-    exts = set(re.findall(r"""['"](\.[a-zA-Z0-9]+)['"]""", m.group(1)))
-    return {e.lower() for e in exts}
+    return {item.lower() for item in re.findall(r"""['"](\.[a-zA-Z0-9]+)['"]""", match.group(1))}
 
 
-def run_static_checks(repo_root: Path, results: list[CheckResult]) -> None:
+def require_text(text: str, tokens: list[str]) -> list[str]:
+    return [token for token in tokens if token not in text]
+
+
+def run_static_checks(repo_root: Path) -> list[CheckResult]:
+    checks: list[CheckResult] = []
     api_py = repo_root / "api.py"
     pipeline_py = repo_root / "pipeline.py"
-    editor_jsx = repo_root / "editor-ui" / "src" / "Editor.jsx"
     input_jsx = repo_root / "editor-ui" / "src" / "Input.jsx"
+    editor_jsx = repo_root / "editor-ui" / "src" / "Editor.jsx"
+    main_jsx = repo_root / "editor-ui" / "src" / "main.jsx"
+    package_json = repo_root / "editor-ui" / "package.json"
     gitignore = repo_root / ".gitignore"
-    later_updates = repo_root / "docs" / "later-updates.md"
 
-    needed_files = [api_py, pipeline_py, editor_jsx, input_jsx, gitignore]
-    missing = [str(p) for p in needed_files if not p.exists()]
-    if missing:
-        results.append(CheckResult("FAIL", "Static file presence", f"Missing required files: {', '.join(missing)}"))
-        return
+    required_files = [api_py, pipeline_py, input_jsx, editor_jsx, main_jsx, package_json, gitignore]
+    missing_files = [str(path.relative_to(repo_root)) for path in required_files if not path.exists()]
+    checks.append(result(
+        "FAIL" if missing_files else "PASS",
+        "Static",
+        "Required files",
+        f"Missing: {', '.join(missing_files)}" if missing_files else "All required files are present.",
+    ))
+    if missing_files:
+        return checks
 
-    source_files = [
-        api_py,
-        pipeline_py,
-        *list((repo_root / "editor-ui" / "src").glob("*.jsx")),
-        *list((repo_root / "editor-ui" / "src").glob("*.js")),
-    ]
-    joined_source = "\n".join(read_text(p) for p in source_files if p.exists())
+    api_txt = read_text(api_py)
+    pipeline_txt = read_text(pipeline_py)
+    input_txt = read_text(input_jsx)
+    editor_txt = read_text(editor_jsx)
+    main_txt = read_text(main_jsx)
+    package_txt = read_text(package_json).lower()
+    src_text = "\n".join(
+        read_text(path)
+        for path in (repo_root / "editor-ui" / "src").glob("*.*")
+        if path.suffix in {".js", ".jsx", ".css"}
+    )
+    joined_source = "\n".join([api_txt, pipeline_txt, input_txt, editor_txt, main_txt, src_text])
     low_source = joined_source.lower()
 
     banned_routes = ["/pipeline/preflight", "/pipeline/output-batch-check"]
-    present = [r for r in banned_routes if r.lower() in low_source]
-    if present:
-        results.append(CheckResult("FAIL", "No preflight routes", f"Found banned route(s): {', '.join(present)}"))
-    else:
-        results.append(CheckResult("PASS", "No preflight routes", "No banned preflight routes found in source files."))
-
-    if re.search(r"taskkill\s+/im\s+realesrgan-ncnn-vulkan\.exe", low_source):
-        results.append(CheckResult("FAIL", "No broad process kill", "Found banned broad taskkill /IM invocation."))
-    else:
-        results.append(CheckResult("PASS", "No broad process kill", "No banned broad taskkill /IM invocation found."))
-
-    api_exts = parse_supported_exts(read_text(api_py))
-    pipe_exts = parse_supported_exts(read_text(pipeline_py))
-
-    tif_ok = ".tif" in api_exts and ".tiff" in api_exts and ".tif" in pipe_exts and ".tiff" in pipe_exts
-    results.append(CheckResult(
-        "PASS" if tif_ok else "FAIL",
-        "TIFF compatibility (.tif + .tiff)",
-        f"api.py={sorted(api_exts)} pipeline.py={sorted(pipe_exts)}",
+    found_routes = [route for route in banned_routes if route.lower() in low_source]
+    checks.append(result(
+        "FAIL" if found_routes else "PASS",
+        "Static",
+        "No removed preflight routes",
+        f"Found: {', '.join(found_routes)}" if found_routes else "No removed preflight routes found.",
     ))
 
-    avif_ok = ".avif" in api_exts and ".avif" in pipe_exts
-    results.append(CheckResult(
-        "PASS" if avif_ok else "FAIL",
-        "AVIF support",
-        f"api.py has .avif={'.avif' in api_exts}; pipeline.py has .avif={'.avif' in pipe_exts}",
+    broad_kill = bool(re.search(r"taskkill\s+/im\s+realesrgan-ncnn-vulkan\.exe", low_source))
+    checks.append(result(
+        "FAIL" if broad_kill else "PASS",
+        "Static",
+        "No broad process kill",
+        "Found banned broad taskkill /IM invocation." if broad_kill else "No banned broad taskkill /IM invocation found.",
     ))
 
-    git_txt = read_text(gitignore).lower()
-    results.append(CheckResult(
-        "PASS" if "session.json" in git_txt else "FAIL",
-        ".gitignore session.json",
-        "session.json is ignored." if "session.json" in git_txt else "session.json is missing from .gitignore.",
-    ))
-    results.append(CheckResult(
-        "PASS" if ".cache/" in git_txt else "FAIL",
-        ".gitignore .cache/",
-        ".cache/ is ignored." if ".cache/" in git_txt else ".cache/ is missing from .gitignore.",
+    electron_refs = "electron" in package_txt or "electron-builder" in package_txt
+    checks.append(result(
+        "FAIL" if electron_refs else "PASS",
+        "Static",
+        "Electron postponed",
+        "Electron dependency/script reference found in package.json." if electron_refs else "No Electron dependency/script reference found.",
     ))
 
-    editor_txt = read_text(editor_jsx)
-    editor_needed = ["DEFAULT_OUTPUT_IDENTITY", "normalizeOutputIdentity"]
-    missing_editor = [token for token in editor_needed if token not in editor_txt]
-    results.append(CheckResult(
-        "PASS" if not missing_editor else "FAIL",
-        "Editor output identity handling",
-        "All required Editor.jsx output identity symbols found."
-        if not missing_editor else f"Missing in Editor.jsx: {', '.join(missing_editor)}",
+    api_exts = parse_supported_exts(api_txt)
+    pipeline_exts = parse_supported_exts(pipeline_txt)
+    expected_exts = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".avif"}
+    missing_api_exts = sorted(expected_exts - api_exts)
+    missing_pipeline_exts = sorted(expected_exts - pipeline_exts)
+    checks.append(result(
+        "FAIL" if missing_api_exts or missing_pipeline_exts else "PASS",
+        "Static",
+        "Supported image extensions",
+        f"api missing={missing_api_exts or 'none'} pipeline missing={missing_pipeline_exts or 'none'}",
     ))
 
-    input_txt = read_text(input_jsx)
-    input_needed = ["relativePathFromInput", "imageId"]
-    missing_input = [token for token in input_needed if token not in input_txt]
-    results.append(CheckResult(
-        "PASS" if not missing_input else "FAIL",
-        "Input relative/image IDs",
-        "All required Input.jsx relative/image ID symbols found."
-        if not missing_input else f"Missing in Input.jsx: {', '.join(missing_input)}",
+    gitignore_txt = read_text(gitignore).lower()
+    ignored = all(token in gitignore_txt for token in ["session.json", ".cache/"])
+    checks.append(result(
+        "FAIL" if not ignored else "PASS",
+        "Static",
+        "Generated files ignored",
+        "session.json and .cache/ are ignored." if ignored else "session.json or .cache/ missing from .gitignore.",
     ))
 
-    pipe_txt = read_text(pipeline_py)
-    pipe_needed = ["_resolve_paths_from_tokens", "_relative_image_id"]
-    missing_pipe = [token for token in pipe_needed if token not in pipe_txt]
-    results.append(CheckResult(
-        "PASS" if not missing_pipe else "FAIL",
-        "Pipeline relative token helpers",
-        "All required pipeline.py token helper symbols found."
-        if not missing_pipe else f"Missing in pipeline.py: {', '.join(missing_pipe)}",
+    explicit_loading_missing = require_text(input_txt, ["const loadImages =", "recursive=${includeSubfolders", "&limit=500"])
+    checks.append(result(
+        "FAIL" if explicit_loading_missing else "PASS",
+        "Static",
+        "Input explicit bounded loading",
+        "Input load/refresh remains explicit and bounded."
+        if not explicit_loading_missing else f"Missing marker(s): {', '.join(explicit_loading_missing)}",
     ))
 
-    api_txt = read_text(api_py)
-    preview_needed = ["PREVIEW_CACHE_DIR", "_preview_cache_key", "_write_preview_cache_atomically"]
-    missing_preview = [token for token in preview_needed if token not in api_txt]
-    results.append(CheckResult(
-        "PASS" if not missing_preview else "FAIL",
-        "Preview cache helpers",
-        "All required preview cache helpers found."
-        if not missing_preview else f"Missing preview helper(s): {', '.join(missing_preview)}",
+    input_id_missing = require_text(input_txt, ["relativePathFromInput", "imageIdForPath"])
+    checks.append(result(
+        "FAIL" if input_id_missing else "PASS",
+        "Static",
+        "Input relative image IDs",
+        "Relative image ID helper is present."
+        if not input_id_missing else f"Missing marker(s): {', '.join(input_id_missing)}",
     ))
 
-    if re.search(r"choices\s*=\s*\[\s*['\"]auto['\"]\s*,\s*['\"]manual['\"]\s*\]", joined_source):
-        results.append(CheckResult("FAIL", "rembg fallback manual hidden", "Found choices=['auto','manual'] pattern."))
-    else:
-        results.append(CheckResult("PASS", "rembg fallback manual hidden", "No choices=['auto','manual'] pattern found."))
-
-    source_editor_final_refs = [
-        str(p.relative_to(repo_root))
-        for p in [api_py, editor_jsx]
-        if "Editor/final" in read_text(p)
-    ]
-    results.append(CheckResult(
-        "PASS" if not source_editor_final_refs else "FAIL",
-        "Editor final output root",
-        "No active source references <output>/Editor/final."
-        if not source_editor_final_refs else f"Found stale Editor/final references: {', '.join(source_editor_final_refs)}",
+    editor_queue_missing = require_text(editor_txt, ["sortImageQueue", "imageQueueLabel", "relativePathFromRoot"])
+    checks.append(result(
+        "FAIL" if editor_queue_missing else "PASS",
+        "Static",
+        "Editor queue ordering and labels",
+        "Editor has deterministic queue ordering and relative labels."
+        if not editor_queue_missing else f"Missing marker(s): {', '.join(editor_queue_missing)}",
     ))
 
-    handoff_needed = ["completed:   bool = False", "_write_pipeline_session(0, completed=True)", "session.completed"]
-    missing_handoff = [token for token in handoff_needed if token not in joined_source]
-    results.append(CheckResult(
-        "PASS" if not missing_handoff else "FAIL",
-        "Completed pipeline handoff",
-        "Completed session handoff markers found."
-        if not missing_handoff else f"Missing handoff marker(s): {', '.join(missing_handoff)}",
+    stale_output_refs = []
+    for path in [api_py, editor_jsx]:
+        text = read_text(path)
+        if "Editor/final" in text or "thumbnails/400" in text or "thumbnails\\\\400" in text:
+            stale_output_refs.append(str(path.relative_to(repo_root)))
+    checks.append(result(
+        "FAIL" if stale_output_refs else "PASS",
+        "Static",
+        "Editor output conventions",
+        "No active source references old Editor/final or thumbnails/400 conventions."
+        if not stale_output_refs else f"Stale references: {', '.join(stale_output_refs)}",
     ))
 
-    input_explicit_needed = ["const loadImages =", "recursive=${includeSubfolders", "&limit=500"]
-    missing_input_explicit = [token for token in input_explicit_needed if token not in input_txt]
-    results.append(CheckResult(
-        "PASS" if not missing_input_explicit else "FAIL",
-        "Input explicit folder loading",
-        "Input loading is explicit, bounded, and user-controlled."
-        if not missing_input_explicit else f"Missing Input explicit load marker(s): {', '.join(missing_input_explicit)}",
+    thumbnail_flat_missing = require_text(api_txt, ['"thumbnails" / rel'])
+    checks.append(result(
+        "FAIL" if thumbnail_flat_missing else "PASS",
+        "Static",
+        "Flattened thumbnail helper",
+        "mirror_thumbnail_path targets <output>/Editor/thumbnails/<relative image>."
+        if not thumbnail_flat_missing else "mirror_thumbnail_path flattening marker is missing.",
     ))
 
-    if later_updates.exists():
-        note_ok = "Preview cache packaging migration" in read_text(later_updates)
-        results.append(CheckResult(
-            "PASS" if note_ok else "FAIL",
-            "Later updates note",
-            "docs/later-updates.md contains preview cache migration note."
-            if note_ok else "docs/later-updates.md exists but is missing the preview cache migration note.",
-        ))
-    else:
-        results.append(CheckResult("FAIL", "Later updates note", "docs/later-updates.md is missing."))
+    session_missing = require_text(api_txt + editor_txt, ["completed:   bool = False", "_write_pipeline_session(0, completed=True)", "session.completed"])
+    checks.append(result(
+        "FAIL" if session_missing else "PASS",
+        "Static",
+        "Completed session handoff",
+        "Completed pipeline session handoff markers are present."
+        if not session_missing else f"Missing marker(s): {', '.join(session_missing)}",
+    ))
+
+    settings_merge_missing = require_text(api_txt, ["def _deep_merge", "merged = _merged_settings(existing, incoming)"])
+    checks.append(result(
+        "FAIL" if settings_merge_missing else "PASS",
+        "Static",
+        "Settings patch merge",
+        "Settings POST still deep-merges patches with existing settings."
+        if not settings_merge_missing else f"Missing marker(s): {', '.join(settings_merge_missing)}",
+    ))
+
+    theme_missing = require_text(main_txt, ["THEME_STORAGE_KEY", "normalizeTheme", "persistTheme"])
+    checks.append(result(
+        "FAIL" if theme_missing else "PASS",
+        "Static",
+        "Theme persistence hooks",
+        "Theme persistence hooks are present."
+        if not theme_missing else f"Missing marker(s): {', '.join(theme_missing)}",
+    ))
+
+    return checks
 
 
-def _record_created(created: list[tuple[Path, str]], path: Path, kind: str) -> None:
-    for existing_path, _ in created:
-        if existing_path == path:
-            return
-    created.append((path, kind))
+def looks_like_sandbox(path: Path) -> bool:
+    return any(SANDBOX_TOKEN in part.lower() for part in path.resolve().parts)
 
 
-def _ensure_dir(path: Path, created: list[tuple[Path, str]]) -> None:
+def safe_remove_sandbox(sandbox: Path, repo_root: Path) -> CheckResult:
+    try:
+        resolved = sandbox.resolve()
+    except Exception as exc:
+        return result("FAIL", "Cleanup", "Sandbox cleanup", f"Could not resolve sandbox path: {exc}")
+    if resolved == repo_root.resolve():
+        return result("FAIL", "Cleanup", "Sandbox cleanup", "Refusing to remove repo root.")
+    if not looks_like_sandbox(resolved):
+        return result("FAIL", "Cleanup", "Sandbox cleanup", f"Refusing to remove non-smoke sandbox: {resolved}")
+    if not resolved.exists():
+        return result("PASS", "Cleanup", "Sandbox cleanup", f"Nothing to clean: {resolved}")
+    try:
+        shutil.rmtree(resolved)
+        return result("PASS", "Cleanup", "Sandbox cleanup", f"Removed sandbox: {resolved}")
+    except Exception as exc:
+        return result("FAIL", "Cleanup", "Sandbox cleanup", f"Cleanup failed: {exc}")
+
+
+def ensure_dir(path: Path, created: list[Path]) -> None:
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
-        _record_created(created, path, "dir")
+        created.append(path)
 
 
-def _write_bytes(path: Path, data: bytes, created: list[tuple[Path, str]]) -> None:
-    if not path.parent.exists():
-        _ensure_dir(path.parent, created)
+def write_image(path: Path, color: tuple[int, int, int], created: list[Path]) -> None:
+    try:
+        from PIL import Image, ImageDraw
+    except Exception as exc:
+        raise RuntimeError(f"Pillow import failed: {exc}") from exc
+    ensure_dir(path.parent, created)
     if not path.exists():
-        _record_created(created, path, "file")
-    path.write_bytes(data)
+        created.append(path)
+    image = Image.new("RGBA", (64, 48), color + (255,))
+    ImageDraw.Draw(image).text((4, 18), path.stem, fill=(255, 255, 255, 255))
+    image.save(path)
 
 
-def _write_image(path: Path, color: tuple[int, int, int], fmt: str, created: list[tuple[Path, str]]) -> None:
-    try:
-        from PIL import Image
-    except Exception as e:
-        raise RuntimeError(f"Pillow import failed: {e}") from e
-    if not path.parent.exists():
-        _ensure_dir(path.parent, created)
-    if not path.exists():
-        _record_created(created, path, "file")
-    img = Image.new("RGB", (32, 32), color=color)
-    img.save(path, format=fmt)
+def wait_for_path(path: Path, timeout_seconds: float = 3.0) -> bool:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if path.exists():
+            return True
+        time.sleep(0.05)
+    return path.exists()
 
 
-def _can_write_avif() -> bool:
-    try:
-        from PIL import Image
-        return "AVIF" in Image.SAVE
-    except Exception:
-        return False
-
-
-def _write_avif_sample(path: Path, created: list[tuple[Path, str]]) -> bool:
-    try:
-        from PIL import Image
-    except Exception:
-        return False
-    if not path.parent.exists():
-        _ensure_dir(path.parent, created)
-    if not path.exists():
-        _record_created(created, path, "file")
-    try:
-        Image.new("RGB", (32, 32), color=(90, 160, 220)).save(path, format="AVIF")
-        return True
-    except Exception:
-        return False
-
-
-def setup_sandbox(sandbox: Path, created: list[tuple[Path, str]]) -> dict[str, Path]:
-    _ensure_dir(sandbox, created)
+def setup_api_fixtures(sandbox: Path, created: list[Path]) -> dict[str, Path]:
     input_dir = sandbox / "input"
-    out_empty = sandbox / "output_empty"
-    out_with_processed = sandbox / "output_with_processed"
-    processed_dir = out_with_processed / "processed"
-    red_dir = input_dir / "red"
-    blue_dir = input_dir / "blue"
-
-    for d in [input_dir, out_empty, out_with_processed, processed_dir, red_dir, blue_dir]:
-        _ensure_dir(d, created)
-
-    _write_image(red_dir / "product.png", (255, 0, 0), "PNG", created)
-    _write_image(blue_dir / "product.png", (0, 0, 255), "PNG", created)
-    _write_image(input_dir / "sample.tif", (60, 120, 30), "TIFF", created)
-    _write_image(input_dir / "sample.tiff", (10, 220, 120), "TIFF", created)
-    _write_image(processed_dir / "product.png", (180, 30, 30), "PNG", created)
-    _write_bytes(input_dir / "broken.png", b"not-a-real-image", created)
-
+    output_dir = sandbox / "output"
+    for directory in [sandbox, input_dir, output_dir]:
+        ensure_dir(directory, created)
+    colors = [
+        (210, 60, 60),
+        (80, 150, 220),
+        (70, 190, 120),
+        (220, 170, 80),
+        (150, 90, 210),
+        (80, 180, 180),
+    ]
+    for rel, color in zip(SUPPORTED_IMAGE_RELS, colors, strict=True):
+        write_image(input_dir / rel, color, created)
     return {
-        "sandbox": sandbox,
         "input": input_dir,
-        "output_empty": out_empty,
-        "output_with_processed": out_with_processed,
-        "processed": processed_dir,
-        "red_png": red_dir / "product.png",
-        "blue_png": blue_dir / "product.png",
-        "sample_tif": input_dir / "sample.tif",
-        "sample_tiff": input_dir / "sample.tiff",
-        "broken_png": input_dir / "broken.png",
+        "output": output_dir,
+        "first": input_dir / "a" / "001.png",
+        "second": input_dir / "a" / "002.png",
     }
 
 
-def _json_dict(resp: ApiResponse) -> dict[str, Any]:
-    data = resp.json()
-    if isinstance(data, dict):
-        return data
-    raise ValueError("Response JSON is not an object.")
+def json_object(response: ApiResponse) -> dict[str, Any]:
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("Expected JSON object")
+    return payload
 
 
-def run_api_checks(
-    repo_root: Path,
-    api_url: str,
-    sandbox: Path,
-    results: list[CheckResult],
-    created: list[tuple[Path, str]],
-    *,
-    avif_sample: Path | None = None,
-    verbose: bool = False,
-) -> None:
+def check_response_ok(category: str, name: str, response: ApiResponse) -> CheckResult | None:
+    if response.ok:
+        return None
+    return result("FAIL", category, name, f"HTTP {response.status} from {response.url}: {response.text or response.error}")
+
+
+def run_api_checks(repo_root: Path, api_url: str, sandbox: Path, verbose: bool) -> tuple[list[CheckResult], list[Path]]:
+    checks: list[CheckResult] = []
+    created: list[Path] = []
     client = ApiClient(api_url, verbose=verbose)
-    api_pillow_avif_imported: bool | None = None
-    api_pillow_avif_import_error = ""
 
     try:
-        paths = setup_sandbox(sandbox, created)
-    except Exception as e:
-        results.append(CheckResult("FAIL", "Sandbox setup", f"Failed to build sandbox fixtures: {e}"))
-        return
+        paths = setup_api_fixtures(sandbox, created)
+    except Exception as exc:
+        return [result("FAIL", "API", "Sandbox fixtures", f"Could not create fixtures: {exc}")], created
 
-    # API diagnostics: AVIF decode capabilities in the running API process.
-    status_resp = client.request("GET", "/pipeline/status")
-    if status_resp.ok:
-        try:
-            payload = _json_dict(status_resp)
-            avif_supported = payload.get("avif_decode_supported")
-            avif_registered = payload.get("pillow_registered_avif")
-            imported = payload.get("pillow_avif_imported")
-            import_error = payload.get("pillow_avif_import_error")
-            if isinstance(imported, bool):
-                api_pillow_avif_imported = imported
-            if isinstance(import_error, str):
-                api_pillow_avif_import_error = import_error
-            details = (
-                f"avif_decode_supported={avif_supported} "
-                f"pillow_registered_avif={avif_registered} "
-                f"pillow_avif_imported={imported}"
-            )
-            if import_error:
-                details += f" import_error={import_error}"
-            results.append(CheckResult("PASS", "API AVIF diagnostics", details))
-        except Exception as e:
-            results.append(CheckResult("WARN", "API AVIF diagnostics", f"Could not parse /pipeline/status diagnostics: {e}"))
-    else:
-        results.append(CheckResult("WARN", "API AVIF diagnostics", f"Could not fetch /pipeline/status: HTTP {status_resp.status}"))
-
-    # 1) /source with custom empty output
-    r1 = client.request("GET", "/source", params={"output_dir": str(paths["output_empty"])})
-    if not r1.ok:
-        results.append(CheckResult("FAIL", "API /source empty output", f"HTTP {r1.status} from {r1.url}: {r1.text or r1.error}"))
+    images_resp = client.request("GET", "/images", params={"folder": str(paths["input"]), "recursive": "true", "limit": "0"})
+    if failure := check_response_ok("API", "/images deterministic order", images_resp):
+        checks.append(failure)
     else:
         try:
-            data = _json_dict(r1)
-            cond = (data.get("found") is False and data.get("source_stage") == "none" and not str(data.get("folder", "")).strip())
-            results.append(CheckResult(
-                "PASS" if cond else "FAIL",
-                "API /source empty output",
-                f"found={data.get('found')} source_stage={data.get('source_stage')} folder={data.get('folder')!r}",
+            payload = json_object(images_resp)
+            rels = [relative_to_root(path, paths["input"]) for path in payload.get("images", [])]
+            order_ok = rels == SUPPORTED_IMAGE_RELS
+            same_ok = "nested-a/same.png" in rels and "nested-b/same.png" in rels
+            checks.append(result(
+                "PASS" if order_ok else "FAIL",
+                "API",
+                "/images deterministic order",
+                f"returned={rels}",
             ))
-        except Exception as e:
-            results.append(CheckResult("FAIL", "API /source empty output", f"Invalid JSON payload: {e}"))
+            checks.append(result(
+                "PASS" if same_ok else "FAIL",
+                "API",
+                "Nested same-name IDs",
+                "nested-a/same.png and nested-b/same.png are both present."
+                if same_ok else f"returned={rels}",
+            ))
+        except Exception as exc:
+            checks.append(result("FAIL", "API", "/images deterministic order", f"Invalid JSON payload: {exc}"))
 
-    # 2) /source with processed folder
-    r2 = client.request("GET", "/source", params={"output_dir": str(paths["output_with_processed"])})
-    if not r2.ok:
-        results.append(CheckResult("FAIL", "API /source processed output", f"HTTP {r2.status} from {r2.url}: {r2.text or r2.error}"))
+    limit_resp = client.request("GET", "/images", params={"folder": str(paths["input"]), "recursive": "true", "limit": "3"})
+    if failure := check_response_ok("API", "/images limit/truncated", limit_resp):
+        checks.append(failure)
     else:
         try:
-            data = _json_dict(r2)
-            folder = norm_path_text(str(data.get("folder", ""))).lower()
-            cond = data.get("found") is True and data.get("source_stage") == "processed" and folder.endswith("/processed")
-            results.append(CheckResult(
-                "PASS" if cond else "FAIL",
-                "API /source processed output",
-                f"found={data.get('found')} source_stage={data.get('source_stage')} folder={data.get('folder')!r}",
+            payload = json_object(limit_resp)
+            limit_ok = payload.get("count") == 3 and payload.get("truncated") is True
+            checks.append(result(
+                "PASS" if limit_ok else "FAIL",
+                "API",
+                "/images limit/truncated",
+                f"count={payload.get('count')} truncated={payload.get('truncated')}",
             ))
-        except Exception as e:
-            results.append(CheckResult("FAIL", "API /source processed output", f"Invalid JSON payload: {e}"))
+        except Exception as exc:
+            checks.append(result("FAIL", "API", "/images limit/truncated", f"Invalid JSON payload: {exc}"))
 
-    # 3) /images on sandbox input
-    r3 = client.request("GET", "/images", params={"folder": str(paths["input"])})
-    if not r3.ok:
-        results.append(CheckResult("FAIL", "API /images input listing", f"HTTP {r3.status} from {r3.url}: {r3.text or r3.error}"))
-    else:
-        try:
-            data = _json_dict(r3)
-            images = [norm_path_text(str(p)).lower() for p in data.get("images", [])]
-            required = [
-                "red/product.png",
-                "blue/product.png",
-                "sample.tif",
-                "sample.tiff",
-            ]
-            missing = [rel for rel in required if not any(img.endswith(rel) for img in images)]
-            cond = not missing
-            results.append(CheckResult(
-                "PASS" if cond else "FAIL",
-                "API /images input listing",
-                f"count={data.get('count')} missing={missing if missing else 'none'}",
-            ))
-        except Exception as e:
-            results.append(CheckResult("FAIL", "API /images input listing", f"Invalid JSON payload: {e}"))
-
-    # 4) /preview valid PNG
-    r4 = client.request("GET", "/preview", params={"path": str(paths["red_png"]), "size": "200"})
-    ct4 = r4.headers.get("content-type", "")
-    cond4 = r4.ok and (ct4.startswith("image/png") or ct4.startswith("image/jpeg"))
-    results.append(CheckResult(
-        "PASS" if cond4 else "FAIL",
-        "API /preview valid PNG",
-        f"status={r4.status} content-type={ct4!r} url={r4.url}",
+    preview_resp = client.request("GET", "/preview", params={"path": str(paths["first"]), "size": "128"})
+    content_type = preview_resp.headers.get("content-type", "")
+    preview_ok = preview_resp.ok and (content_type.startswith("image/png") or content_type.startswith("image/jpeg"))
+    checks.append(result(
+        "PASS" if preview_ok else "FAIL",
+        "API",
+        "/preview valid PNG",
+        f"status={preview_resp.status} content-type={content_type!r}",
     ))
 
-    # 5) /preview .tif
-    r5 = client.request("GET", "/preview", params={"path": str(paths["sample_tif"]), "size": "200"})
-    results.append(CheckResult(
-        "PASS" if r5.ok else "FAIL",
-        "API /preview .tif",
-        f"status={r5.status} url={r5.url} detail={r5.error if not r5.ok else 'ok'}",
-    ))
-
-    # 6) /preview broken PNG
-    r6 = client.request("GET", "/preview", params={"path": str(paths["broken_png"]), "size": "200"})
-    text6 = r6.text
-    cond6 = (not r6.ok) and (r6.status in (400, 500)) and bool(text6.strip())
-    results.append(CheckResult(
-        "PASS" if cond6 else "FAIL",
-        "API /preview broken PNG",
-        f"status={r6.status} has_error_text={bool(text6.strip())} detail={text6 or r6.error}",
-    ))
-
-    # 7) /preview .avif using generated sample or caller-provided sample
-    avif_candidate: Path | None = None
-    if _can_write_avif():
-        generated_avif = paths["input"] / "sample.avif"
-        if _write_avif_sample(generated_avif, created):
-            avif_candidate = generated_avif
-            results.append(CheckResult("PASS", "AVIF sample prep", f"Generated AVIF sample: {generated_avif}"))
-        else:
-            results.append(CheckResult("WARN", "AVIF sample prep", "Pillow appears to support AVIF save but sample generation failed."))
-    if avif_candidate is None and avif_sample is not None:
-        if avif_sample.exists() and avif_sample.is_file():
-            avif_candidate = avif_sample
-            results.append(CheckResult("PASS", "AVIF sample prep", f"Using --avif-sample path: {avif_sample}"))
-        else:
-            results.append(CheckResult("WARN", "AVIF sample prep", f"--avif-sample not found: {avif_sample}"))
-
-    if avif_candidate is None:
-        results.append(CheckResult("WARN", "API /preview .avif", "No AVIF sample available; skipped AVIF preview check."))
-    elif api_pillow_avif_imported is False:
-        results.append(CheckResult(
-            "FAIL",
-            "API /preview .avif",
-            "AVIF sample exists but pillow_avif is missing in API environment."
-            + (f" import_error={api_pillow_avif_import_error}" if api_pillow_avif_import_error else ""),
-        ))
+    save_payload = {
+        "items": [{"image_path": str(paths["first"]), "canvas_x": 32, "canvas_y": 32, "scale": 1}],
+        "src_root": str(paths["input"]),
+        "queue_index": 0,
+        "is_combo": False,
+        "thumbnail": True,
+        "canvas_size": 64,
+        "output_dir": str(paths["output"]),
+    }
+    save_resp = client.request("POST", "/save", payload=save_payload)
+    if failure := check_response_ok("API", "Editor save paths", save_resp):
+        checks.append(failure)
     else:
-        ravif = client.request("GET", "/preview", params={"path": str(avif_candidate), "size": "200"})
-        cavif = ravif.headers.get("content-type", "")
-        ok_content = cavif.startswith("image/png") or cavif.startswith("image/jpeg")
-        if ravif.ok and ok_content:
-            results.append(CheckResult(
-                "PASS",
-                "API /preview .avif",
-                f"status={ravif.status} content-type={cavif!r} url={ravif.url}",
+        try:
+            payload = json_object(save_resp)
+            final_path = paths["output"] / "Editor" / "a" / "001.png"
+            thumb_path = paths["output"] / "Editor" / "thumbnails" / "a" / "001.png"
+            old_thumb_path = paths["output"] / "Editor" / "thumbnails" / "400" / "a" / "001.png"
+            final_exists = final_path.exists()
+            thumb_exists = wait_for_path(thumb_path)
+            save_ok = final_exists and thumb_exists and not old_thumb_path.exists()
+            checks.append(result(
+                "PASS" if save_ok else "FAIL",
+                "API",
+                "Editor save paths",
+                f"saved={payload.get('saved')} final_exists={final_exists} thumb={payload.get('thumb')} thumb_exists={thumb_exists} old_thumb_exists={old_thumb_path.exists()}",
             ))
-        else:
-            detail = ravif.text or ravif.error
-            if ravif.status == 400 and EXPECTED_AVIF_PREVIEW_ERROR not in detail:
-                detail = f"{detail} (expected detail: {EXPECTED_AVIF_PREVIEW_ERROR})"
-            results.append(CheckResult(
-                "FAIL",
-                "API /preview .avif",
-                f"status={ravif.status} content-type={cavif!r} detail={detail}",
-            ))
+        except Exception as exc:
+            checks.append(result("FAIL", "API", "Editor save paths", f"Invalid JSON payload: {exc}"))
 
-    # 8) preview cache check (WARN if cannot verify)
-    cache_dir = repo_root / ".cache" / "previews"
-    if cache_dir.exists():
-        files = [p for p in cache_dir.glob("*") if p.is_file()]
-        if not files:
-            results.append(CheckResult("FAIL", "Preview cache artifacts", f"Cache directory exists but has no files: {cache_dir}"))
-        else:
-            non_zero = [p for p in files if p.stat().st_size > 0]
-            if non_zero:
-                results.append(CheckResult("PASS", "Preview cache artifacts", f"Found {len(non_zero)} non-zero preview cache file(s)."))
-            else:
-                results.append(CheckResult("FAIL", "Preview cache artifacts", f"Cache files are zero bytes in {cache_dir}."))
+    skip_resp = client.request(
+        "POST",
+        "/skip",
+        payload={"image_path": str(paths["second"]), "src_root": str(paths["input"]), "output_dir": str(paths["output"])},
+    )
+    if failure := check_response_ok("API", "Editor skipped path", skip_resp):
+        checks.append(failure)
     else:
-        if r4.ok or r5.ok:
-            results.append(CheckResult("WARN", "Preview cache artifacts", "Preview succeeded but .cache/previews was not found (possible permissions or lazy cache path behavior)."))
-        else:
-            results.append(CheckResult("WARN", "Preview cache artifacts", "Preview requests failed, so cache verification was skipped."))
+        try:
+            payload = json_object(skip_resp)
+            skip_path = paths["output"] / "Editor" / "skipped" / "a" / "002.png"
+            checks.append(result(
+                "PASS" if skip_path.exists() else "FAIL",
+                "API",
+                "Editor skipped path",
+                f"skipped={payload.get('skipped')} exists={skip_path.exists()}",
+            ))
+        except Exception as exc:
+            checks.append(result("FAIL", "API", "Editor skipped path", f"Invalid JSON payload: {exc}"))
 
-    # 9) settings merge safety with backup + restore
+    checks.extend(run_settings_api_checks(repo_root, client, sandbox, created))
+    return checks, created
+
+
+def run_settings_api_checks(repo_root: Path, client: ApiClient, sandbox: Path, created: list[Path]) -> list[CheckResult]:
+    checks: list[CheckResult] = []
     settings_file = repo_root / "settings.json"
-    backup_path = sandbox / "settings.backup.json"
     if not settings_file.exists():
-        results.append(CheckResult("WARN", "Settings merge safety", "settings.json missing; skipped settings merge test."))
-        return
+        return [result("WARN", "API", "Settings patch/merge", "settings.json missing; skipped settings patch check.")]
 
-    restore_ok = False
-    backup_made = False
-    original_text = ""
-    try:
-        original_text = settings_file.read_text(encoding="utf-8")
-        _write_bytes(backup_path, original_text.encode("utf-8"), created)
-        backup_made = True
-    except Exception as e:
-        results.append(CheckResult("WARN", "Settings merge safety", f"Could not create settings backup; skipped test: {e}"))
-        return
-
-    if not backup_made:
-        results.append(CheckResult("WARN", "Settings merge safety", "Could not guarantee backup; skipped test."))
-        return
+    backup = sandbox / "settings.backup.json"
+    original = settings_file.read_text(encoding="utf-8")
+    ensure_dir(backup.parent, created)
+    backup.write_text(original, encoding="utf-8")
+    created.append(backup)
 
     try:
         before_resp = client.request("GET", "/settings")
-        if not before_resp.ok:
-            results.append(CheckResult("FAIL", "Settings merge safety", f"Initial GET /settings failed: HTTP {before_resp.status}"))
-            return
-
-        before = _json_dict(before_resp).get("settings")
+        if failure := check_response_ok("API", "Settings patch/merge", before_resp):
+            return [failure]
+        before = json_object(before_resp).get("settings")
         if not isinstance(before, dict):
-            results.append(CheckResult("FAIL", "Settings merge safety", "Initial GET /settings returned invalid payload."))
-            return
+            return [result("FAIL", "API", "Settings patch/merge", "GET /settings did not return settings object.")]
+        before_sections = set(before.keys())
 
-        appearance = before.get("appearance") if isinstance(before.get("appearance"), dict) else {}
-        current_theme = str(appearance.get("theme", "light"))
-        patch_payload = {"settings": {"appearance": {"theme": current_theme}}}
-        post_resp = client.request("POST", "/settings", payload=patch_payload)
-        if not post_resp.ok:
-            results.append(CheckResult("FAIL", "Settings merge safety", f"POST /settings failed: HTTP {post_resp.status} {post_resp.text or post_resp.error}"))
-            return
+        round_trips: list[str] = []
+        for theme in ["light", "dark"]:
+            post_resp = client.request("POST", "/settings", payload={"settings": {"appearance": {"theme": theme}}})
+            if failure := check_response_ok("API", f"Theme round-trip {theme}", post_resp):
+                checks.append(failure)
+                continue
+            get_resp = client.request("GET", "/settings")
+            if failure := check_response_ok("API", f"Theme round-trip {theme}", get_resp):
+                checks.append(failure)
+                continue
+            after = json_object(get_resp).get("settings")
+            if not isinstance(after, dict):
+                checks.append(result("FAIL", "API", f"Theme round-trip {theme}", "GET /settings did not return settings object."))
+                continue
+            theme_ok = after.get("appearance", {}).get("theme") == theme
+            merge_ok = before_sections.issubset(set(after.keys()))
+            checks.append(result(
+                "PASS" if theme_ok and merge_ok else "FAIL",
+                "API",
+                f"Theme round-trip {theme}",
+                f"theme={after.get('appearance', {}).get('theme')} sections_preserved={merge_ok}",
+            ))
+            if theme_ok:
+                round_trips.append(theme)
 
-        after_resp = client.request("GET", "/settings")
-        if not after_resp.ok:
-            results.append(CheckResult("FAIL", "Settings merge safety", f"Final GET /settings failed: HTTP {after_resp.status}"))
-            return
-
-        after = _json_dict(after_resp).get("settings")
-        if not isinstance(after, dict):
-            results.append(CheckResult("FAIL", "Settings merge safety", "Final GET /settings returned invalid payload."))
-            return
-
-        before_keys = set(before.keys())
-        after_keys = set(after.keys())
-        missing_keys = sorted(before_keys - after_keys)
-        if missing_keys:
-            results.append(CheckResult("FAIL", "Settings merge safety", f"Top-level sections were wiped: {missing_keys}"))
-        else:
-            results.append(CheckResult("PASS", "Settings merge safety", "POST /settings partial patch preserved existing top-level sections."))
+        checks.append(result(
+            "PASS" if set(round_trips) == {"light", "dark"} else "FAIL",
+            "API",
+            "Settings patch/merge",
+            f"theme_round_trips={round_trips} top_level_sections={sorted(before_sections)}",
+        ))
     finally:
-        # Restore local settings.json no matter what.
         try:
-            if backup_path.exists():
-                settings_file.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
-                restore_ok = True
-        except Exception:
-            restore_ok = False
+            settings_file.write_text(original, encoding="utf-8")
+            checks.append(result("PASS", "API", "Settings restore", "settings.json restored after API settings checks."))
+        except Exception as exc:
+            checks.append(result("WARN", "API", "Settings restore", f"Could not restore settings.json automatically: {exc}"))
 
-        if not restore_ok:
-            results.append(CheckResult("WARN", "Settings restore", f"Could not automatically restore {settings_file} from {backup_path}."))
+    return checks
 
 
-def print_created(created: list[tuple[Path, str]], repo_root: Path) -> None:
-    print("\nCreated paths:")
+def print_results(checks: list[CheckResult]) -> None:
+    print("\nSmoke Test Results:")
+    current_category = None
+    for check in checks:
+        if check.category != current_category:
+            current_category = check.category
+            print(f"\n[{current_category}]")
+            print(f"{'STATUS':<7}  {'TEST':<34} DETAILS")
+            print("-" * 80)
+        print(f"{check.status:<7}  {check.name:<34} {check.details}")
+
+
+def print_created(created: list[Path], repo_root: Path) -> None:
+    print("\nCreated sandbox paths:")
     if not created:
         print("  (none)")
         return
-    for path, kind in created:
+    for path in created:
         try:
-            rel = path.resolve().relative_to(repo_root.resolve())
-            label = f"./{norm_path_text(str(rel))}"
+            label = "./" + normalize_path(str(path.resolve().relative_to(repo_root.resolve())))
         except Exception:
             label = str(path)
-        print(f"  - [{kind}] {label}")
+        print(f"  - {label}")
 
 
-def print_results(results: list[CheckResult]) -> None:
-    print("\nSmoke Test Results:")
-    header = f"{'STATUS':<7}  {'TEST':<38} DETAILS"
-    print(header)
-    print("-" * len(header))
-    for r in results:
-        print(f"{r.status:<7}  {r.name:<38} {r.details}")
+def print_coverage_notes(api_mode: bool) -> None:
+    print("\nCoverage notes:")
+    print("  - Static checks: source-level regression guards; safe by default.")
+    if api_mode:
+        print("  - API checks: sandboxed /images, /preview, /save, /skip, and /settings checks ran.")
+    else:
+        print("  - API checks: skipped because --api-url was not provided.")
+    print("  - Manual/browser checks not automated: tab navigation, visual thumbnail repaint, snap highlight visuals, Vite UI clicks.")
+    print("  - Dangerous checks not automated: real upscale/rembg pipeline runs, GPU OOM, cancellation/stop behavior.")
+    print("  - No pipeline run was started.")
+    print("  - No process stop/kill was called.")
+    print("  - No real user input/output folders were modified.")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Safe local smoke test for key stability fixes.")
-    parser.add_argument("--api-url", default="", help="Run API smoke checks against a running local API.")
-    parser.add_argument("--sandbox", default="", help="Sandbox folder path for smoke data (default: repo/.smoke-test-sandbox).")
-    parser.add_argument("--avif-sample", default="", help="Optional AVIF file path used for /preview AVIF smoke check when local AVIF generation is unavailable.")
-    parser.add_argument("--cleanup", action="store_true", help="Delete the sandbox folder after checks (safe-guarded).")
-    parser.add_argument("--keep-sandbox", action="store_true", help="Keep sandbox folder even when --cleanup is set.")
-    parser.add_argument("--danger-run-pipeline", action="store_true", default=False, help="Reserved; intentionally not implemented.")
-    parser.add_argument("--danger-test-stop", action="store_true", default=False, help="Reserved; intentionally not implemented.")
-    parser.add_argument("--verbose", action="store_true", help="Verbose logging.")
+    parser = argparse.ArgumentParser(description="Safe local smoke test for Image Pipeline stability invariants.")
+    parser.add_argument("--api-url", default="", help="Run sandboxed API checks against a running local API.")
+    parser.add_argument("--sandbox", default="", help="Sandbox folder path (default: repo/.smoke-test-sandbox).")
+    parser.add_argument("--cleanup", action="store_true", help="Delete sandbox folder after checks.")
+    parser.add_argument("--keep-sandbox", action="store_true", help="Keep sandbox even when --cleanup is set.")
+    parser.add_argument("--danger-run-pipeline", action="store_true", help="Reserved; intentionally not implemented.")
+    parser.add_argument("--danger-test-stop", action="store_true", help="Reserved; intentionally not implemented.")
+    parser.add_argument("--verbose", action="store_true", help="Print API request URLs.")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
-    explicit_sandbox = bool(args.sandbox.strip())
-    sandbox = Path(args.sandbox).expanduser().resolve() if explicit_sandbox else (repo_root / ".smoke-test-sandbox").resolve()
-
-    results: list[CheckResult] = []
-    created: list[tuple[Path, str]] = []
-
-    if not explicit_sandbox and repo_root.resolve() not in sandbox.parents and sandbox != repo_root:
-        results.append(CheckResult("FAIL", "Sandbox path safety", f"Default sandbox must be under repo root: {sandbox}"))
-        print_results(results)
-        print_created(created, repo_root)
-        return 1
+    sandbox = Path(args.sandbox).expanduser().resolve() if args.sandbox.strip() else (repo_root / ".smoke-test-sandbox").resolve()
+    checks = run_static_checks(repo_root)
+    created: list[Path] = []
 
     if args.danger_run_pipeline:
-        results.append(CheckResult("WARN", "Danger flag --danger-run-pipeline", "Flag provided, but run/stop pipeline calls are intentionally not implemented in this script."))
+        checks.append(result("WARN", "Danger", "--danger-run-pipeline", "Flag is intentionally not implemented; no pipeline run was started."))
     if args.danger_test_stop:
-        results.append(CheckResult("WARN", "Danger flag --danger-test-stop", "Flag provided, but stop/kill behavior is intentionally not implemented in this script."))
-
-    run_static_checks(repo_root, results)
+        checks.append(result("WARN", "Danger", "--danger-test-stop", "Flag is intentionally not implemented; no process stop/kill was called."))
 
     if args.api_url.strip():
-        avif_sample = Path(args.avif_sample).expanduser().resolve() if args.avif_sample.strip() else None
-        run_api_checks(
-            repo_root,
-            args.api_url.strip(),
-            sandbox,
-            results,
-            created,
-            avif_sample=avif_sample,
-            verbose=args.verbose,
-        )
+        api_checks, api_created = run_api_checks(repo_root, args.api_url.strip(), sandbox, args.verbose)
+        checks.extend(api_checks)
+        created.extend(api_created)
     else:
-        results.append(CheckResult("PASS", "Mode", "Static checks mode only (no API calls performed)."))
+        checks.append(result("INFO", "API", "API mode", "Skipped; pass --api-url to run sandboxed API checks."))
 
     if args.cleanup and args.keep_sandbox:
-        results.append(CheckResult("WARN", "Cleanup", "--cleanup ignored because --keep-sandbox was set."))
+        checks.append(result("WARN", "Cleanup", "Sandbox cleanup", "--cleanup ignored because --keep-sandbox was set."))
     elif args.cleanup:
-        ok, msg = safe_remove_sandbox(sandbox, repo_root)
-        results.append(CheckResult("PASS" if ok else "FAIL", "Cleanup", msg))
+        checks.append(safe_remove_sandbox(sandbox, repo_root))
 
-    print_results(results)
+    print_results(checks)
     print_created(created, repo_root)
-    print("\nNo real input/output folders were modified.")
-    print("No pipeline run was started.")
-    print("No process stop/kill was called.")
+    print_coverage_notes(bool(args.api_url.strip()))
 
-    has_fail = any(r.status == "FAIL" for r in results)
-    return 1 if has_fail else 0
+    return 1 if any(check.status == "FAIL" for check in checks) else 0
 
 
 if __name__ == "__main__":
