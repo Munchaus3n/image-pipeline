@@ -81,6 +81,8 @@ These remain browser/manual checks unless a future browser automation dependency
 8. Navigate to Process and confirm completed-run `Open Editor` styling matches header actions when visible.
 9. Confirm the Process Resume prompt uses a top-right `×` dismiss button.
 10. Resume if possible and confirm live preview collapses when no real preview paths are available, without large empty placeholders.
+11. Confirm the compact Input density shows more thumbnails above the fold without crowding the path controls or preview panel.
+12. Hover the first column of image cards and confirm hover/selected shadows remain inside the scrollable grid without clipping.
 
 ## Dangerous/Real Pipeline Checks
 These are intentionally not automated by `safe_smoke_test.py`:
@@ -100,5 +102,6 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-27 visual foundation automated validation: static smoke, Python compile, frontend install, frontend build, and frontend lint. API-mode smoke was skipped because `127.0.0.1:7421` was not reachable; existing Vite servers responded locally, but full browser visual inspection was not captured.
 - Passed 2026-06-27 Input visual automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Passed 2026-06-27 Input/Process polish follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
+- Passed 2026-06-27 Input density/clipping follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no browser automation, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

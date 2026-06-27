@@ -273,3 +273,21 @@
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
 - Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
+
+## 2026-06-27 Input Density/Clipping Follow-Up
+
+### Code Changes
+- Tightened the Input screen vertical density across the header, toolbar, path/search row, selection toolbar, grid cards, and preview panel.
+- Reduced Input grid card minimum width and gaps so the first viewport shows more thumbnails without adding new behavior or API calls.
+- Added safe grid inset and removed hover transform/reduced hover shadow so first-column hover effects no longer clip against the scroll container.
+- Kept the visible Input action as `Load`; no auto-scan, path/session, processing, output, Editor handoff, Electron, dependency, or redesign changes were made.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` passed against the already-running API.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
+- Full click-by-click browser visual QA and screenshots were not captured because no browser automation dependency is installed and none was added.

@@ -967,3 +967,322 @@ input[type=number] { color-scheme: dark; }
     max-height: 420px;
   }
 }
+
+/* Follow-up density pass: tighter desktop proportions and safer hover inset. */
+.input-page-header {
+  min-height: 48px;
+  gap: 14px;
+  padding: 0 18px;
+}
+
+.input-page-title {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+
+.input-page-subtitle {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.input-page-actions {
+  gap: 10px;
+}
+
+.input-header-count {
+  font-size: 10px !important;
+}
+
+.input-page-actions .input-next-button {
+  min-height: 34px !important;
+  padding: 0 14px !important;
+  border-radius: 999px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.1em;
+}
+
+.input-toolbar {
+  margin: 14px 20px 8px !important;
+  grid-template-columns: minmax(300px, 1.4fr) minmax(180px, 0.72fr) auto auto auto !important;
+  gap: 8px !important;
+}
+
+.input-folder-group {
+  height: 36px;
+  border-radius: 10px;
+  gap: 5px !important;
+}
+
+.input-path-field,
+.input-search-field {
+  min-height: 34px !important;
+  font-size: 10px !important;
+  padding: 0 10px !important;
+}
+
+.input-path-field {
+  border-radius: 10px 0 0 10px !important;
+}
+
+.input-folder-group select {
+  width: 30px !important;
+  min-height: 34px;
+  font-size: 9px !important;
+}
+
+.input-search-field {
+  border-radius: 10px !important;
+}
+
+.input-toolbar .input-browse-button,
+.input-toolbar .input-load-button {
+  min-height: 34px !important;
+  padding: 0 9px !important;
+  font-size: 9px !important;
+}
+
+.input-toolbar .input-load-button {
+  min-width: 58px;
+  border-radius: 0 9px 9px 0 !important;
+}
+
+.input-subfolders-toggle,
+.input-toolbar .input-select-button {
+  min-height: 31px;
+  border-radius: 9px !important;
+  padding: 0 9px !important;
+  font-size: 9px !important;
+  letter-spacing: 0.06em;
+}
+
+.input-selection-bar {
+  min-height: 38px;
+  margin: 0 20px 8px !important;
+  padding: 6px 8px 6px 12px !important;
+  gap: 10px !important;
+  border-radius: 10px !important;
+}
+
+.input-selection-count {
+  font-size: 10px !important;
+  letter-spacing: 0.07em;
+}
+
+.input-selection-actions {
+  gap: 5px;
+}
+
+.input-selection-action,
+.input-selection-clear {
+  min-height: 29px;
+  border-radius: 8px !important;
+  padding: 0 10px !important;
+  font-size: 10px !important;
+}
+
+.input-selection-clear {
+  min-width: 46px;
+}
+
+.input-main {
+  padding: 0 20px 16px !important;
+  gap: 12px;
+}
+
+.input-grid-scroll {
+  padding: 3px 6px 8px !important;
+}
+
+.input-grid {
+  grid-template-columns: repeat(auto-fill, minmax(134px, 1fr)) !important;
+  gap: 10px !important;
+}
+
+.input-grid .input-card {
+  border-radius: 12px !important;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.input-grid .input-card.is-selected {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent),
+    0 8px 16px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.input-grid .input-thumb:hover {
+  transform: none;
+  box-shadow: 0 7px 16px color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.input-thumb-image,
+.input-thumb-fallback {
+  border-top-left-radius: 11px;
+  border-top-right-radius: 11px;
+}
+
+.input-checkbox {
+  top: 8px !important;
+  right: 8px !important;
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
+}
+
+.input-eye-button {
+  width: 22px !important;
+  height: 22px !important;
+  right: 8px !important;
+  bottom: 8px !important;
+}
+
+.input-excluded-badge {
+  top: 8px !important;
+  left: 8px !important;
+  padding: 3px 6px !important;
+  font-size: 7px !important;
+}
+
+.input-filename-bar {
+  min-height: 36px;
+  padding: 6px 8px !important;
+}
+
+.input-filename {
+  font-size: 9px !important;
+}
+
+.input-folder-name {
+  margin-top: 0 !important;
+  font-size: 7px !important;
+}
+
+.input-empty-state,
+.input-loading-state,
+.input-error-state,
+.input-pending-state,
+.input-zero-state {
+  min-height: 260px;
+  border-radius: 14px;
+}
+
+.input-preview {
+  width: 238px !important;
+  border-radius: 14px;
+}
+
+.input-preview-header {
+  min-height: 38px;
+  padding: 0 12px !important;
+}
+
+.input-preview-header span {
+  font-size: 9px !important;
+  letter-spacing: 0.14em !important;
+}
+
+.input-preview-header button {
+  width: 24px;
+  height: 24px;
+}
+
+.input-preview-image {
+  width: calc(100% - 20px) !important;
+  height: clamp(104px, 18vh, 142px) !important;
+  margin: 10px 10px 0;
+  border-radius: 12px;
+}
+
+.input-preview-body {
+  padding: 10px !important;
+}
+
+.input-preview-label {
+  margin-bottom: 3px !important;
+  font-size: 8px !important;
+  letter-spacing: 0.12em !important;
+}
+
+.input-preview-value {
+  margin-bottom: 7px !important;
+  font-size: 9px !important;
+  line-height: 1.45 !important;
+}
+
+.input-preview-divider {
+  margin: 6px 0 8px;
+}
+
+.input-preview-control {
+  min-height: 36px;
+  border-radius: 10px;
+  padding: 0 9px;
+}
+
+.input-preview-toggle-label {
+  font-size: 10px !important;
+}
+
+.input-preview-toggle-button {
+  min-height: 25px !important;
+  padding: 0 8px !important;
+  border-radius: 8px !important;
+  font-size: 9px !important;
+}
+
+.input-preview-remove {
+  min-height: 34px !important;
+  border-radius: 10px !important;
+  font-size: 10px !important;
+}
+
+@media (max-width: 1180px) {
+  .input-toolbar {
+    margin: 12px 16px 8px !important;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 0.62fr) auto auto auto !important;
+  }
+
+  .input-selection-bar {
+    margin: 0 16px 8px !important;
+  }
+
+  .input-main {
+    padding: 0 16px 14px !important;
+  }
+
+  .input-grid {
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)) !important;
+    gap: 9px !important;
+  }
+
+  .input-preview {
+    width: 220px !important;
+  }
+
+  .input-preview-image {
+    height: clamp(96px, 17vh, 132px) !important;
+  }
+}
+
+@media (max-width: 960px) {
+  .input-page-header {
+    padding: 10px 12px;
+  }
+
+  .input-toolbar {
+    margin: 10px 12px 8px !important;
+  }
+
+  .input-main {
+    padding: 0 12px 12px !important;
+  }
+
+  .input-grid {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)) !important;
+  }
+
+  .input-preview {
+    width: 100% !important;
+    max-height: 360px;
+  }
+}

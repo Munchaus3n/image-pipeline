@@ -16,6 +16,7 @@
 - Visual foundation shell is implemented: compact Lovable-style sidebar, light/dark tokens, workflow step cards, secondary tabs, and styled theme toggle.
 - Input visual pass is implemented: `Input · Review` header, path/search controls, image grid cards, selection toolbar, and preview/details panel now match the shell direction.
 - Input/Process polish follow-up is implemented: visible `Load` label, compact Input preview panel, cleaner selection toolbar, Process Open Editor polish, Resume prompt `×` dismiss, and collapsed empty live preview area.
+- Input density/clipping follow-up is implemented: tighter Input proportions, more compact thumbnail grid, and safer first-column hover/selected shadows.
 - Next implementation should be the Process visual pass only.
 - No Electron packaging work has been started.
 
