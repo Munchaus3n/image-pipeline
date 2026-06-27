@@ -22,7 +22,7 @@
 ## Phase 4 - Editor Output Structure - Done
 - Implement final output convention as `<output>/Editor/<relative image>.png`.
 - Keep skipped output as `<output>/Editor/skipped/<relative image>`.
-- Keep thumbnails under `<output>/Editor/thumbnails/<size>/`.
+- Keep thumbnails under `<output>/Editor/thumbnails/<relative image>.png`.
 - Ensure output folder identity is not carried across unrelated runs.
 
 ## Phase 5 - Processing Reliability - Done
@@ -59,11 +59,11 @@
 - Fixed exact light/dark theme persistence.
 - Do not redesign Process yet.
 
-### Batch 2 - Editor Queue And Output Decisions
-- Make Editor queue stable and folder-by-folder.
-- Show folder/context in Editor labels.
+### Batch 2 - Editor Queue And Output Decisions - Completed 2026-06-27
+- Made Editor queue stable and folder-by-folder.
+- Showed folder/context in Editor labels.
 - Reset snap/alignment state after completing an image.
-- Confirm and then implement thumbnail output convention.
+- Implemented thumbnail output convention as `<output>/Editor/thumbnails/<relative image>.png`.
 
 ### Batch 3 - Process/Input UX Cleanup
 - Simplify or define Load vs Refresh.

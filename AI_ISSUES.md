@@ -9,9 +9,9 @@
 1. Fixed 2026-06-26: stale Input thumbnails can remain when photos change inside the same selected folder.
 2. Fixed 2026-06-26: exclude-from-background-removal selection can exclude more than selected or miss selected images.
 3. Fixed 2026-06-26: light/dark mode can flip between app launches; theme must persist exactly.
-4. Editor item queue should be stable and folder-by-folder, not random.
-5. Editor item labels should include folder/context, not filename only.
-6. Snap/alignment color/state does not reset after completing an image.
+4. Fixed 2026-06-27: Editor item queue should be stable and folder-by-folder, not random.
+5. Fixed 2026-06-27: Editor item labels should include folder/context, not filename only.
+6. Fixed 2026-06-27: snap/alignment color/state does not reset after completing an image.
 
 ### UX Cleanup
 1. Load and Refresh are effectively the same; keep one clear action or define the difference.
@@ -31,13 +31,15 @@
 5. Editor Output panel should be cleaner.
 
 ### Product Decision Needed
-1. Thumbnail output convention should avoid unnecessary folder-in-folder nesting; confirm desired convention before implementation.
+1. Fixed 2026-06-27: thumbnail output convention now avoids unnecessary `thumbnails/400/` nesting.
 2. Decide whether Load/Refresh remain separate or collapse into one reload action.
 3. Decide whether Process live preview is reliable enough to keep.
 
 ## Validation Notes
 - Batch 1 behavior fixes were completed on 2026-06-26 on `local/batch1-input-exclude-theme`.
 - Batch 1 validation passed safe smoke, Python compile, `npm.cmd install`, frontend build, frontend lint, same-folder image mutation probe, nested same-filename ID probe, and theme settings round-trip.
+- Batch 2 behavior fixes were completed on 2026-06-27 on `local/batch2-editor-queue-snap-thumbs`.
+- Batch 2 validation passed safe smoke, Python compile, `npm.cmd install`, frontend build, frontend lint, nested queue order probe, final/skipped path probe, and flattened thumbnail path probe.
 - Real local workflow regression completed on 2026-06-23 with isolated PNG inputs.
 - Real-ESRGAN upscale-only, rembg-only on CPU-forced `bria-rmbg`, and one both-stages run passed.
 - No stale output folder reuse, `<output>/Editor/final` regression, or completed-session handoff failure was found.

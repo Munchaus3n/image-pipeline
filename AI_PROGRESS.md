@@ -35,7 +35,7 @@
 - Completed.
 - Final editor exports now land directly under `<output>/Editor/`.
 - Skipped files remain under `<output>/Editor/skipped/`.
-- Thumbnails now land under `<output>/Editor/thumbnails/<size>/`.
+- Thumbnails now land under `<output>/Editor/thumbnails/`.
 
 ### Phase 5 - Processing Reliability
 - Completed.
@@ -94,7 +94,7 @@
 - Editor source handoff passed by loading the exact completed `src_root` with 3 images.
 - Editor final save passed at `%TEMP%\image-pipeline-real-validation-20260623-134905\output-a\Editor\alpha.png`.
 - Editor skipped save passed at `%TEMP%\image-pipeline-real-validation-20260623-134905\output-a\Editor\skipped\beta.png`.
-- Editor thumbnail passed at `%TEMP%\image-pipeline-real-validation-20260623-134905\output-a\Editor\thumbnails\400\alpha.png`.
+- Editor thumbnail passed under the then-current thumbnail convention; Batch 2 later flattened thumbnails to `<output>/Editor/thumbnails/`.
 - Second real upscale-only run with a different output folder passed; session moved to `<output-b>\upscaled` and save moved to `<output-b>\Editor\alpha.png`.
 - Real rembg-only run passed on CPU-forced `bria-rmbg`; model loaded and wrote `<output-rembg>\processed\alpha.png`.
 - Real both-stages run passed on one image; session handoff used `<output-both>\processed`.
@@ -142,3 +142,30 @@
 - Confirmed distinct relative IDs for same-named nested files: `nested-a/same.png` and `nested-b/same.png`.
 - Confirmed settings theme round-trip: saved `light`, read back `light`; saved `dark`, read back `dark`.
 - Stopped validation servers and removed temporary validation folders/logs.
+
+## 2026-06-27 Batch 2 Editor Queue/Snap/Thumbnail Fixes
+
+### Code Changes
+- Made `/api/images` return a deterministic natural path order for source image lists.
+- Added defensive Editor queue sorting by relative path so folders load folder-by-folder and files sort naturally inside each folder.
+- Updated Editor item labels to show source-relative context such as `a/001.png` instead of only duplicate filenames.
+- Reset transient snap/alignment visual state when loading a source, clearing a source, completing all images, saving/advancing, and skipping/advancing.
+- Changed thumbnail output convention to `<output>/Editor/thumbnails/<relative image>.png`; final and skipped output paths are unchanged.
+- No Electron work, dependency additions, Process/Input UX cleanup, or broad redesign were made.
+
+### Automated Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+
+### Local App Validation
+- Started FastAPI with `python api.py` and Vite with `npm.cmd run dev -- --host 127.0.0.1`; Vite selected port `5174` because `5173` was already in use.
+- Confirmed Vite `5174` and proxy `/api/settings` returned 200.
+- Created nested real PNGs: `a/001.png`, `a/002.png`, `b/001.png`, `b/002.png`.
+- Confirmed `/api/images` returned deterministic folder-by-folder order: `a/001.png`, `a/002.png`, `b/001.png`, `b/002.png`.
+- Confirmed final save path remained `<output>/Editor/a/001.png`.
+- Confirmed skipped path remained `<output>/Editor/skipped/a/002.png`.
+- Confirmed thumbnail path is now `<output>/Editor/thumbnails/a/001.png` and the old `<output>/Editor/thumbnails/400/a/001.png` path was not created.
+- Stopped the Batch 2 Vite/API validation processes and removed Batch 2 temporary validation folders/logs.

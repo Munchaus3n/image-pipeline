@@ -11,7 +11,8 @@
 - One validation issue was fixed: upscale-only completion logs now point to `<output>/upscaled`.
 - User feedback from 2026-06-26 is documented in `AI_ISSUES.md`, `AI_DESIGN_PLAN.md`, `AI_FIX_PLAN.md`, and `AI_PROGRESS.md`.
 - Batch 1 behavior bugs are fixed and validated: stale Input thumbnails, exclusion selection exactness, and exact theme persistence.
-- Next implementation should start with Batch 2 behavior bugs before Process design work.
+- Batch 2 behavior bugs are fixed and validated: Editor queue ordering/labels, snap/alignment reset, and flattened thumbnail output convention.
+- Next implementation should start with Batch 3 Process/Input UX cleanup before Process design work.
 - No Electron packaging work has been started.
 
 ## Next Agent Instructions
@@ -20,12 +21,13 @@
 - Keep changes small; do not commit unless explicitly asked.
 - Do not add Electron files or dependencies.
 - Prefer deleting/adjusting existing workflow code over adding abstractions.
-- Do not start Process redesign before Batch 2 behavior bugs are fixed.
+- Do not start Process redesign before Batch 3 UX corrections are fixed.
 
 ## Watchpoints
 - Do not let Settings overwrite active path state after mount.
 - Do not auto-scan large folders on input typing.
 - Do not delete the successful pipeline session before Editor consumes it.
 - Do not reintroduce `<output>/Editor/final`; final exports go directly under `<output>/Editor/`.
+- Do not reintroduce `<output>/Editor/thumbnails/400`; thumbnails go directly under `<output>/Editor/thumbnails/`.
 - Do not let Editor fall back to stale default output when a custom output was just processed.
 - Keep browser/Vite dev mode compatible.

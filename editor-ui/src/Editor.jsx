@@ -49,6 +49,60 @@ function normalizeOutputIdentity(path = "") {
   return key || DEFAULT_OUTPUT_IDENTITY;
 }
 
+function toForwardSlashes(path = "") {
+  return String(path || "").replace(/\\/g, "/");
+}
+
+function trimTrailingSlashes(path = "") {
+  return path.replace(/\/+$/, "");
+}
+
+function relativePathFromRoot(absPath, rootPath) {
+  const absNorm = trimTrailingSlashes(toForwardSlashes(absPath).trim());
+  const rootNorm = trimTrailingSlashes(toForwardSlashes(rootPath).trim());
+  if (!absNorm || !rootNorm) return "";
+  const absLower = absNorm.toLowerCase();
+  const rootLower = rootNorm.toLowerCase();
+  if (absLower === rootLower) return "";
+  if (absLower.startsWith(`${rootLower}/`)) return absNorm.slice(rootNorm.length + 1);
+  return "";
+}
+
+function naturalParts(value = "") {
+  return String(value)
+    .toLowerCase()
+    .split(/(\d+)/)
+    .filter(Boolean)
+    .map(part => (/^\d+$/.test(part) ? Number(part) : part));
+}
+
+function compareNaturalPaths(a, b) {
+  const aParts = toForwardSlashes(a).split("/").flatMap(part => [...naturalParts(part), "/"]);
+  const bParts = toForwardSlashes(b).split("/").flatMap(part => [...naturalParts(part), "/"]);
+  const len = Math.max(aParts.length, bParts.length);
+  for (let i = 0; i < len; i += 1) {
+    if (aParts[i] === undefined) return -1;
+    if (bParts[i] === undefined) return 1;
+    if (aParts[i] === bParts[i]) continue;
+    if (typeof aParts[i] === "number" && typeof bParts[i] === "number") return aParts[i] - bParts[i];
+    return String(aParts[i]).localeCompare(String(bParts[i]));
+  }
+  return 0;
+}
+
+function sortImageQueue(images, rootPath) {
+  return [...images].sort((a, b) => {
+    const relA = relativePathFromRoot(a, rootPath) || a;
+    const relB = relativePathFromRoot(b, rootPath) || b;
+    return compareNaturalPaths(relA, relB);
+  });
+}
+
+function imageQueueLabel(path, rootPath) {
+  const rel = relativePathFromRoot(path, rootPath);
+  return rel || path.split(/[\\/]/).pop();
+}
+
 // Returns canvas-pixel-space bounds for an item.
 // All hit testing and drawing uses these values (DS-space, not CANVAS_SIZE-space).
 function itemBounds(item) {
@@ -172,6 +226,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   const sourceLoadSeqRef = useRef(0);
   const resumePromptActiveRef = useRef(false);
   const sessionRunIdRef = useRef("");
+  const srcFolderRef = useRef("");
   // BUG-06 FIX: loadImage is useCallback but called from initFromFolder/advance which
   // need stable references. A ref breaks the circular dep chain cleanly — callers
   // always get the latest version without needing it in their own dep arrays.
@@ -288,6 +343,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   // allDone has no state/callback deps — clearSession is a stable import
   const allDone = useCallback(async () => {
     setItems([]); setSelId(null);
+    setActiveSnapZone(null);
     setStatus(`all images processed.\noutput → ${activeOutputDir}/Editor/`);
     await clearSession().catch(() => {});
   }, [activeOutputDir]);
@@ -344,7 +400,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
 
     const newItem = {
       id:       nextItemIdRef.current++,
-      label:    path.split(/[\\/]/).pop(),
+      label:    imageQueueLabel(path, srcFolderRef.current),
       filePath: path,
       canvasX:  CANVAS_SIZE / 2,
       canvasY:  Math.round((g.top + g.bottom) / 2),
@@ -370,13 +426,16 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   // initFromFolder: stable (uses loadImageRef to avoid circular dep on loadImage)
   const initFromFolder = useCallback(async (folder, startIdx, guidesOverride) => {
     const result = await getImages(folder);
+    const nextQueue = sortImageQueue(result.images, folder);
+    srcFolderRef.current = folder;
     setSrcFolder(folder);
     setSrcLabel(folder);
-    setQueue(result.images);
+    setQueue(nextQueue);
     setQueueIdx(startIdx);
     setItems([]);
     setSelId(null);
-    await loadImageRef.current(result.images, startIdx, false, guidesOverride);
+    setActiveSnapZone(null);
+    await loadImageRef.current(nextQueue, startIdx, false, guidesOverride);
     setStatus("");
   }, []); // getImages is a stable import; all setters are stable; uses ref for loadImage
 
@@ -388,6 +447,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     setQueueIdx(0);
     setItems([]);
     setSelId(null);
+    setActiveSnapZone(null);
     setSourceStage("none");
     setStatus(message);
   }, []);
@@ -527,6 +587,9 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
   const advance = useCallback(() => {
     const nextIdx = queueIdx + 1;
     setQueueIdx(nextIdx);
+    setActiveSnapZone(null);
+    undoRef.current = null;
+    dragRef.current = null;
     if (!comboMode) { setItems([]); setSelId(null); }
     loadImageRef.current(queue, nextIdx, comboMode);
   }, [queueIdx, comboMode, queue]);
@@ -596,9 +659,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     }
 
     // 5. Active snap zone — solid colored border
-    const snapZone = activeSnapZone && guides[activeSnapZone] ? activeSnapZone
-      : (templates[template]?.zone && guides[templates[template].zone]) ? templates[template].zone
-      : null;
+    const snapZone = activeSnapZone && guides[activeSnapZone] ? activeSnapZone : null;
     if (snapZone) {
       const g = guides[snapZone];
       const t=g.top*S, b=g.bottom*S, l=g.left*S, r=g.right*S;
@@ -1229,5 +1290,3 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     </>
   );
 }
-
-

@@ -55,11 +55,11 @@
 - Fixed theme persistence so light/dark mode restores exactly across launches.
 - Validation passed: targeted UI/API checks plus `python scripts\safe_smoke_test.py`, Python compile, Vite build, and lint.
 
-### Batch 2 - Editor Queue And Output Decisions
-- Make Editor queue ordering stable and folder-by-folder.
-- Show folder/context in Editor queue labels.
+### Batch 2 - Editor Queue And Output Decisions - Completed 2026-06-27
+- Made Editor queue ordering stable and folder-by-folder.
+- Showed folder/context in Editor queue labels.
 - Reset snap/alignment color/state automatically after completing an image.
-- Revisit thumbnail output convention and document/implement the chosen path only after confirming the desired convention.
+- Implemented thumbnail output convention as `<output>/Editor/thumbnails/<relative image>.png`.
 
 ### Batch 3 - Process/Input UX Corrections
 - Simplify or clearly differentiate Load vs Refresh.

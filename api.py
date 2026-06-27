@@ -175,7 +175,18 @@ def images_in_folder(folder: Path, *, recursive: bool = True, limit: int = 0) ->
     truncated = capped and len(images) > limit
     if truncated:
         images = images[:limit]
-    return sorted(images), truncated
+    return sorted(images, key=lambda p: _natural_path_key(p, folder)), truncated
+
+def _natural_path_key(path: Path, root: Path) -> tuple:
+    try:
+        value = path.relative_to(root)
+    except ValueError:
+        value = path
+    parts = str(value).replace("\\", "/").lower().split("/")
+    return tuple(
+        tuple(int(chunk) if chunk.isdigit() else chunk for chunk in re.split(r"(\d+)", part))
+        for part in parts
+    )
 
 def detect_source_folder(
     output_root: Path | None = None, *, allow_input_fallback: bool = True
@@ -230,7 +241,7 @@ def mirror_thumbnail_path(save_path: Path, output_base: Path, thumb_size: int) -
         rel = save_path.relative_to(output_base / "Editor")
     except ValueError:
         rel = save_path.name
-    return output_base / "Editor" / "thumbnails" / str(thumb_size) / rel
+    return output_base / "Editor" / "thumbnails" / rel
 
 def mirror_skip_path(src: Path, src_root: Path, output_base: Path | None = None) -> Path:
     return mirror_save_path(src, src_root, output_base=output_base, stage="skipped")
