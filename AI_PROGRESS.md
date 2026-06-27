@@ -291,3 +291,22 @@
 - `cd editor-ui && npm.cmd run lint` passed.
 - Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
 - Full click-by-click browser visual QA and screenshots were not captured because no browser automation dependency is installed and none was added.
+
+## 2026-06-27 Process Visual Match
+
+### Code Changes
+- Tightened the Process header actions so Run Pipeline stays strong primary, Stop is a compact destructive pill, and Open Editor keeps a readable secondary style.
+- Restyled the left Process config column with smaller grouped cards, uppercase labels, compact path fields, segmented controls, toggles, and output actions.
+- Compressed the resume, ready, progress, live preview, and Activity panels to better fit common desktop heights without reintroducing the `Will run` block or adding a System/GPU card.
+- Reduced hover/focus shadow movement to avoid clipping and horizontal overflow in the Process sidebar and panels.
+- Kept changes CSS-only; no API contracts, processing logic, path/session behavior, output conventions, Editor handoff, Electron, or dependency changes were made.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- Initial sandboxed `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` failed with `Permission denied` writing `__pycache__`; rerun with local write approval passed.
+- Initial sandboxed `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` failed with `Access is denied` creating `.smoke-test-sandbox`; rerun with local write approval passed.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
+- Full click-by-click browser visual QA and screenshots were not captured because no browser automation dependency is installed and none was added.

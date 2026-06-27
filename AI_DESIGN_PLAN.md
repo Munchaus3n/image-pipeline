@@ -81,11 +81,12 @@
 - Brought Input header, path/search row, toolbar controls, selection bar, image grid cards, empty/loading/error states, and preview panel into the shell design language.
 - Kept explicit loading, refresh behavior, image IDs, exclusions, recent folders, and navigation behavior unchanged.
 
-### Next - Process Visual Pass
-- Apply the shell design language to the Process screen after Input visuals are stable.
-- Keep current path/session/output behavior and pipeline API calls unchanged.
+### Process Visual Pass - Completed 2026-06-27
+- Applied the shell design language to the Process screen after Input visuals stabilized.
+- Kept current path/session/output behavior, pipeline API calls, processing logic, and Editor handoff unchanged.
+- Preserved the removed `Will run` block and omitted any System/GPU card.
 
-### Later - Editor Design Cleanup
+### Next - Editor Design Cleanup
 - Clean right sidebar, cards, buttons, queue item display, snap/alignment controls, and output panel.
 - Keep save/skip/session/output behavior unchanged.
 
@@ -96,6 +97,7 @@
 - Keep upscale settings, remove-background settings, editor/export settings, and skip/exclusion summary visually separate.
 - Keep run, stop, progress, ETA, log, and Open Editor states unambiguous.
 - Prefer stable class names and CSS over new inline styles.
+- Process visual pass is complete as of 2026-06-27; future Process work should be bug-fix-only unless explicitly scoped.
 
 ## Do Not Touch Before Electron
 - No Electron implementation, packaging, main process, preload, installer, or Electron dependencies.

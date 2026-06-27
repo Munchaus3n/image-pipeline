@@ -84,6 +84,17 @@ These remain browser/manual checks unless a future browser automation dependency
 11. Confirm the compact Input density shows more thumbnails above the fold without crowding the path controls or preview panel.
 12. Hover the first column of image cards and confirm hover/selected shadows remain inside the scrollable grid without clipping.
 
+## Process Visual Checks
+These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
+1. Open Process in light mode and confirm the left configuration column uses compact grouped cards without the removed `Will run` block.
+2. Confirm Run Pipeline is a strong primary action, Stop is a compact destructive pill, and Open Editor is readable when visible.
+3. Confirm the ready card is compact enough for the Activity panel to remain visible on common desktop heights.
+4. During a run, confirm progress percent, stage pill, elapsed/ETA, and stats remain readable without oversized vertical whitespace.
+5. Confirm live preview renders only when real preview paths exist and does not show empty placeholder blocks.
+6. Confirm the Activity panel uses compact telemetry rows, highlights errors, and keeps context toggles usable.
+7. Toggle dark mode and confirm Process cards, fields, toggles, logs, status pills, and buttons remain intentional.
+8. Confirm no System/GPU card and no horizontal overflow are present.
+
 ## Dangerous/Real Pipeline Checks
 These are intentionally not automated by `safe_smoke_test.py`:
 - Real Real-ESRGAN upscale runs.
@@ -103,5 +114,6 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-27 Input visual automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Passed 2026-06-27 Input/Process polish follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Passed 2026-06-27 Input density/clipping follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
+- Passed 2026-06-27 Process visual automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no browser automation, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.
