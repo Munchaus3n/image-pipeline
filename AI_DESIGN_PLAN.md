@@ -42,10 +42,12 @@
 1. Behavior bugs from user feedback.
 2. Editor output/thumbnail convention decision.
 3. Process/Input UX cleanup that does not alter workflow behavior.
-4. Editor design cleanup.
-5. Process tab design implementation.
-6. Templates/Settings cleanup.
-7. Electron remains postponed until the browser workflow and design baseline are stable.
+4. Visual foundation shell.
+5. Input visual pass.
+6. Process visual pass.
+7. Editor design cleanup.
+8. Templates/Settings cleanup.
+9. Electron remains postponed until the browser workflow and design baseline are stable.
 
 ## Next Small Implementation Batches
 
@@ -70,7 +72,20 @@
 - Kept live preview, but it only renders when real preview paths exist.
 - Removed the duplicate left-sidebar `Will run` summary block.
 
-### Batch 4 - Editor Design Cleanup
+### Visual Foundation Shell - Completed 2026-06-27
+- Updated global light/dark tokens, sidebar shell, compact branding, workflow step cards, secondary navigation, and theme toggle styling.
+- Removed System/GPU card direction from the shell baseline; do not add replacement hardware/status cards.
+- Kept all screen behavior, API calls, processing logic, and output conventions unchanged.
+
+### Next - Input Visual Pass
+- Bring Input screen spacing, cards, toolbar controls, buttons, empty/loading/error states, image grid cards, and preview panel into the shell design language.
+- Keep explicit loading, refresh behavior, image IDs, exclusions, recent folders, and navigation behavior unchanged.
+
+### Later - Process Visual Pass
+- Apply the shell design language to the Process screen after Input visuals are stable.
+- Keep current path/session/output behavior and pipeline API calls unchanged.
+
+### Later - Editor Design Cleanup
 - Clean right sidebar, cards, buttons, queue item display, snap/alignment controls, and output panel.
 - Keep save/skip/session/output behavior unchanged.
 

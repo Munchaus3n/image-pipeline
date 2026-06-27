@@ -214,3 +214,22 @@
 - `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
+
+## 2026-06-27 Visual Foundation Shell
+
+### Code Changes
+- Updated global light/dark design tokens toward the local Lovable/ImageFlow reference palette without migrating Tailwind, Radix, TanStack, routing, or architecture.
+- Made the app shell/sidebar more compact with `Pipeline Pro` branding, a compact logo mark, workflow step numbers, status text, hints, and rounded active step cards.
+- Restyled secondary navigation and the theme toggle to match the new shell language.
+- Added shared focus-visible styling for buttons and form controls through the shell stylesheet.
+- Confirmed no System/GPU indicator card was added or retained.
+- No Electron work, dependency additions, API call changes, processing logic changes, screen workflow changes, or Editor output convention changes were made.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- API-mode smoke was skipped because `http://127.0.0.1:7421/settings` was not reachable.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing local Vite servers responded on `127.0.0.1:5173`, `5174`, and `5175`; API was not running, so browser/proxy validation was not completed in this pass.

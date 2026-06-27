@@ -13,7 +13,8 @@
 - Batch 1 behavior bugs are fixed and validated: stale Input thumbnails, exclusion selection exactness, and exact theme persistence.
 - Batch 2 behavior bugs are fixed and validated: Editor queue ordering/labels, snap/alignment reset, and flattened thumbnail output convention.
 - Batch 3 Process/Input UX cleanup is fixed and validated: single explicit reload action, unified Activity panel, stage-step progress/ETA, Open Editor styling, hidden empty previews, and removed duplicate `Will run` block.
-- Next implementation should start with Batch 4 Editor design cleanup.
+- Visual foundation shell is implemented: compact Lovable-style sidebar, light/dark tokens, workflow step cards, secondary tabs, and styled theme toggle.
+- Next implementation should be the Input visual pass only.
 - No Electron packaging work has been started.
 
 ## Next Agent Instructions
@@ -22,7 +23,7 @@
 - Keep changes small; do not commit unless explicitly asked.
 - Do not add Electron files or dependencies.
 - Prefer deleting/adjusting existing workflow code over adding abstractions.
-- Do not start Process redesign before Batch 4 Editor design cleanup is addressed or explicitly deferred.
+- Do not start Process, Editor, Templates, or Settings visual redesign before the Input visual pass is completed or explicitly deferred.
 
 ## Watchpoints
 - Do not let Settings overwrite active path state after mount.

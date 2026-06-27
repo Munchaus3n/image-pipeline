@@ -60,6 +60,15 @@ These remain manual because no browser automation dependency is allowed:
 10. Repeat snap reset check with Skip.
 11. Run two batches with different output folders; confirm Editor does not reuse the first output.
 
+## Visual Shell Checks
+These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
+1. Open the app in light mode and inspect the sidebar, Input, Process, Editor, Templates, and Settings screens.
+2. Confirm compact `Pipeline Pro` branding, workflow step numbers, status text, active step card, secondary tabs, and theme toggle render cleanly.
+3. Switch to dark mode and confirm the dark palette looks intentional, with readable cards, borders, text, buttons, logs, and previews.
+4. Reload the app and confirm the selected theme persists.
+5. Confirm no System/GPU indicator card exists.
+6. Confirm sidebar navigation still changes screens without altering workflow behavior.
+
 ## Dangerous/Real Pipeline Checks
 These are intentionally not automated by `safe_smoke_test.py`:
 - Real Real-ESRGAN upscale runs.
@@ -75,5 +84,6 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed: Batch 2 validation for Editor queue order/labels, snap reset code path, final/skipped output paths, and flattened thumbnail path.
 - Passed 2026-06-27 smoke-test review: updated static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend build, and frontend lint.
 - Passed 2026-06-27 Batch 3 automated validation: static smoke, Python compile, frontend install, frontend build, and frontend lint. API-mode smoke was skipped because no local API server was listening and this pass avoided process termination.
+- Passed 2026-06-27 visual foundation automated validation: static smoke, Python compile, frontend install, frontend build, and frontend lint. API-mode smoke was skipped because `127.0.0.1:7421` was not reachable; existing Vite servers responded locally, but full browser visual inspection was not captured.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no browser automation, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

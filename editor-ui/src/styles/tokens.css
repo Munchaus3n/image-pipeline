@@ -2,91 +2,97 @@
 
 :root,
 [data-theme="light"] {
-  /* Base colors - Light theme */
-  --bg:        hsl(34, 34%, 96%);
-  --panel:     hsl(0, 0%, 100%);
-  --panel2:    hsl(34, 26%, 93%);
-  --border:    hsl(220, 18%, 87%);
-  --text:      hsl(222, 33%, 16%);
-  --dim:       hsl(220, 16%, 40%);
-  --dim2:      hsl(221, 14%, 58%);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* Base colors - warm studio light */
+  --bg:        hsl(40, 24%, 97%);
+  --panel:     hsl(40, 18%, 94%);
+  --panel2:    hsl(40, 14%, 90%);
+  --border:    hsla(240, 7%, 12%, 0.11);
+  --text:      hsl(240, 10%, 12%);
+  --dim:       hsl(240, 5%, 45%);
+  --dim2:      hsl(240, 5%, 58%);
 
   /* Accent colors */
-  --accent:    hsl(218, 94%, 56%);
-  --accent-strong: hsl(218, 92%, 49%);
-  --accent-soft: hsl(216, 100%, 95%);
+  --accent:    hsl(235, 75%, 55%);
+  --accent-strong: hsl(235, 78%, 48%);
+  --accent-soft: hsl(235, 88%, 96%);
   --accent-fg: hsl(0, 0%, 100%);
-  --green:     hsl(152, 67%, 35%);
-  --green-bg:  hsl(148, 55%, 94%);
-  --green-bdr: hsl(151, 43%, 77%);
-  --red:       hsl(2, 78%, 56%);
-  --red-bg:    hsl(3, 100%, 96%);
-  --red-bdr:   hsl(4, 70%, 83%);
-  --yellow:    hsl(36, 93%, 47%);
-  --yellow-bg: hsl(40, 100%, 95%);
-  --yellow-bdr: hsl(38, 73%, 80%);
+  --green:     hsl(142, 65%, 38%);
+  --green-bg:  hsl(142, 52%, 94%);
+  --green-bdr: hsl(142, 39%, 76%);
+  --red:       hsl(0, 75%, 50%);
+  --red-bg:    hsl(0, 88%, 96%);
+  --red-bdr:   hsl(0, 62%, 83%);
+  --yellow:    hsl(38, 90%, 45%);
+  --yellow-bg: hsl(41, 100%, 94%);
+  --yellow-bdr: hsl(39, 70%, 80%);
   --magenta:   hsl(293, 70%, 54%);
 
   /* Utility */
-  --img-bg:    hsl(38, 22%, 92%);
-  --surface-muted: hsl(36, 24%, 94%);
+  --img-bg:    hsl(40, 12%, 88%);
+  --surface-muted: hsl(40, 12%, 92%);
   --surface-elevated: hsl(0, 0%, 100%);
-  --field-bg: hsl(36, 30%, 98%);
-  --log-bg: hsl(36, 42%, 97%);
-  --log-bg-alt: hsl(35, 30%, 95%);
-  --preview-bg: hsl(34, 24%, 98%);
-  --disabled-bg: hsl(220, 20%, 91%);
-  --disabled-text: hsl(220, 10%, 52%);
-  --scrollbar: hsl(218, 19%, 80%);
+  --field-bg: hsl(0, 0%, 100%);
+  --log-bg: hsl(42, 24%, 96%);
+  --log-bg-alt: hsl(40, 17%, 93%);
+  --preview-bg: hsl(0, 0%, 100%);
+  --disabled-bg: hsl(40, 10%, 88%);
+  --disabled-text: hsl(240, 4%, 54%);
+  --scrollbar: hsl(240, 5%, 76%);
   --radius-xs: 8px;
   --radius-sm: 12px;
   --radius-md: 16px;
   --radius-lg: 22px;
-  --shadow:    0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 14px rgba(16, 24, 40, 0.06);
-  --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.09), 0 3px 10px rgba(15, 23, 42, 0.06);
+  --shadow:    0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 24px rgba(15, 23, 42, 0.07);
+  --shadow-lg: 0 18px 44px rgba(15, 23, 42, 0.10), 0 6px 18px rgba(15, 23, 42, 0.07);
 }
 
 [data-theme="dark"] {
-  /* Base colors - Dark theme */
-  --bg:        hsl(222, 27%, 9%);
-  --panel:     hsl(224, 24%, 12%);
-  --panel2:    hsl(222, 19%, 15%);
-  --border:    hsl(221, 15%, 24%);
-  --text:      hsl(220, 31%, 94%);
-  --dim:       hsl(219, 18%, 72%);
-  --dim2:      hsl(221, 12%, 54%);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* Base colors - intentional darkroom */
+  --bg:        hsl(240, 10%, 4%);
+  --panel:     hsl(240, 10%, 8%);
+  --panel2:    hsl(240, 7%, 14%);
+  --border:    hsla(0, 0%, 100%, 0.09);
+  --text:      hsl(240, 5%, 91%);
+  --dim:       hsl(240, 5%, 62%);
+  --dim2:      hsl(240, 5%, 47%);
 
   /* Accent colors */
-  --accent:    hsl(216, 96%, 63%);
-  --accent-strong: hsl(214, 100%, 70%);
-  --accent-soft: hsl(221, 44%, 18%);
+  --accent:    hsl(235, 85%, 65%);
+  --accent-strong: hsl(235, 90%, 72%);
+  --accent-soft: hsl(235, 46%, 17%);
   --accent-fg: hsl(0, 0%, 100%);
-  --green:     hsl(148, 69%, 50%);
-  --green-bg:  hsl(149, 53%, 17%);
-  --green-bdr: hsl(149, 45%, 31%);
-  --red:       hsl(4, 90%, 66%);
-  --red-bg:    hsl(2, 46%, 18%);
-  --red-bdr:   hsl(4, 59%, 39%);
-  --yellow:    hsl(42, 95%, 62%);
-  --yellow-bg: hsl(42, 57%, 18%);
-  --yellow-bdr: hsl(41, 57%, 36%);
+  --green:     hsl(142, 70%, 45%);
+  --green-bg:  hsl(142, 43%, 15%);
+  --green-bdr: hsl(142, 47%, 30%);
+  --red:       hsl(0, 85%, 60%);
+  --red-bg:    hsl(0, 47%, 16%);
+  --red-bdr:   hsl(0, 57%, 34%);
+  --yellow:    hsl(38, 90%, 55%);
+  --yellow-bg: hsl(38, 50%, 16%);
+  --yellow-bdr: hsl(38, 53%, 32%);
   --magenta:   hsl(294, 73%, 65%);
 
   /* Utility */
-  --img-bg:    hsl(223, 27%, 8%);
-  --surface-muted: hsl(223, 20%, 14%);
-  --surface-elevated: hsl(224, 24%, 12%);
-  --field-bg: hsl(223, 25%, 10%);
-  --log-bg: hsl(224, 29%, 9%);
-  --log-bg-alt: hsl(223, 22%, 12%);
-  --preview-bg: hsl(223, 22%, 13%);
-  --disabled-bg: hsl(223, 16%, 22%);
-  --disabled-text: hsl(221, 10%, 56%);
-  --scrollbar: hsl(220, 14%, 31%);
+  --img-bg:    hsl(240, 10%, 6%);
+  --surface-muted: hsl(240, 7%, 12%);
+  --surface-elevated: hsl(240, 8%, 11%);
+  --field-bg: hsl(240, 10%, 7%);
+  --log-bg: hsl(240, 12%, 6%);
+  --log-bg-alt: hsl(240, 9%, 9%);
+  --preview-bg: hsl(240, 8%, 10%);
+  --disabled-bg: hsl(240, 5%, 18%);
+  --disabled-text: hsl(240, 5%, 50%);
+  --scrollbar: hsl(240, 5%, 28%);
   --radius-xs: 8px;
   --radius-sm: 12px;
   --radius-md: 16px;
   --radius-lg: 22px;
-  --shadow:    0 1px 2px rgba(2, 6, 23, 0.55), 0 10px 22px rgba(2, 6, 23, 0.35);
-  --shadow-lg: 0 18px 42px rgba(0, 0, 0, 0.52), 0 5px 16px rgba(2, 6, 23, 0.4);
+  --shadow:    0 1px 2px rgba(0, 0, 0, 0.40), 0 12px 28px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 22px 58px rgba(0, 0, 0, 0.52), 0 8px 24px rgba(0, 0, 0, 0.42);
 }

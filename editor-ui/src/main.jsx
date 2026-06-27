@@ -8,9 +8,9 @@ import Settings from "./Settings.jsx";
 import "./index.css";
 
 const TABS = [
-  { id: "input", label: "Input" },
-  { id: "pipeline", label: "Process" },
-  { id: "editor", label: "Editor" },
+  { id: "input", label: "Input", hint: "Select source folder" },
+  { id: "pipeline", label: "Process", hint: "Configure pipeline" },
+  { id: "editor", label: "Editor", hint: "Review and export" },
   { id: "templates", label: "Templates" },
   { id: "settings", label: "Settings" },
 ];
@@ -171,27 +171,32 @@ export function Root() {
     >
       <aside className="app-sidebar">
         <div className="app-header app-logo">
-          <svg className="app-logo-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2">
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-            <polyline points="7.5 4.21 12 6.81 16.5 4.21" />
-            <polyline points="7.5 19.79 7.5 14.6 3 12" />
-            <polyline points="21 12 16.5 14.6 16.5 19.79" />
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-            <line x1="12" y1="22.08" x2="12" y2="12" />
-          </svg>
+          <div className="app-logo-mark" aria-hidden="true"><span /></div>
           <div>
-            <div className="app-title">Image Pipeline Pro</div>
-            <div className="app-version">v2.0</div>
+            <div className="app-title">Pipeline Pro</div>
+            <div className="app-version">Image workflow</div>
           </div>
         </div>
 
         <nav className="app-tabs">
           {primaryTabs.map((tab, i) => {
             const active = screen === tab.id;
+            const status = active ? "Active" : mountedScreens.has(tab.id) ? "Ready" : "Idle";
             return (
-              <button key={tab.id} className={active ? "app-tab app-tab-active" : "app-tab"} onClick={() => openScreen(tab.id)}>
-                <span className="app-tab-index">{String(i + 1).padStart(2, "0")}</span>
-                <span>{tab.label}</span>
+              <button
+                key={tab.id}
+                className={active ? "app-tab app-tab-active" : "app-tab"}
+                onClick={() => openScreen(tab.id)}
+                aria-current={active ? "page" : undefined}
+              >
+                <span className="app-tab-meta">
+                  <span className="app-tab-step">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="app-tab-status">{status}</span>
+                </span>
+                <span className="app-tab-copy">
+                  <span className="app-tab-label">{tab.label}</span>
+                  <span className="app-tab-hint">{tab.hint}</span>
+                </span>
               </button>
             );
           })}
@@ -201,8 +206,13 @@ export function Root() {
           {secondaryTabs.map((tab) => {
             const active = screen === tab.id;
             return (
-              <button key={tab.id} className={active ? "app-tab app-tab-active" : "app-tab"} onClick={() => openScreen(tab.id)}>
-                <span>{tab.label}</span>
+              <button
+                key={tab.id}
+                className={active ? "app-tab app-tab-secondary app-tab-active" : "app-tab app-tab-secondary"}
+                onClick={() => openScreen(tab.id)}
+                aria-current={active ? "page" : undefined}
+              >
+                <span className="app-tab-label">{tab.label}</span>
               </button>
             );
           })}
