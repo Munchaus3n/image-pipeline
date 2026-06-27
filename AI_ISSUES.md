@@ -14,13 +14,13 @@
 6. Fixed 2026-06-27: snap/alignment color/state does not reset after completing an image.
 
 ### UX Cleanup
-1. Load and Refresh are effectively the same; keep one clear action or define the difference.
-2. Buttons should match the current design language.
-3. Open Editor button does not match the Process design.
-4. Errors and Output Log duplicate each other; keep one unified activity/log panel with errors highlighted.
-5. Live preview boxes should either fill with actual previews or be removed.
-6. Processing count appears wrong because completed can stay zero until rembg stage.
-7. Add ETA under percent, opposite elapsed time.
+1. Fixed 2026-06-27: Load and Refresh are now one explicit `Load / Refresh Folder` action.
+2. Fixed 2026-06-27: Process `Open Editor` button now uses the current Process button language.
+3. Fixed 2026-06-27: Errors and Output Log are unified into one Activity panel with highlighted errors and context.
+4. Fixed 2026-06-27: Live preview no longer shows empty filler boxes before real preview paths exist.
+5. Fixed 2026-06-27: Processing count now reports stage steps so upscale progress is visible before rembg completes.
+6. Fixed 2026-06-27: ETA is shown next to elapsed time in the Process progress metadata.
+7. Fixed 2026-06-27: the duplicate left-sidebar `Will run` summary block was removed.
 8. “Wipe input after run” needs safer wording/location and should remain disabled by default.
 
 ### Design Cleanup
@@ -32,14 +32,16 @@
 
 ### Product Decision Needed
 1. Fixed 2026-06-27: thumbnail output convention now avoids unnecessary `thumbnails/400/` nesting.
-2. Decide whether Load/Refresh remain separate or collapse into one reload action.
-3. Decide whether Process live preview is reliable enough to keep.
+2. Fixed 2026-06-27: Load/Refresh collapsed into one reload action.
+3. Fixed 2026-06-27: Process live preview remains, but only renders when real preview paths exist.
 
 ## Validation Notes
 - Batch 1 behavior fixes were completed on 2026-06-26 on `local/batch1-input-exclude-theme`.
 - Batch 1 validation passed safe smoke, Python compile, `npm.cmd install`, frontend build, frontend lint, same-folder image mutation probe, nested same-filename ID probe, and theme settings round-trip.
 - Batch 2 behavior fixes were completed on 2026-06-27 on `local/batch2-editor-queue-snap-thumbs`.
 - Batch 2 validation passed safe smoke, Python compile, `npm.cmd install`, frontend build, frontend lint, nested queue order probe, final/skipped path probe, and flattened thumbnail path probe.
+- Batch 3 UX fixes were completed on 2026-06-27 on `local/batch3-process-input-ux`.
+- Batch 3 validation passed safe smoke, Python compile, `npm.cmd install`, frontend build, and frontend lint; API-mode smoke was skipped because no local API server was already running.
 - Real local workflow regression completed on 2026-06-23 with isolated PNG inputs.
 - Real-ESRGAN upscale-only, rembg-only on CPU-forced `bria-rmbg`, and one both-stages run passed.
 - No stale output folder reuse, `<output>/Editor/final` regression, or completed-session handoff failure was found.

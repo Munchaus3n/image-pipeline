@@ -12,7 +12,8 @@
 - User feedback from 2026-06-26 is documented in `AI_ISSUES.md`, `AI_DESIGN_PLAN.md`, `AI_FIX_PLAN.md`, and `AI_PROGRESS.md`.
 - Batch 1 behavior bugs are fixed and validated: stale Input thumbnails, exclusion selection exactness, and exact theme persistence.
 - Batch 2 behavior bugs are fixed and validated: Editor queue ordering/labels, snap/alignment reset, and flattened thumbnail output convention.
-- Next implementation should start with Batch 3 Process/Input UX cleanup before Process design work.
+- Batch 3 Process/Input UX cleanup is fixed and validated: single explicit reload action, unified Activity panel, stage-step progress/ETA, Open Editor styling, hidden empty previews, and removed duplicate `Will run` block.
+- Next implementation should start with Batch 4 Editor design cleanup.
 - No Electron packaging work has been started.
 
 ## Next Agent Instructions
@@ -21,7 +22,7 @@
 - Keep changes small; do not commit unless explicitly asked.
 - Do not add Electron files or dependencies.
 - Prefer deleting/adjusting existing workflow code over adding abstractions.
-- Do not start Process redesign before Batch 3 UX corrections are fixed.
+- Do not start Process redesign before Batch 4 Editor design cleanup is addressed or explicitly deferred.
 
 ## Watchpoints
 - Do not let Settings overwrite active path state after mount.

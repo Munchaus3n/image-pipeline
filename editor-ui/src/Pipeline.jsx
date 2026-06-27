@@ -177,7 +177,6 @@ function usePipeline() {
 
   const abortRef    = useRef(null);
   const logRef      = useRef(null);
-  const errorRef    = useRef(null);
   const timerRef    = useRef(null);
   const startRef    = useRef(null);
   const doneSet     = useRef(new Set());
@@ -191,9 +190,6 @@ function usePipeline() {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
-  useEffect(() => {
-    if (errorRef.current) errorRef.current.scrollTop = errorRef.current.scrollHeight;
-  }, [errors]);
   useEffect(() => {
     if (running) {
       startRef.current = Date.now();
@@ -405,13 +401,16 @@ function usePipeline() {
     running, done, log, errors, imageDone, imageSkipped, imageError,
     totalImages, recentDone, elapsed, stage,
     upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip,
-    logRef, errorRef, start, stop
+    logRef, start, stop
   };
 }
 
 // Zone 1: Live preview strip
 
 function Zone1({ imageDone, totalImages, previewPath, livePreviewStrip }) {
+  const hasPreviewItems = Boolean(previewPath) || (Array.isArray(livePreviewStrip) && livePreviewStrip.some(item => item?.path));
+  if (!hasPreviewItems) return null;
+
   return (
     <PipelinePreviewStrip
       previewPath={previewPath}
@@ -428,7 +427,7 @@ function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalI
   const stripItems = Array.isArray(livePreviewStrip) ? livePreviewStrip : [];
   let sourceItems = stripItems
     .map(item => ({ path: item?.path || "", name: item?.name || "" }))
-    .filter(item => item.path || item.name);
+    .filter(item => item.path);
 
   if (previewPath) {
     const previewItem = {
@@ -440,7 +439,7 @@ function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalI
       sourceItems = [previewItem, ...sourceItems.filter(item => item.path !== previewPath)];
     }
   }
-  const slotItems = Array.from({ length: 4 }, (_, idx) => sourceItems[idx] || { path: "", name: "" });
+  const slotItems = sourceItems.slice(0, 4);
 
   return (
     <div className="pipeline-zone pipeline-progress-card pipeline-preview-strip">
@@ -520,26 +519,31 @@ function StageRow({ label, stats, total, active, stageDone, color }) {
   );
 }
 
-function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale, doRembg, oomGpuCount = 0 }) {
+function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale, doRembg, oomGpuCount = 0, imageProgress = {} }) {
   const fmt = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   const n = Math.max(0, totalImages || 0);
 
   const upProcessed = upStats.done + upStats.skip + upStats.err;
   const bgProcessed = bgStats.done + bgStats.skip + bgStats.err;
   const hasBothStages = doUpscale && doRembg;
-  const finalStats = doRembg ? bgStats : upStats;
-  const finalProcessed = doRembg ? bgProcessed : upProcessed;
+  const totalUnits = (doUpscale ? n : 0) + (doRembg ? n : 0);
+  const processedUnits = (doUpscale ? upProcessed : 0) + (doRembg ? bgProcessed : 0);
+  const activeUnits = Object.values(imageProgress).filter(meta => meta?.status === "running").length;
+  const inFlightUnits = !done && totalUnits > 0 && activeUnits > 0
+    ? Math.min(activeUnits * 0.25, Math.max(0, totalUnits - processedUnits))
+    : 0;
+  const visibleUnits = Math.min(totalUnits, processedUnits + inFlightUnits);
   const totalErrors = upStats.err + bgStats.err;
 
-  const upRatio = n > 0 ? Math.min(1, upProcessed / n) : 0;
-  const bgRatio = n > 0 ? Math.min(1, bgProcessed / n) : 0;
-  const progressRatio = n === 0 ? 0 : (
-    hasBothStages ? ((upRatio + bgRatio) / 2)
-      : doUpscale ? upRatio
-      : doRembg ? bgRatio
-      : 0
-  );
+  const progressRatio = totalUnits === 0 ? 0 : visibleUnits / totalUnits;
   const progressPct = done ? 100 : Math.min(100, Math.max(0, Math.round(progressRatio * 100)));
+  const etaSeconds = !done && processedUnits > 0 && elapsed > 0 && totalUnits > processedUnits
+    ? Math.ceil((elapsed / processedUnits) * (totalUnits - processedUnits))
+    : null;
+  const etaLabel = done ? "ETA done" : etaSeconds ? `ETA ${fmt(etaSeconds)}` : "ETA —";
+  const countLabel = hasBothStages
+    ? `${processedUnits}/${totalUnits} stage steps`
+    : `${processedUnits}/${totalUnits} files`;
 
   const stagePill = done
     ? "Completed"
@@ -564,7 +568,8 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale,
         </div>
 
         <div className="pipeline-progress-meta">
-          <span>{n > 0 ? `${finalProcessed}/${n} files` : "count pending"}</span>
+          <span>{totalUnits > 0 ? countLabel : "count pending"}</span>
+          <span>{etaLabel}</span>
           <span>elapsed {fmt(elapsed)}</span>
           {oomGpuCount > 0 && <span>OOM fallback {oomGpuCount}</span>}
           {done && totalErrors > 0 && <span>{totalErrors} error{totalErrors > 1 ? "s" : ""}</span>}
@@ -575,9 +580,9 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale,
         </div>
 
         <div className="pipeline-progress-stats">
-          <SmStat label="Processed" value={finalStats.done} color={C.green} />
-          <SmStat label="Skipped" value={finalStats.skip} color={finalStats.skip > 0 ? C.yellow : C.dim} />
-          <SmStat label="Errors" value={finalStats.err} color={finalStats.err > 0 ? C.red : C.dim} />
+          <SmStat label="Upscale" value={upProcessed} color={doUpscale && upProcessed > 0 ? C.green : C.dim} />
+          <SmStat label="Remove BG" value={bgProcessed} color={doRembg && bgProcessed > 0 ? C.green : C.dim} />
+          <SmStat label="Errors" value={totalErrors} color={totalErrors > 0 ? C.red : C.dim} />
         </div>
       </div>
     </div>
@@ -667,9 +672,9 @@ function TagInput({ tags, onChange }) {
   );
 }
 
-// ── LogPanel ──────────────────────────────────────────────────────────────────
+// ── ActivityPanel ─────────────────────────────────────────────────────────────
 
-function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) {
+function ActivityPanel({ logRef, log, errors, imageError, running, open, setOpen, imageProgress }) {
   const progressColor = (status) => {
     if (status === "error") return C.red;
     if (status === "skip") return C.dim2;
@@ -680,25 +685,28 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
   const isRuleLike = (raw) => /[─═]{4,}/.test(raw);
   const isPureRule = (raw) => /^[\s─═]+$/.test(raw.trim());
   const extractRuleLabel = (raw) => raw.replace(/^[\s─═]+|[\s─═]+$/g, "").trim();
+  const [expanded, setExpanded] = useState({});
+  const errorByRaw = new Map(errors.map(error => [error.raw, error]));
+  const hasErrors = imageError > 0 || errors.length > 0;
 
   return (
-    <div className="pipeline-log-panel" style={{
-      flex: open ? flex : "0 0 34px", minWidth: 0, minHeight: 0,
+    <div className="pipeline-activity-panel" style={{
+      flex: open ? "1 1 auto" : "0 0 34px", minWidth: 0, minHeight: 0,
       display: "flex", flexDirection: "column",
       transition: "flex 0.2s ease"
     }}>
       <div className="pipeline-bottom-panel-header">
-        <div className="pipeline-bottom-panel-title">
-          Output Log
+        <div className={`pipeline-bottom-panel-title ${hasErrors ? "has-errors" : ""}`}>
+          Activity {hasErrors ? `(${errors.length} error${errors.length === 1 ? "" : "s"})` : ""}
         </div>
         <button className="pipeline-bottom-panel-toggle" onClick={() => setOpen(v => !v)}>
           {open ? "Hide" : "Show"}
         </button>
       </div>
       {open && (
-        <div className="pipeline-log-list pipeline-log-console" ref={logRef}>
-          {log.length === 0 && !running ? (
-            <div className="pipeline-log-empty">Configure and press Run Pipeline.</div>
+        <div className={`pipeline-log-list pipeline-activity-console ${hasErrors ? "has-errors" : ""}`} ref={logRef}>
+          {log.length === 0 ? (
+            <div className="pipeline-log-empty">{running ? "Waiting for pipeline activity..." : "Configure and press Run Pipeline."}</div>
           ) : log.map((e, i) => {
             // BUG-05 FIX: inline ASCII progress bar instead of CSS width-transition div
             if (e.kind === "progress") {
@@ -726,83 +734,41 @@ function LogPanel({ logRef, log, running, open, setOpen, flex, imageProgress }) 
                 </div>
               );
             }
+            const errorContext = e.kind === "error" ? errorByRaw.get(e.raw)?.context : null;
             return (
-              <div key={i} style={{
-                whiteSpace: "pre-wrap", wordBreak: "break-all",
-                color: KIND_COLOR[e.kind] ?? C.dim,
-                opacity: e.kind === "info" ? 0.55 : 1,
-                paddingLeft: e.kind === "section" ? 0 : 4,
-                borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
-                marginBottom: e.kind === "section" ? 3 : 0,
-              }}>
-                {e.raw}
+              <div
+                key={i}
+                className={e.kind === "error" ? "pipeline-activity-entry is-error" : "pipeline-activity-entry"}
+                style={{
+                  whiteSpace: "pre-wrap", wordBreak: "break-all",
+                  color: KIND_COLOR[e.kind] ?? C.dim,
+                  opacity: e.kind === "info" ? 0.55 : 1,
+                  paddingLeft: e.kind === "section" ? 0 : 4,
+                  borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
+                  marginBottom: e.kind === "section" ? 3 : 0,
+                }}
+              >
+                <div>{e.raw}</div>
+                {errorContext?.length > 0 && (
+                  <>
+                    <button
+                      className="pipeline-error-context-toggle"
+                      onClick={() => setExpanded(p => ({ ...p, [i]: !p[i] }))}
+                    >
+                      {expanded[i] ? "▾ hide context" : "▸ show context"}
+                    </button>
+                    {expanded[i] && (
+                      <div className="pipeline-error-context">
+                        {errorContext.map((line, j) => (
+                          <div key={j}>{line}</div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             );
           })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── ErrorPanel ────────────────────────────────────────────────────────────────
-
-function ErrorPanel({ errorRef, errors, imageError, open, setOpen, flex }) {
-  const [expanded, setExpanded] = useState({});
-  const hasErrors = imageError > 0;
-
-  return (
-    <div className="pipeline-error-panel" style={{
-      flex: open ? flex : "0 0 34px", minHeight: 0,
-      display: "flex", flexDirection: "column",
-      transition: "flex 0.2s ease"
-    }}>
-      <div className="pipeline-bottom-panel-header">
-        <div className={`pipeline-bottom-panel-title ${hasErrors ? "has-errors" : ""}`}>
-          Errors {hasErrors ? `(${imageError})` : ""}
-        </div>
-        <button className="pipeline-bottom-panel-toggle" onClick={() => setOpen(v => !v)}>
-          {open ? "Hide" : "Show"}
-        </button>
-      </div>
-      {open && (
-        <div className={`pipeline-log-list pipeline-error-list ${hasErrors ? "has-errors" : ""}`} ref={errorRef}>
-          {errors.length === 0 ? (
-            <div className="pipeline-error-empty">No errors</div>
-          ) : errors.map((e, i) => (
-            <div key={i} style={{
-              paddingBottom: 8, marginBottom: 8,
-              borderBottom: i < errors.length - 1 ? `1px solid var(--red-bdr)` : "none"
-            }}>
-              <div style={{ color: C.red, whiteSpace: "pre-wrap", wordBreak: "break-word", fontWeight: 600 }}>{e.raw}</div>
-              {e.context?.length > 0 && (
-                <>
-                  <button
-                    className="pipeline-error-context-toggle"
-                    onClick={() => setExpanded(p => ({ ...p, [i]: !p[i] }))}
-                    style={{
-                      marginTop: 3, background: "transparent", border: "none",
-                      color: C.dim, fontSize: 9, cursor: "pointer",
-                      fontFamily: "JetBrains Mono", padding: 0, letterSpacing: "0.05em"
-                    }}
-                  >
-                    {expanded[i] ? "▾ hide context" : "▸ show context"}
-                  </button>
-                  {expanded[i] && (
-                    <div style={{
-                      marginTop: 4, padding: "4px 6px",
-                      background: "color-mix(in srgb, var(--red) 6%, var(--panel))", borderRadius: 3,
-                      border: `1px solid var(--red-bdr)`,
-                    }}>
-                      {e.context.map((line, j) => (
-                        <div key={j} style={{ color: C.dim, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 9 }}>{line}</div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          ))}
         </div>
       )}
     </div>
@@ -835,7 +801,6 @@ export default function Pipeline({
   const [upscaleMaxPx, setUpscaleMaxPx] = useState("");
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
   const [logOpen, setLogOpen] = useState(true);
-  const [errOpen, setErrOpen] = useState(true);
   const [resumeSession, setResumeSession] = useState(null);
   const [showResume, setShowResume] = useState(false);
   const doneNotifiedRef = useRef(false);
@@ -893,7 +858,7 @@ export default function Pipeline({
     running, done, log, errors, imageDone, imageError,
     totalImages, elapsed, stage,
     upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip,
-    logRef, errorRef, start, stop,
+    logRef, start, stop,
   } = usePipeline();
 
   useEffect(() => {
@@ -1017,7 +982,7 @@ export default function Pipeline({
           )}
           {done && !running && (
             <button
-              className="pipeline-btn pipeline-secondary-button"
+              className="pipeline-btn pipeline-secondary-button pipeline-open-editor-button"
               onClick={() => onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail })}
             >
               Open Editor →
@@ -1177,28 +1142,6 @@ export default function Pipeline({
           </Row>
           </div>
 
-          <SectionLabel>Will run</SectionLabel>
-          {/* Will run summary */}
-          <div className="pipeline-section pipeline-will-run-block" style={{
-            marginTop: 0, background: C.panel2, border: `1px solid ${C.border}`,
-            borderRadius: 4, padding: "9px 12px"
-          }}>
-            {nothingSelected
-              ? <div className="pipeline-will-run-empty" style={{ fontSize: 12, color: C.red }}>✕ Enable at least one stage</div>
-              : <>
-                {doUpscale && <div className="pipeline-will-run-item" style={{ fontSize: 12, color: C.green, marginBottom: 3 }}>✓ Upscale ×{scale} (NCNN Vulkan)</div>}
-                {doRembg && (() => {
-                  return (
-                    <div className="pipeline-will-run-item" style={{ fontSize: 12, color: C.green }}>
-                      ✓ Remove BG ({rembgModel || "birefnet-general"})
-                      {activeExcludeCount > 0 && <span style={{ color: C.yellow }}> · {activeExcludeCount} excluded</span>}
-                      {skipCount  > 0 && <span style={{ color: C.dim   }}> · {skipCount} skipped</span>}
-                    </div>
-                  );
-                })()}
-              </>
-            }
-          </div>
           </div>
 
           {/* Action buttons */}
@@ -1230,6 +1173,7 @@ export default function Pipeline({
                     done={done} stage={stage}
                     doUpscale={doUpscale} doRembg={doRembg}
                     oomGpuCount={oomGpuCount}
+                    imageProgress={imageProgress}
                   />
                 )}
                 {!running && !done && (
@@ -1256,15 +1200,10 @@ export default function Pipeline({
             </div>
 
             <div className="pipeline-bottom-panels" style={{ flex: "1 1 auto", minHeight: 210, display: "flex", flexDirection: "column", gap: 8 }}>
-              <ErrorPanel
-                errorRef={errorRef} errors={errors} imageError={imageError}
-                open={errOpen} setOpen={setErrOpen}
-                flex={logOpen && errOpen ? 1 : (errOpen ? 9 : 1)}
-              />
-              <LogPanel
+              <ActivityPanel
                 logRef={logRef} log={log} running={running}
                 open={logOpen} setOpen={setLogOpen}
-                flex={logOpen && errOpen ? 1 : (logOpen ? 9 : 1)}
+                errors={errors} imageError={imageError}
                 imageProgress={imageProgress}
               />
             </div>

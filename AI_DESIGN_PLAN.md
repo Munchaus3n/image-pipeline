@@ -42,8 +42,8 @@
 1. Behavior bugs from user feedback.
 2. Editor output/thumbnail convention decision.
 3. Process/Input UX cleanup that does not alter workflow behavior.
-4. Process tab design implementation.
-5. Editor design cleanup.
+4. Editor design cleanup.
+5. Process tab design implementation.
 6. Templates/Settings cleanup.
 7. Electron remains postponed until the browser workflow and design baseline are stable.
 
@@ -61,13 +61,14 @@
 - Reset snap/alignment color/state automatically after completing an image.
 - Implemented thumbnail output convention as `<output>/Editor/thumbnails/<relative image>.png`.
 
-### Batch 3 - Process/Input UX Corrections
-- Simplify or clearly differentiate Load vs Refresh.
-- Replace duplicated Errors/Output Log with one unified activity/log panel with highlighted errors.
-- Fix progress/count model so completed work is clear during upscale-only, rembg-only, and both-stage runs.
-- Add ETA under percent, opposite elapsed time.
-- Style Open Editor button to match the current Process design language.
-- Decide whether live preview boxes are reliable enough; otherwise remove the block.
+### Batch 3 - Process/Input UX Corrections - Completed 2026-06-27
+- Collapsed Load/Refresh into one explicit `Load / Refresh Folder` action.
+- Replaced duplicated Errors/Output Log with one unified Activity panel with highlighted errors and context.
+- Fixed progress/count model so stage work is clear during upscale-only, rembg-only, and both-stage runs.
+- Added ETA next to elapsed time in the Process progress metadata.
+- Styled Open Editor button to match the current Process design language.
+- Kept live preview, but it only renders when real preview paths exist.
+- Removed the duplicate left-sidebar `Will run` summary block.
 
 ### Batch 4 - Editor Design Cleanup
 - Clean right sidebar, cards, buttons, queue item display, snap/alignment controls, and output panel.

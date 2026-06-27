@@ -65,12 +65,13 @@
 - Reset snap/alignment state after completing an image.
 - Implemented thumbnail output convention as `<output>/Editor/thumbnails/<relative image>.png`.
 
-### Batch 3 - Process/Input UX Cleanup
-- Simplify or define Load vs Refresh.
-- Unify Errors and Output Log into one activity/log panel with highlighted errors.
-- Rethink progress/count model and add ETA under percent opposite elapsed time.
-- Style Open Editor button to match current design language.
-- Keep or remove live preview boxes based on reliability.
+### Batch 3 - Process/Input UX Cleanup - Completed 2026-06-27
+- Collapsed Load/Refresh into one explicit `Load / Refresh Folder` action.
+- Unified Errors and Output Log into one Activity panel with highlighted errors and context.
+- Updated progress/count model to show stage steps and added ETA next to elapsed time.
+- Styled Open Editor button to match current Process design language.
+- Kept live preview but hid it until real preview paths exist.
+- Removed the duplicate left-sidebar `Will run` summary block.
 
 ### Batch 4 - Editor Design Cleanup
 - Clean Editor right sidebar, cards, buttons, queue display, snap/alignment controls, and Output panel.

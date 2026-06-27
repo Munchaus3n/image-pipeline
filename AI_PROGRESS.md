@@ -193,3 +193,24 @@
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
 - The only issue found during validation was a smoke-test timing bug around asynchronous thumbnail writes; fixed with a bounded wait in the test, with no app behavior change.
+
+## 2026-06-27 Batch 3 Process/Input UX Cleanup
+
+### Code Changes
+- Collapsed Input `Load` and `Refresh` into one explicit `Load / Refresh Folder` action; typing or changing folders still does not auto-scan.
+- Preserved same-folder refresh behavior by reusing the existing reload path and pruning stale loaded state without resetting the path.
+- Replaced the separate Process `Errors` and `Output Log` panels with one `Activity` panel that highlights error lines and keeps expandable context.
+- Updated Process progress to report stage steps during two-stage runs, so upscale work is visible before rembg completes.
+- Added ETA next to elapsed time in the Process progress metadata.
+- Styled the Process `Open Editor` action with the current accent/button language.
+- Hid the live preview strip until real preview paths are available, and removed empty filler preview boxes.
+- Removed the left-sidebar `Will run` summary block; the existing ready/status card remains the single run summary.
+- No Electron work, dependency additions, Editor/output convention changes, processing logic changes, or broad redesign were made.
+
+### Automated Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- API-mode smoke was skipped because no local API was listening on `127.0.0.1:7421`; the pass did not start a server that would need process termination.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.

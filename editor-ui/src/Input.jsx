@@ -322,16 +322,16 @@ export default function Input({
             borderRadius: 4, padding: "5px 10px", fontSize: 13,
             cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
           }}>{browseLoading ? "…" : "…"}</button>
-          <button className="inp-btn input-load-button" onClick={() => loadImages({ resetSession: true })} disabled={loading || !inputDir.trim()} style={{
+          <button
+            className="inp-btn input-load-button input-reload-button"
+            onClick={() => loadImages({ resetSession: loadedDirRef.current !== inputDir.trim() })}
+            disabled={loading || !inputDir.trim()}
+            title="Scan the selected folder on demand. No images load while typing."
+            style={{
             background: inputDir.trim() ? C.panel2 : "transparent", color: inputDir.trim() ? C.text : C.dim2,
             border: `1px solid ${C.border}`, borderRadius: 4, padding: "5px 10px", fontSize: 11,
             cursor: inputDir.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", flexShrink: 0,
-          }}>{loading ? "Loading" : "Load"}</button>
-          <button className="inp-btn input-refresh-button" onClick={() => loadImages()} disabled={loading || !inputDir.trim()} style={{
-            background: "transparent", color: inputDir.trim() ? C.dim : C.dim2,
-            border: `1px solid ${C.border}`, borderRadius: 4, padding: "5px 8px", fontSize: 11,
-            cursor: inputDir.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", flexShrink: 0,
-          }}>Refresh</button>
+          }}>{loading ? "Loading" : "Load / Refresh Folder"}</button>
         </div>
 
         {/* Search */}
@@ -456,8 +456,8 @@ export default function Input({
             </div>
           ) : !loadedDirRef.current ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
-              <span style={{ color: C.dim, fontSize: 12 }}>Folder selected. Click Load to scan images.</span>
-              <span style={{ color: C.dim2, fontSize: 11 }}>Refresh reloads the same folder without changing the path.</span>
+              <span style={{ color: C.dim, fontSize: 12 }}>Folder selected. Click Load / Refresh Folder to scan images.</span>
+              <span style={{ color: C.dim2, fontSize: 11 }}>Images never auto-load while typing or changing folders.</span>
             </div>
           ) : visible.length === 0 ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>

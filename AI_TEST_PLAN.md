@@ -49,9 +49,9 @@ Use `npm.cmd` on PowerShell if `npm.ps1` is blocked by execution policy.
 ## Manual/Browser Checks
 These remain manual because no browser automation dependency is allowed:
 1. Start `api.py` and the Vite dev server.
-2. Select an input folder and confirm no images load until Load is clicked.
-3. Click Load; confirm list appears and count is bounded/clear.
-4. Click Refresh after folder contents change; confirm stale thumbnails disappear.
+2. Select an input folder and confirm no images load until `Load / Refresh Folder` is clicked.
+3. Click `Load / Refresh Folder`; confirm list appears and count is bounded/clear.
+4. Click `Load / Refresh Folder` after folder contents change; confirm stale thumbnails disappear.
 5. Use recent input/output dropdowns after browsing or typing paths.
 6. Confirm Process preserves selected input/output paths.
 7. Run custom output batches and confirm Editor loads exact completed `src_root`.
@@ -74,5 +74,6 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed: Batch 1 real workflow validation for stale Input thumbnails, exclusion identity, and theme persistence.
 - Passed: Batch 2 validation for Editor queue order/labels, snap reset code path, final/skipped output paths, and flattened thumbnail path.
 - Passed 2026-06-27 smoke-test review: updated static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend build, and frontend lint.
+- Passed 2026-06-27 Batch 3 automated validation: static smoke, Python compile, frontend install, frontend build, and frontend lint. API-mode smoke was skipped because no local API server was listening and this pass avoided process termination.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no browser automation, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.
