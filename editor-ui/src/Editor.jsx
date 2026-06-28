@@ -19,6 +19,7 @@ import {
 // zoom: CSS scale applied to the canvas element for view zoom
 let CANVAS_SIZE = 1440;  // mutable module var — kept for non-React drawing functions
 const DS = 720;
+const DISPLAY_ZOOM_MULTIPLIER = 0.62;
 const scaleFactor = () => DS / CANVAS_SIZE;
 
 const BASE = "/api";
@@ -159,41 +160,26 @@ function RefImage({ src }) {
 function CollSection({ label, accent, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section style={{
-       marginBottom: 10,
-      border: `1px solid ${C.border}`,
-      borderRadius: 10,
-      background: "color-mix(in srgb,var(--panel2) 30%,var(--panel))",
-      overflow: "hidden",
-    }}>
+    <section className="editor-tool-section" style={{ "--section-accent": accent || "var(--accent)" }}>
       <button
-        className="ed-btn"
+        type="button"
+        className="ed-btn editor-tool-toggle"
         onClick={() => setOpen(v => !v)}
-        style={{
-          width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between",
-          background:"transparent", border:"none", padding:"9px 10px", cursor:"pointer",
-          fontFamily:"inherit",
-        }}
       >
-        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-          <div style={{
-            width: 3,
-            height: 12,
-            borderRadius: 999,
-            background: accent || "var(--accent)",
-            flexShrink: 0,
-          }}/>
-          <span style={{ fontSize:10, fontWeight:700, letterSpacing:"0.08em", color:"var(--dim)", textTransform:"uppercase" }}>{label}</span>
+        <div className="editor-tool-title">
+          <span className="editor-tool-accent" />
+          <span>{label}</span>
         </div>
         <svg
           width="10" height="10" viewBox="0 0 10 10" fill="none"
-          style={{ transition:"transform 0.18s", transform: open ? "rotate(180deg)" : "rotate(0deg)", color:"var(--dim)", flexShrink:0 }}
+          className="editor-tool-chevron"
+          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
         >
           <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         </svg>
       </button>
       {open && (
-        <div style={{ padding:"0 10px 10px" }}>
+        <div className="editor-tool-content">
           {children}
         </div>
       )}
@@ -201,9 +187,9 @@ function CollSection({ label, accent, defaultOpen = true, children }) {
   );
 }
 
-function Btn({ children, onClick, style={} }) {
+function Btn({ children, onClick, style={}, className = "" }) {
   return (
-    <button onClick={onClick} style={{
+    <button type="button" className={`ed-btn editor-mini-button ${className}`.trim()} onClick={onClick} style={{
       background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
       borderRadius:8, padding:"7px 8px", fontSize:11, cursor:"pointer",
       width:"100%", textAlign:"left", fontFamily:"inherit",
@@ -213,7 +199,7 @@ function Btn({ children, onClick, style={} }) {
   );
 }
 
-export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true }) {
+export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true }) {
   const canvasRef    = useRef(null);
   const containerRef = useRef(null);
   const dragRef      = useRef(null);
@@ -892,6 +878,9 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
     { label:"125%", value:1.25 },
     { label:"150%", value:1.5  },
   ];
+  const displayZoom = zoom * DISPLAY_ZOOM_MULTIPLIER;
+  const queueChip = queue.length ? `${Math.min(queueIdx + 1, queue.length)} / ${queue.length}` : "— / —";
+  const currentFileLabel = queue[queueIdx] ? imageQueueLabel(queue[queueIdx], srcFolder) : (srcLabel || "No image loaded");
 
   return (
     <>
@@ -899,58 +888,56 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
         ref={containerRef}
         tabIndex={0}
         onKeyDown={onKeyDown}
-        style={{
-          display:"flex", background:C.bg, height:"100%", minHeight:0,
-          fontFamily:"'Outfit','DM Sans',system-ui,sans-serif",
-          color:C.text, outline:"none", userSelect:"none", fontSize:13,
-        }}
+        className="editor-root"
       >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
         ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
         ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
-        .ed-btn:hover{filter:brightness(1.1)} .ed-btn:active{transform:scale(0.97)}
-        .coll-section{}
+        .ed-btn:active{transform:scale(0.98)}
         select,input{outline:none} input[type=range]{accent-color:var(--green)}
         input[type=checkbox]{accent-color:var(--accent)}
         [data-theme="dark"] select option{background:hsl(222,20%,16%);color:hsl(210,40%,95%)}
         [data-theme="light"] select option{background:hsl(220,14%,94%);color:hsl(224,20%,15%)}
       `}</style>
 
+      <header className="editor-topbar">
+        <h1 className="editor-title">Editor · Place &amp; Save</h1>
+        <div className="editor-topbar-actions">
+          <span className="editor-queue-chip">{queueChip}</span>
+          <span className="editor-file-chip" title={currentFileLabel}>{currentFileLabel}</span>
+          <button type="button" className="ed-btn editor-action-secondary" onClick={doSkip}>
+            <span>Skip</span>
+            <kbd>S</kbd>
+          </button>
+          <button type="button" className={saved ? "ed-btn editor-action-primary editor-action-saved" : "ed-btn editor-action-primary"} onClick={doSave}>
+            <span>{saved ? "Saved!" : "Save & Next"}</span>
+            <kbd>↵</kbd>
+          </button>
+        </div>
+      </header>
+
+      <div className="editor-workspace">
       {/* ── Canvas area ──────────────────────────────────────────── */}
-      <div style={{
-        flex:1, display:"flex", flexDirection:"column", minWidth:0, minHeight:0, background:C.bg,
-      }}>
-        <div style={{
-          flex:1, display:"flex", alignItems:"center", justifyContent:"center",
-          overflow:"auto", padding:16, minHeight:0,
-        }}>
-          <div style={{
-            width: DS * zoom, height: DS * zoom,
-            overflow:"hidden", flexShrink:0,
-            border:`1px solid ${C.border}`, borderRadius:3,
-            boxShadow:`0 0 0 1px color-mix(in srgb,var(--border) 60%,transparent), 0 12px 32px rgba(0,0,0,0.25)`,
-          }}>
+      <div className="editor-canvas-column">
+        <div className="editor-canvas-viewport">
+          <div className="editor-canvas-frame" style={{ width: DS * displayZoom, height: DS * displayZoom }}>
             <canvas
               ref={canvasRef} width={DS} height={DS}
               onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
-              style={{ cursor:"crosshair", display:"block", width:DS*zoom, height:DS*zoom, transformOrigin:"top left" }}
+              style={{ cursor:"crosshair", display:"block", width:DS*displayZoom, height:DS*displayZoom, transformOrigin:"top left" }}
             />
           </div>
         </div>
 
         {/* ── Footer bar ── */}
-        <div style={{
-          height:30, borderTop:`1px solid ${C.border}`, background:C.panel,
-          display:"flex", alignItems:"center", padding:"0 12px", gap:16, flexShrink:0,
-        }}>
-          <div style={{ display:"flex", gap:10, fontSize:9, color:C.dim, fontFamily:"JetBrains Mono" }}>
+        <div className="editor-footer">
+          <div className="editor-footer-hints">
             {["Drag=Move","Scroll=Resize","Arrows=Nudge","Ctrl+Z=Undo"].map(h => (
               <span key={h}>{h}</span>
             ))}
           </div>
 
-          <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:4 }}>
+          <div className="editor-stage-pills">
             {[
               { lbl:"Upscale", done:true },
               { lbl:"RemBG",   done:true },
@@ -983,7 +970,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
             ))}
           </div>
 
-          <div style={{ display:"flex", alignItems:"center", gap:2, borderLeft:`1px solid ${C.border}`, paddingLeft:10 }}>
+          <div className="editor-zoom-controls">
             {zoomPresets.map(({ label, value }) => (
               <button key={label} className="ed-btn" onClick={() => setZoom(value)} style={{
                 padding:"2px 6px", fontSize:9, cursor:"pointer", fontFamily:"inherit", borderRadius:3,
@@ -998,41 +985,11 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
       </div>
 
       {/* ── Sidebar ───────────────────────────────────────────────── */}
-      <div style={{
-        width:262, background:C.panel, borderLeft:`1px solid ${C.border}`,
-        display:"flex", flexDirection:"column", flexShrink:0, minHeight:0,
-      }}>
-        {/* Sidebar header */}
-        <div style={{
-          padding:"0 10px", height:40, borderBottom:`1px solid ${C.border}`,
-          display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0,
-          background: "color-mix(in srgb,var(--panel2) 45%,var(--panel))",
-        }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <button className="ed-btn" onClick={onGoPipeline} style={{
-              background:"transparent", color:C.dim, border:`1px solid ${C.border}`,
-              borderRadius:999, padding:"4px 10px", fontSize:10, cursor:"pointer", fontFamily:"inherit",
-            }}>← Back</button>
-            <span style={{
-              fontSize:10, color:C.text, fontWeight:600, border:`1px solid ${C.border}`,
-              background:"var(--panel)", borderRadius:999, padding:"1px 8px",
-            }}>
-              {Math.min(queueIdx+1, queue.length||1)} / {queue.length||"—"}
-            </span>
-          </div>
-          <div style={{
-            fontSize:9, color:"var(--green)", fontFamily:"JetBrains Mono",
-            maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-            textAlign:"right",
-          }}>
-            {srcLabel || "…"}
-          </div>
-        </div>
-
+      <aside className="editor-sidebar">
         {/* Scrollable content */}
-        <div style={{ flex:1, overflowY:"auto", padding:"10px" }}>
+        <div className="editor-sidebar-scroll">
 
-          <CollSection label="Source" accent="var(--green)" defaultOpen>
+          <CollSection label="Source" accent="var(--green)" defaultOpen={false}>
             <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:4, marginBottom:4 }}>
               <Btn className="ed-btn" onClick={async () => {
                 try {
@@ -1055,45 +1012,6 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
               <input type="checkbox" checked={comboMode} onChange={e=>setComboMode(e.target.checked)} />
               Combo mode
             </label>
-          </CollSection>
-
-          {/* ── Actions ── */}
-          <CollSection label="Queue" accent="hsl(217 95% 60%)" defaultOpen>
-          <button className="ed-btn" onClick={doSave} style={{
-            width:"100%", padding:"7px 10px", marginBottom:4,
-            background: saved ? "var(--green)" : "var(--green-bg)",
-            color: saved ? "#fff" : "var(--green)",
-            border:`1px solid ${saved ? "var(--green)" : "var(--green-bdr)"}`,
-            borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit",
-            transition:"all 0.15s",
-            display:"flex", alignItems:"center", justifyContent:"space-between",
-          }}>
-            <span>{saved ? "✓ Saved!" : "Save & Next"}</span>
-            <kbd style={{
-              fontSize:9, fontFamily:"JetBrains Mono",
-              background: saved ? "rgba(255,255,255,0.2)" : "color-mix(in srgb,var(--green) 20%,transparent)",
-              border:`1px solid ${saved ? "rgba(255,255,255,0.3)" : "var(--green-bdr)"}`,
-              borderRadius:3, padding:"1px 5px", color:"inherit",
-            }}>↵</kbd>
-          </button>
-          <div style={{ display:"flex", gap:4, marginBottom:0 }}>
-            <button className="ed-btn" onClick={doSkip} style={{
-              flex:1, padding:"5px 0", background:"var(--yellow-bg)",
-              color:"var(--yellow)", border:`1px solid var(--yellow-bdr)`,
-              borderRadius:5, fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:3,
-            }}>
-              Skip <kbd style={{ fontSize:8, fontFamily:"JetBrains Mono", background:"color-mix(in srgb,var(--yellow) 15%,transparent)", border:`1px solid var(--yellow-bdr)`, borderRadius:3, padding:"0 4px" }}>S</kbd>
-            </button>
-            <button className="ed-btn" onClick={removeSelected} style={{
-              flex:1, padding:"5px 0", background:"var(--red-bg)",
-              color:"var(--red)", border:`1px solid var(--red-bdr)`,
-              borderRadius:5, fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:3,
-            }}>
-              Remove <kbd style={{ fontSize:8, fontFamily:"JetBrains Mono", background:"color-mix(in srgb,var(--red) 15%,transparent)", border:`1px solid var(--red-bdr)`, borderRadius:3, padding:"0 4px" }}>Del</kbd>
-            </button>
-          </div>
           </CollSection>
 
           {/* ── Template ── */}
@@ -1194,6 +1112,10 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
                 V
               </button>
             </div>
+          </CollSection>
+
+          {/* ── Scale ── */}
+          <CollSection label="Scale" accent="var(--accent)" defaultOpen>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
               <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer" }}>
                 <input type="checkbox" checked={scaleLocked} onChange={e=>setScaleLocked(e.target.checked)} style={{ accentColor:"var(--red)" }} />
@@ -1240,7 +1162,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
 
           {/* ── Canvas Items ── */}
           {items.length > 0 && (
-             <CollSection label="Items" accent="hsl(246 82% 66%)" defaultOpen>
+             <CollSection label="Items" accent="hsl(246 82% 66%)" defaultOpen={false}>
               <div style={{ display:"flex", flexDirection:"column", gap:2, marginBottom:2 }}>
                 {items.map(item => (
                   <button key={item.id} className="ed-btn" onClick={() => setSelId(item.id)} style={{
@@ -1255,11 +1177,14 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
                   </button>
                 ))}
               </div>
+              <button type="button" className="ed-btn editor-remove-item" onClick={removeSelected}>
+                Remove item <kbd>Del</kbd>
+              </button>
             </CollSection>
           )}
 
           {/* ── Output ── */}
-          <CollSection label="Output" accent="var(--green)" defaultOpen>
+          <CollSection label="Output" accent="var(--green)" defaultOpen={false}>
           {/* BUG-03 FIX: was openFolder() with no arg — opened OUTPUT_ROOT on server.
               Now passes srcFolder so Explorer opens the actual session source folder. */}
           <Btn className="ed-btn" onClick={() => openFolder(activeOutputDir || srcFolder)} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
@@ -1276,6 +1201,7 @@ export default function Editor({ onGoPipeline, outputDir = "", canvasSize: canva
             </div>
           )}
         </div>
+      </aside>
       </div>
       </div>
       <ConfirmModal

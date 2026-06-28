@@ -86,9 +86,10 @@
 - Kept current path/session/output behavior, pipeline API calls, processing logic, and Editor handoff unchanged.
 - Preserved the removed `Will run` block and omitted any System/GPU card.
 
-### Next - Editor Design Cleanup
-- Clean right sidebar, cards, buttons, queue item display, snap/alignment controls, and output panel.
-- Keep save/skip/session/output behavior unchanged.
+### Editor Design Cleanup - Completed 2026-06-28
+- Cleaned the Editor top command bar, canvas viewport, right accordion sidebar, snap/alignment controls, Scale section, Items list, and Output panel.
+- Calibrated display-only Editor zoom with `DISPLAY_ZOOM_MULTIPLIER = 0.62`.
+- Kept save/skip/session/output behavior, queue labels/order, snap reset behavior, canvas/export dimensions, API contracts, processing logic, and dependencies unchanged.
 
 ## Process Tab Design Direction
 - Keep a clear left configuration sidebar.

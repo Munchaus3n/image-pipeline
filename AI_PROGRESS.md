@@ -350,3 +350,29 @@
 - `cd editor-ui && npm.cmd run lint` passed.
 - Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
 - Full click-by-click browser visual QA and screenshots were not captured because no browser automation dependency is installed and none was added.
+
+## 2026-06-28 Editor Visual Redo
+
+### Code Changes
+- Rebuilt the Editor screen from the clean `local/editor-visual-redo` branch without using the bad `local/editor-visual-match` branch.
+- Added a compact `Editor · Place & Save` top command bar with queue chip, current filename, secondary Skip action, and strong blue Save & Next action.
+- Recalibrated display-only canvas zoom with `DISPLAY_ZOOM_MULTIPLIER = 0.62`; saved pixels, canvas dimensions, placement math, guide math, and export dimensions are unchanged.
+- Restyled the Editor canvas viewport for a calmer centered workspace with more breathing room at the 100% label.
+- Converted the right Editor controls to flat compact accordions: Source, Template, Snap & Align, Scale, Canvas, Items, and Output.
+- Moved Remove into the Items accordion as a destructive item action and kept Save/Skip in the top command bar.
+- Kept source loading, queue order/labels, save/skip/session behavior, snap reset behavior, output conventions, API contracts, backend processing, Electron scope, and dependencies unchanged.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` passed against the already-running API.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed after removing an unused Editor prop/state path introduced by the visual cleanup.
+- Headless Chrome manual-style visual validation ran against `http://127.0.0.1:5176`: light and dark Editor rendered, topbar measured 58px high, sidebar measured 320px wide, and the 100% canvas display measured 446px square.
+- Headless zoom validation confirmed display sizes: 75% = 335px, 100% = 446px, 125% = 558px, 150% = 670px.
+- Headless visual validation confirmed no System/GPU card text exists, sections render in the required order, and zoom labels remain `75%`, `100%`, `125%`, `150%`.
+- Browser screenshots were captured under ignored `.cache/` paths: `.cache/editor-visual-redo-light.png` and `.cache/editor-visual-redo-dark.png`.
+- Later in validation, the originally provided API/Vite servers were unreachable, so a temporary local API/Vite pair was started only for a disposable browser behavior probe and then stopped.
+- Disposable browser behavior probe passed source reload, Save & Next, Skip, final output path, thumbnail path, skipped path, and final PNG dimensions (`1440x1440`) using sandbox files under ignored `.cache/`.
+- Snap reset behavior remains preserved by the unchanged save/skip `advance()` reset path; the headless probe did not produce a stuck snap visual state.

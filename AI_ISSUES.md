@@ -25,11 +25,11 @@
 8. “Wipe input after run” needs safer wording/location and should remain disabled by default.
 
 ### Design Cleanup
-1. Editor does not yet match the design language.
-2. Editor right sidebar/cards/buttons need cleanup.
-3. Editor queue item should show folder/context.
-4. Snap/alignment controls need clearer selected/reset state.
-5. Editor Output panel should be cleaner.
+1. Fixed 2026-06-28: Editor now uses the current design language with compact top command bar, centered canvas viewport, and flat accordion tools.
+2. Fixed 2026-06-28: Editor right sidebar/cards/buttons were cleaned up into slim accordion rows and compact controls.
+3. Fixed 2026-06-27 and preserved 2026-06-28: Editor queue item labels show folder/context.
+4. Fixed 2026-06-27 and preserved 2026-06-28: snap/alignment state resets after completed images and active snap state remains clear.
+5. Fixed 2026-06-28: Editor Output panel was simplified into the compact accordion style.
 
 ### Product Decision Needed
 1. Fixed 2026-06-27: thumbnail output convention now avoids unnecessary `thumbnails/400/` nesting.

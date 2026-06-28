@@ -99,6 +99,18 @@ These remain browser/manual checks unless a future browser automation dependency
 11. Confirm four live preview tiles distribute across the available row width instead of staying fixed and tiny.
 12. Confirm the Activity panel still moves below the expanded preview strip cleanly.
 
+## Editor Visual Checks
+These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
+1. Open Editor in light mode and confirm the `Editor · Place & Save` top command bar is compact and vertically aligned.
+2. Confirm the queue chip, current filename, Skip, and Save & Next controls stay in the top command bar and retain keyboard behavior.
+3. Confirm the 100% zoom label uses the display-only multiplier and shows more canvas breathing room without changing saved pixels.
+4. Confirm the 75%, 100%, 125%, and 150% zoom controls still resize only the display view.
+5. Confirm the right sidebar uses compact flat accordion rows for Source, Template, Snap & Align, Scale, Canvas, Items, and Output.
+6. Confirm Source controls, Template select, Snap & Align buttons, Scale slider/buttons, Items labels, and Output button remain readable.
+7. Confirm Save & Next, Skip, source reload, queue labels, and snap reset behavior still work.
+8. Toggle dark mode and confirm the Editor palette remains intentional and readable.
+9. Confirm no System/GPU card or replacement hardware/status card exists.
+
 ## Dangerous/Real Pipeline Checks
 These are intentionally not automated by `safe_smoke_test.py`:
 - Real Real-ESRGAN upscale runs.
@@ -121,5 +133,10 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-27 Process visual automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Passed 2026-06-28 Process spacing/preview tile follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Passed 2026-06-28 Process preview strip final fix automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
+- Passed 2026-06-28 Editor visual redo validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, frontend lint, and headless Chrome light/dark visual checks against `127.0.0.1:5176`.
+- Editor display zoom calibration uses `DISPLAY_ZOOM_MULTIPLIER = 0.62`; headless measurements were 75% = 335px, 100% = 446px, 125% = 558px, and 150% = 670px.
+- Editor visual screenshots were captured under ignored `.cache/` paths for light and dark mode; no System/GPU card text was detected.
+- Passed 2026-06-28 disposable Editor browser behavior probe: source reload, Save & Next, Skip, final output path, thumbnail path, skipped path, and saved PNG dimensions (`1440x1440`) using ignored `.cache/` sandbox files.
+- The disposable behavior probe used temporary local API/Vite processes only after the originally provided `127.0.0.1:7421` and `127.0.0.1:5176` servers became unreachable; those temporary processes were stopped after the probe.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
-- Remaining smoke-test gaps are intentional: no browser automation, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.
+- Remaining smoke-test gaps are intentional: no persistent browser automation dependency, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.
