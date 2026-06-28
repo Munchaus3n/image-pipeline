@@ -19,7 +19,7 @@ import {
 // zoom: CSS scale applied to the canvas element for view zoom
 let CANVAS_SIZE = 1440;  // mutable module var — kept for non-React drawing functions
 const DS = 720;
-const DISPLAY_ZOOM_MULTIPLIER = 0.62;
+const DISPLAY_ZOOM_MULTIPLIER = 0.78;
 const scaleFactor = () => DS / CANVAS_SIZE;
 
 const BASE = "/api";
@@ -157,17 +157,16 @@ function RefImage({ src }) {
   );
 }
 
-function CollSection({ label, accent, defaultOpen = true, children }) {
+function CollSection({ label, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="editor-tool-section" style={{ "--section-accent": accent || "var(--accent)" }}>
+    <section className="editor-tool-section">
       <button
         type="button"
         className="ed-btn editor-tool-toggle"
         onClick={() => setOpen(v => !v)}
-      >
+        >
         <div className="editor-tool-title">
-          <span className="editor-tool-accent" />
           <span>{label}</span>
         </div>
         <svg
@@ -903,12 +902,11 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       <header className="editor-topbar">
         <h1 className="editor-title">Editor · Place &amp; Save</h1>
         <div className="editor-topbar-actions">
-          <span className="editor-queue-chip">{queueChip}</span>
-          <span className="editor-file-chip" title={currentFileLabel}>{currentFileLabel}</span>
           <button type="button" className="ed-btn editor-action-secondary" onClick={doSkip}>
             <span>Skip</span>
             <kbd>S</kbd>
           </button>
+          <span className="editor-queue-chip">{queueChip}</span>
           <button type="button" className={saved ? "ed-btn editor-action-primary editor-action-saved" : "ed-btn editor-action-primary"} onClick={doSave}>
             <span>{saved ? "Saved!" : "Save & Next"}</span>
             <kbd>↵</kbd>
@@ -937,37 +935,9 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
             ))}
           </div>
 
-          <div className="editor-stage-pills">
-            {[
-              { lbl:"Upscale", done:true },
-              { lbl:"RemBG",   done:true },
-              { lbl:"Editor",  done:false, active:true },
-            ].map(({ lbl, done, active }, i) => (
-              <div key={lbl} style={{ display:"flex", alignItems:"center", gap:4 }}>
-                {i > 0 && (
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ opacity:0.3 }}>
-                    <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                )}
-                <div style={{
-                  display:"flex", alignItems:"center", gap:3,
-                  padding:"2px 7px", borderRadius:3,
-                  background: active ? "color-mix(in srgb,var(--accent) 12%,transparent)"
-                    : done ? "color-mix(in srgb,var(--green) 10%,transparent)" : "transparent",
-                  border: `1px solid ${active ? "color-mix(in srgb,var(--accent) 35%,transparent)"
-                    : done ? "color-mix(in srgb,var(--green) 25%,transparent)" : "transparent"}`,
-                }}>
-                  <div style={{
-                    width:4, height:4, borderRadius:"50%", flexShrink:0,
-                    background: done ? "var(--green)" : active ? "var(--accent)" : C.dim,
-                  }}/>
-                  <span style={{
-                    fontSize:9, fontWeight: active ? 600 : 400,
-                    color: active ? "var(--accent)" : done ? "var(--green)" : C.dim,
-                  }}>{lbl}</span>
-                </div>
-              </div>
-            ))}
+          <div className="editor-footer-file" title={currentFileLabel}>
+            <span>Current file:</span>
+            <strong>{currentFileLabel}</strong>
           </div>
 
           <div className="editor-zoom-controls">

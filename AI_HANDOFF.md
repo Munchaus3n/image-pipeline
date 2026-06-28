@@ -19,7 +19,7 @@
 - Input density/clipping follow-up is implemented: tighter Input proportions, more compact thumbnail grid, and safer first-column hover/selected shadows.
 - Process visual pass is implemented: compact left config cards, tighter header actions, compact ready/progress/live preview/Activity panels, and no `Will run` or System/GPU card.
 - Process mini follow-up is implemented: right status cards have header breathing room, and live preview tiles are square 1:1 cover-fit tiles with empty placeholders hidden.
-- Editor visual redo is implemented on the clean task branch: compact top command bar, display-only zoom multiplier `0.62`, centered canvas viewport, flat accordion right sidebar, separate Scale section, compact Items/Output panels, and no System/GPU card.
+- Editor visual redo is implemented on the clean task branch: compact top command bar, display-only zoom multiplier `0.78`, centered sharp-corner canvas viewport, flat accordion right sidebar with gutter spacing and no colored section indicators, separate Scale section, compact Items/Output panels, no footer stage chips, filename in the footer, queue chip beside Skip, and no System/GPU card.
 - Next implementation should be Templates/Settings visual cleanup only if explicitly requested.
 - No Electron packaging work has been started.
 

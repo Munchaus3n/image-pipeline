@@ -376,3 +376,25 @@
 - Later in validation, the originally provided API/Vite servers were unreachable, so a temporary local API/Vite pair was started only for a disposable browser behavior probe and then stopped.
 - Disposable browser behavior probe passed source reload, Save & Next, Skip, final output path, thumbnail path, skipped path, and final PNG dimensions (`1440x1440`) using sandbox files under ignored `.cache/`.
 - Snap reset behavior remains preserved by the unchanged save/skip `advance()` reset path; the headless probe did not produce a stuck snap visual state.
+
+## 2026-06-28 Editor Canvas/Sidebar Follow-Up
+
+### Code Changes
+- Removed the Editor footer stage chips (`Upscale`, `RemBG`, `Editor`) without adding a replacement stage indicator.
+- Increased the display-only Editor zoom calibration to `DISPLAY_ZOOM_MULTIPLIER = 0.78`; export size, saved pixels, canvas settings, placement math, guide math, and output conventions are unchanged.
+- Removed rounded canvas display corners so the visible Editor canvas/frame renders with sharp corners.
+- Added a gutter between the canvas workspace and right sidebar while keeping the compact accordion layout.
+- Removed colored vertical section indicators from Editor accordion headers; section labels and chevrons remain.
+- Removed hover shadows/jumping from right sidebar accordion controls and replaced them with subtle background/border hover treatment.
+- Moved the current filename from the top bar to the compact footer/status area.
+- Moved the queue chip next to the Skip button in the top-right action group.
+- Kept Editor save/skip/session behavior, queue ordering logic, snap reset path, API contracts, backend processing logic, path/session behavior, Electron scope, and dependencies unchanged.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` passed against a temporary local API because the expected API server was initially unreachable.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing Vite at `http://127.0.0.1:5173` responded with the app HTML. A headless browser queue probe against the running Vite server did not complete reliably, so final browser assertions were limited to automated build/lint plus source/static verification in this pass.

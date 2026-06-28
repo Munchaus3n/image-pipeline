@@ -138,5 +138,8 @@ Run these only during explicit real local workflow validation with disposable in
 - Editor visual screenshots were captured under ignored `.cache/` paths for light and dark mode; no System/GPU card text was detected.
 - Passed 2026-06-28 disposable Editor browser behavior probe: source reload, Save & Next, Skip, final output path, thumbnail path, skipped path, and saved PNG dimensions (`1440x1440`) using ignored `.cache/` sandbox files.
 - The disposable behavior probe used temporary local API/Vite processes only after the originally provided `127.0.0.1:7421` and `127.0.0.1:5176` servers became unreachable; those temporary processes were stopped after the probe.
+- Passed 2026-06-28 Editor canvas/sidebar follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint.
+- Editor canvas/sidebar follow-up uses `DISPLAY_ZOOM_MULTIPLIER = 0.78`, removes footer stage chips, moves filename to the footer, moves the queue chip next to Skip, sharpens the display canvas corners, removes sidebar colored section indicators, and removes sidebar hover shadows.
+- Existing Vite at `127.0.0.1:5173` responded with app HTML, but the headless queue probe did not complete reliably against that already-running server; no duplicate Vite server was started for final validation because the user-started Vite server was reachable.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no persistent browser automation dependency, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.
