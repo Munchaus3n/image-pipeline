@@ -96,6 +96,8 @@ These remain browser/manual checks unless a future browser automation dependency
 8. Confirm no System/GPU card and no horizontal overflow are present.
 9. Confirm idle/ready, running, and completed status cards have breathing space below the header without creating extra scroll.
 10. Confirm live preview tiles are 1:1 squares and preview images fill the tile with no letterboxed tiny image.
+11. Confirm four live preview tiles distribute across the available row width instead of staying fixed and tiny.
+12. Confirm the Activity panel still moves below the expanded preview strip cleanly.
 
 ## Dangerous/Real Pipeline Checks
 These are intentionally not automated by `safe_smoke_test.py`:
@@ -118,5 +120,6 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-27 Input density/clipping follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Passed 2026-06-27 Process visual automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Passed 2026-06-28 Process spacing/preview tile follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
+- Passed 2026-06-28 Process preview strip final fix automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, and frontend lint. Existing API/Vite probes returned 200; full click-by-click visual QA was not screenshot-captured.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no browser automation, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

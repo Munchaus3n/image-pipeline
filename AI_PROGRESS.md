@@ -330,3 +330,23 @@
 - `cd editor-ui && npm.cmd run lint` passed.
 - Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
 - Full click-by-click browser visual QA and screenshots were not captured because no browser automation dependency is installed and none was added.
+
+## 2026-06-28 Process Preview Strip Final Fix
+
+### Code Changes
+- Updated the Process live preview grid to use four flexible columns that fill the available row width instead of fixed tiny tile widths.
+- Kept preview tiles square with `aspect-ratio: 1 / 1` while allowing tile size to be driven by available row width.
+- Removed preview tile padding so the image itself fills the clipped rounded square.
+- Reinforced `object-fit: cover`, full width/height, and minimum image dimensions for the preview image element.
+- Kept filename overlays compact and preserved no-placeholder behavior.
+- Kept changes CSS-only; no preview generation, selection, API, processing, session, output, Editor behavior, Electron, or dependency changes were made.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed with local write approval.
+- `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` passed with local write approval.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
+- Full click-by-click browser visual QA and screenshots were not captured because no browser automation dependency is installed and none was added.
