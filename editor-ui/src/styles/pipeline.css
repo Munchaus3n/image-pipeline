@@ -1621,3 +1621,57 @@
     gap: 6px;
   }
 }
+
+/* Process mini follow-up: status breathing room and true square preview tiles. */
+.pipeline-screen .pipeline-results-area {
+  padding-top: 12px !important;
+}
+
+.pipeline-screen .pipeline-status-card-slot {
+  padding-top: 2px;
+}
+
+.pipeline-screen .pipeline-preview-grid {
+  grid-template-columns: repeat(4, var(--pipeline-live-tile-size));
+  grid-auto-rows: var(--pipeline-live-tile-size);
+  justify-content: start;
+}
+
+.pipeline-screen .pipeline-preview-slot {
+  width: var(--pipeline-live-tile-size);
+  height: var(--pipeline-live-tile-size);
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+}
+
+.pipeline-screen .pipeline-preview-slot:has(.pipeline-preview-placeholder) {
+  display: none;
+}
+
+.pipeline-screen .pipeline-preview-slot img,
+.pipeline-screen .pipeline-preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover !important;
+}
+
+.pipeline-screen .pipeline-preview-placeholder {
+  display: none;
+}
+
+.pipeline-screen .pipeline-live-preview-name {
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+  color: rgba(255, 255, 255, 0.78);
+}
+
+@media (max-height: 820px) {
+  .pipeline-screen .pipeline-results-area {
+    padding-top: 9px !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .pipeline-screen .pipeline-results-area {
+    padding-top: 8px !important;
+  }
+}

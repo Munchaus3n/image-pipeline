@@ -18,6 +18,7 @@
 - Input/Process polish follow-up is implemented: visible `Load` label, compact Input preview panel, cleaner selection toolbar, Process Open Editor polish, Resume prompt `×` dismiss, and collapsed empty live preview area.
 - Input density/clipping follow-up is implemented: tighter Input proportions, more compact thumbnail grid, and safer first-column hover/selected shadows.
 - Process visual pass is implemented: compact left config cards, tighter header actions, compact ready/progress/live preview/Activity panels, and no `Will run` or System/GPU card.
+- Process mini follow-up is implemented: right status cards have header breathing room, and live preview tiles are square 1:1 cover-fit tiles with empty placeholders hidden.
 - Next implementation should be the Editor visual pass only.
 - No Electron packaging work has been started.
 

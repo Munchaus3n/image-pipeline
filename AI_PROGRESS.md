@@ -310,3 +310,23 @@
 - `cd editor-ui && npm.cmd run lint` passed.
 - Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
 - Full click-by-click browser visual QA and screenshots were not captured because no browser automation dependency is installed and none was added.
+
+## 2026-06-28 Process Spacing/Preview Tile Follow-Up
+
+### Code Changes
+- Added a small top inset to the Process right results area/status slot so ready, running, and completed cards no longer sit glued to the header.
+- Kept the spacing compact to avoid reintroducing oversized panels or unnecessary scrolling.
+- Changed live preview tiles to true 1:1 squares with clipped rounded corners.
+- Changed live preview images to fill the square tile with `object-fit: cover`, while keeping the filename overlay compact and readable.
+- Hid empty preview placeholders defensively in CSS; the existing behavior still collapses the live preview area when no real preview paths exist.
+- Kept changes CSS-only; no API contracts, processing logic, path/session behavior, output conventions, Editor behavior, Electron, or dependency changes were made.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed with local write approval.
+- `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` passed with local write approval.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing API/Vite probes returned 200 for `http://127.0.0.1:7421/settings`, `http://127.0.0.1:5173/`, and `http://127.0.0.1:5173/api/settings`.
+- Full click-by-click browser visual QA and screenshots were not captured because no browser automation dependency is installed and none was added.
