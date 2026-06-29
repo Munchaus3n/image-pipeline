@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { browseFolder } from "./api";
 
 const BASE = "/api";
 
@@ -17,11 +18,11 @@ function Section({ title, description, children, defaultOpen = false, tone = "de
           <span className="settings-section-title">{title}</span>
           {description && <span className="settings-section-description">{description}</span>}
         </span>
-        <span className="settings-section-arrow" aria-hidden="true">
-          {open ? "v" : ">"}
-        </span>
+        <span className="settings-section-arrow" aria-hidden="true" />
       </button>
-      {open && <div className="settings-section-body">{children}</div>}
+      <div className={open ? "settings-section-body is-open" : "settings-section-body"} aria-hidden={!open}>
+        <div className="settings-section-body-inner">{children}</div>
+      </div>
     </section>
   );
 }
@@ -112,6 +113,41 @@ function TextInput({ value, onChange, placeholder, width = 240, mono = true, max
       onChange={event => onChange(event.target.value)}
       style={{ width }}
     />
+  );
+}
+
+function FolderPathInput({ value, onChange, placeholder }) {
+  const [browsing, setBrowsing] = useState(false);
+
+  const browse = useCallback(async () => {
+    setBrowsing(true);
+    try {
+      const result = await browseFolder(value || "");
+      if (result?.path) onChange(result.path);
+    } catch {
+      void 0;
+    } finally {
+      setBrowsing(false);
+    }
+  }, [onChange, value]);
+
+  return (
+    <div className="settings-path-control">
+      <TextInput
+        value={value}
+        placeholder={placeholder}
+        onChange={onChange}
+        width="100%"
+      />
+      <button
+        type="button"
+        className="settings-path-browse"
+        onClick={browse}
+        disabled={browsing}
+      >
+        {browsing ? "..." : "Browse"}
+      </button>
+    </div>
   );
 }
 
@@ -229,14 +265,14 @@ export default function Settings({ onThemeChange }) {
               defaultOpen
             >
               <Row label="Default input folder" hint="Leave blank to use ./input.">
-                <TextInput
+                <FolderPathInput
                   value={settings.output.input_dir || ""}
                   placeholder="blank = ./input"
                   onChange={value => setSetting("output", "input_dir", value)}
                 />
               </Row>
               <Row label="Default output folder" hint="Leave blank to use ./output.">
-                <TextInput
+                <FolderPathInput
                   value={settings.output.output_dir || ""}
                   placeholder="blank = ./output"
                   onChange={value => setSetting("output", "output_dir", value)}
@@ -284,13 +320,19 @@ export default function Settings({ onThemeChange }) {
               <Row label="Guide opacity">
                 <Slider
                   value={settings.appearance.guide_opacity}
+                  min={0}
+                  max={1}
+                  step={0.01}
                   onChange={value => setSetting("appearance", "guide_opacity", value)}
-                  format={value => `${Math.round(value)}%`}
+                  format={value => `${Math.round(value * 100)}%`}
                 />
               </Row>
               <Row label="Reference image opacity">
                 <Slider
                   value={settings.appearance.ref_img_opacity}
+                  min={0}
+                  max={1}
+                  step={0.01}
                   onChange={value => setSetting("appearance", "ref_img_opacity", value)}
                   format={value => `${Math.round(value * 100)}%`}
                 />

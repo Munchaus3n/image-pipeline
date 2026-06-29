@@ -73,10 +73,14 @@ These remain browser/manual checks unless a future browser automation dependency
 These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
 1. Open Settings in light mode and confirm the `Settings · Workspace` header, helper copy, compact cards, and controls match the app design language.
 2. Confirm Workspace Paths, Appearance, Processing Defaults, Background Removal, Guides, and Safety groups are clear without oversized default browser controls.
-3. Confirm theme selection still updates and persists through the existing settings flow.
-4. Confirm `Wipe input after run` is separated in the amber Safety section, is not visually encouraged, and remains off unless explicitly toggled.
-5. Toggle dark mode and confirm Settings cards, fields, toggles, warnings, and buttons remain intentional and readable.
-6. Confirm Input, Process, Templates, and Editor still open, and no System/GPU card or old visual-language panel appears in Settings.
+3. Expand/collapse every Settings accordion and confirm the chevron rotation and section reveal feel smooth, fast, and non-bouncy.
+4. Confirm theme selection still updates and persists through the existing settings flow.
+5. Confirm Default input folder and Default output folder still allow manual typing and also provide compact Browse buttons using the existing local folder picker.
+6. Confirm browsed input/output folder paths mark Settings dirty and persist after Save/reopening Settings.
+7. Confirm Guide opacity and Reference image opacity display human percentages: `1` as `100%`, `0.3` as `30%`, and `0.05` as `5%`.
+8. Confirm `Wipe input after run` is separated in the amber Safety section, is not visually encouraged, and remains off unless explicitly toggled.
+9. Toggle dark mode and confirm Settings cards, fields, toggles, warnings, and buttons remain intentional and readable.
+10. Confirm Input, Process, Templates, and Editor still open, and no System/GPU card or old visual-language panel appears in Settings.
 
 ## Input Visual Checks
 These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
@@ -159,5 +163,8 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-29 Settings visual/safety cleanup frontend validation: `cd editor-ui && npm.cmd run build` and `cd editor-ui && npm.cmd run lint`.
 - Settings visual/safety cleanup keeps settings persistence/API contracts unchanged, separates `wipe_input_after_run` in an amber Safety section, and removes the old GPU setup card.
 - Backend/API tests were intentionally skipped for the Settings visual/safety cleanup because only frontend Settings UI/styles and AI validation notes changed.
+- Passed 2026-06-29 Settings controls follow-up frontend validation: `cd editor-ui && npm.cmd run build` and `cd editor-ui && npm.cmd run lint`.
+- Settings controls follow-up reuses the existing `/api/browse` picker via the frontend helper for default input/output folder Browse buttons and fixes opacity display without changing stored setting format.
+- Backend/API tests were intentionally skipped for the Settings controls follow-up because only frontend Settings UI/styles and AI validation notes changed.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no persistent browser automation dependency, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

@@ -446,3 +446,16 @@
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
 - Backend/API tests were intentionally skipped because this was a frontend-only Settings visual/safety pass.
+
+## 2026-06-29 Settings Controls Follow-Up
+
+### Code Changes
+- Replaced rough Settings accordion arrow text with a CSS chevron and smoothed expand/collapse using a short grid/opacity transition with reduced-motion support.
+- Reduced Settings label/helper/control font weights so normal form rows feel less heavy while section titles remain structured.
+- Added compact Browse buttons for Default input folder and Default output folder by reusing the existing frontend `browseFolder` helper and `/api/browse` picker path.
+- Fixed opacity sliders to use 0–1 ranges and human percentage display, so `1` shows `100%`, `0.3` shows `30%`, and `0.05` shows `5%` without changing stored setting format.
+
+### Validation
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Backend/API tests were intentionally skipped because no backend behavior or API contract changed.
