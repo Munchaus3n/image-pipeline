@@ -143,5 +143,9 @@ Run these only during explicit real local workflow validation with disposable in
 - Existing Vite at `127.0.0.1:5173` responded with app HTML, but the headless queue probe did not complete reliably against that already-running server; no duplicate Vite server was started for final validation because the user-started Vite server was reachable.
 - Passed 2026-06-29 Editor compact panel/fit follow-up automated validation: static smoke, Python compile, sandboxed API smoke with `--api-url`, frontend install, frontend build, frontend lint, and a headless Chrome compact-fit probe against temporary local Vite.
 - Editor compact panel/fit follow-up uses `DISPLAY_ZOOM_MULTIPLIER = 0.74`, keeps filename in the footer, keeps queue chip beside Skip, preserves sharp canvas corners/no stage chips/no sidebar accents/no System/GPU card, and confirms 100% canvas fit with no canvas viewport, workspace, or document vertical overflow.
+- Passed 2026-06-29 Templates visual match frontend validation: `cd editor-ui && npm.cmd run build` and `cd editor-ui && npm.cmd run lint`.
+- Templates visual match keeps template API/data behavior unchanged and uses token-based compact header, list cards, empty state, form controls, and light/dark-ready styling.
+- Templates browser visual validation against `http://127.0.0.1:5173/` was not completed because the running Vite server was not reachable during this pass; no duplicate Vite server was started.
+- Backend/API tests were intentionally skipped for the Templates visual match because only frontend visual files and AI validation notes changed.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no persistent browser automation dependency, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

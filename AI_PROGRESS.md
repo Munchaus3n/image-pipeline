@@ -417,3 +417,18 @@
 - `cd editor-ui && npm.cmd run lint` passed.
 - Headless Chrome compact-fit probe against temporary local Vite at `http://127.0.0.1:5173` confirmed: no footer stage pills, footer filename present, no topbar filename chip, queue chip beside Skip, 0px canvas radius, no sidebar accents, no System/GPU card, sidebar width 300px, accordion header height 42px, and zoom labels `75%`, `100%`, `125%`, `150%`.
 - Headless Chrome compact-fit probe confirmed the 100% canvas frame measured 533px high inside an 845px canvas viewport, with `viewportScrollHeight == viewportClientHeight`, `workspaceScrollHeight == workspaceClientHeight`, and no document vertical overflow.
+
+## 2026-06-29 Templates Visual Match
+
+### Code Changes
+- Reworked the Templates screen to use semantic Templates-specific classes instead of broad inline style blocks and selector hacks.
+- Added a compact `Templates · Layouts` header, helper copy, status pill/bar, compact list header, intentional empty state, and token-based card/list/form panels.
+- Restyled template rows with subtle active/hover states, zone dots, compact metadata, thumbnails, and a scoped delete icon.
+- Restyled template form controls, upload/dropzone, zone buttons, primary/secondary/destructive actions, and focus states using existing design tokens.
+- Preserved template save/load/delete API calls, template JSON shape, Editor template usage, backend behavior, path/session behavior, output conventions, dependencies, and Electron scope.
+
+### Validation
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- `http://127.0.0.1:5173/` was not reachable during this pass, so browser visual validation against the running Vite server was not completed.
+- Backend/API smoke tests were intentionally skipped because this was a frontend-only visual pass.

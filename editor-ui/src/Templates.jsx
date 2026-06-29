@@ -115,9 +115,9 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
     : null;
 
   return (
-    <div style={{ background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "16px" }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: C.text, marginBottom: 14 }}>
-        {isNew ? "New template" : `Edit — ${tpl.name}`}
+    <div className="template-form-panel">
+      <div className="template-form-title">
+        {isNew ? "New template" : `Edit - ${tpl.name}`}
       </div>
 
       <Field label="Name">
@@ -126,16 +126,16 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
       </Field>
 
       <Field label="Zone">
-        <div style={{ display: "flex", gap: 6 }}>
+        <div className="template-zone-row">
           {ZONES.map(z => (
-            <button key={z} onClick={() => set("zone", z)} style={{
-              background: form.zone === z ? C.panel : "transparent",
-              color: form.zone === z ? ZONE_COLOR[z] : C.dim,
-              border: `1px solid ${form.zone === z ? C.border : "transparent"}`,
-              borderRadius: 4, padding: "3px 10px", fontSize: 11,
-              cursor: "pointer", fontFamily: "inherit",
-              fontWeight: form.zone === z ? 600 : 400,
-            }}>{z}</button>
+            <button
+              key={z}
+              className={form.zone === z ? "template-zone-button template-zone-active" : "template-zone-button"}
+              onClick={() => set("zone", z)}
+              style={{ "--zone-color": ZONE_COLOR[z] }}
+            >
+              {z}
+            </button>
           ))}
         </div>
       </Field>
@@ -152,82 +152,64 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
         {/* Drop zone */}
         <div
           onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-          style={{
-            border: `1px dashed ${dragging ? C.blue : C.border}`,
-            borderRadius: 4, padding: "12px",
-            background: dragging ? "color-mix(in srgb,var(--accent) 8%,var(--panel))" : C.panel,
-            transition: "border-color 0.15s, background 0.15s",
-            marginBottom: hasImage ? 8 : 0,
-          }}
+          className={dragging ? "template-dropzone template-dropzone-active" : "template-dropzone"}
+          style={{ marginBottom: hasImage ? 8 : 0 }}
         >
           {hasImage ? (
-            <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="template-reference-preview">
               <img src={imgSrc} alt="reference"
-                style={{
-                  maxWidth: "100%", maxHeight: 160, display: "block",
-                  borderRadius: 3, objectFit: "contain"
-                }}
+                className="template-reference-image"
                 onError={e => { e.target.style.display = "none"; }} />
               <button
                 onClick={() => set("ref_image", "")}
-                style={{
-                  position: "absolute", top: 4, right: 4,
-                  background: "rgba(0,0,0,0.65)", color: "var(--accent-fg)",
-                  border: "none", borderRadius: 3,
-                  padding: "2px 6px", fontSize: 11, cursor: "pointer",
-                }}>✕</button>
+                className="template-reference-remove"
+              >
+                ×
+              </button>
             </div>
           ) : (
-            <div style={{ textAlign: "center", color: C.dim, fontSize: 11, lineHeight: 2 }}>
+            <div className="template-empty-upload">
               <div>Drop image here</div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 6 }}>
-                <button onClick={() => fileInputRef.current?.click()} style={smallBtnStyle}>
+              <div className="template-upload-actions">
+                <button className="template-btn template-btn-secondary" onClick={() => fileInputRef.current?.click()}>
                   Upload file
                 </button>
-                <button onClick={browseRef} style={smallBtnStyle}>
-                  Browse…
+                <button className="template-btn template-btn-secondary" onClick={browseRef}>
+                  Browse...
                 </button>
               </div>
             </div>
           )}
         </div>
         {hasImage && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => fileInputRef.current?.click()} style={smallBtnStyle}>
+          <div className="template-inline-actions">
+            <button className="template-btn template-btn-secondary" onClick={() => fileInputRef.current?.click()}>
               Replace
             </button>
-            <button onClick={browseRef} style={smallBtnStyle}>Browse…</button>
+            <button className="template-btn template-btn-secondary" onClick={browseRef}>Browse...</button>
           </div>
         )}
       </Field>
 
-      {error && <div style={{ fontSize: 11, color: C.red, marginBottom: 8 }}>{error}</div>}
+      {error && <div className="template-error">{error}</div>}
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
-        <button onClick={handleSave} disabled={saving} style={{
-          background: "var(--green-bg)", color: C.green, border: `1px solid var(--green-bdr)`,
-          borderRadius: 4, padding: "7px 18px", fontSize: 11, fontWeight: 600,
-          cursor: "pointer", fontFamily: "inherit",
-        }}>{saving ? "Saving…" : "Save template"}</button>
+      <div className="template-form-actions">
+        <button className="template-btn template-btn-primary" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving..." : "Save template"}
+        </button>
         <button
+          className="template-btn template-btn-secondary"
           onClick={onCancel}
-          onMouseEnter={e => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = "var(--red-bdr)"; }}
-          onMouseLeave={e => { e.currentTarget.style.color = C.dim; e.currentTarget.style.borderColor = C.border; }}
-          style={{
-            background: "transparent", color: C.dim, border: `1px solid ${C.border}`,
-            borderRadius: 4, padding: "7px 14px", fontSize: 11,
-            cursor: "pointer", fontFamily: "inherit",
-          }}>Cancel</button>
+        >
+          Cancel
+        </button>
         {!isNew && onDelete && (
           <button
+            className="template-btn template-btn-danger"
             onClick={onDelete}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--red-bg)"; e.currentTarget.style.color = C.red; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = C.dim; }}
-            style={{
-              marginLeft: "auto", background: "transparent", color: C.dim,
-              border: `1px solid ${C.border}`, borderRadius: 4,
-              padding: "7px 14px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
-            }}>Delete</button>
+          >
+            Delete
+          </button>
         )}
       </div>
     </div>
@@ -292,15 +274,12 @@ export default function Templates({ onBack, hideHeader }) {
     : editing
       ? { name: editing, ...(templates[editing] || {}) }
       : null;
+  const templateEntries = Object.entries(templates);
+  const templateCount = templateEntries.length;
 
   return (
-    <div style={{
-      display: "flex", flexDirection: "column", background: C.bg, height: "100%", minHeight: 0,
-      fontFamily: "'Outfit','DM Sans',system-ui,sans-serif", color: C.text, fontSize: 13
-    }}>
+    <div className="templates-screen">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-        button:hover{filter:brightness(1.12)} button:active{filter:brightness(0.9)}
         ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
         ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
         ::placeholder{color:var(--dim2);opacity:0.7}
@@ -310,107 +289,115 @@ export default function Templates({ onBack, hideHeader }) {
 
       {/* Header — hidden when nav strip is provided by Root */}
       {!hideHeader && (
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 20px", height: 42, borderBottom: `1px solid ${C.border}`, background: C.panel
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button onClick={onBack} style={{
-            background: "transparent", color: C.dim, border: "none",
-            fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0
-          }}>
-            ← Pipeline
-          </button>
-          <span style={{ color: C.dim2 }}>|</span>
-          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.04em" }}>Templates</span>
+      <div className="templates-header">
+        <div className="templates-heading">
+          {onBack && (
+            <button className="template-back-button" onClick={onBack}>
+              ← Pipeline
+            </button>
+          )}
+          <div>
+            <h1>Templates · Layouts</h1>
+            <p>Manage placement presets and reusable output layouts.</p>
+          </div>
         </div>
-        {status && (
-          <div style={{ fontSize: 11, color: C.green, fontFamily: "JetBrains Mono" }}>{status}</div>
-        )}
+        <div className="templates-header-actions">
+          {status && (
+            <div className="template-status-pill">{status}</div>
+          )}
+          <button className="template-btn template-btn-primary" onClick={() => setEditing("new")}>
+            New Template
+          </button>
+        </div>
       </div>
       )}
       {/* Status feedback when header hidden */}
       {hideHeader && status && (
-        <div style={{ padding: "4px 20px", fontSize: 11, color: C.green,
-          fontFamily: "JetBrains Mono", background: C.panel, borderBottom: `1px solid ${C.border}` }}>
+        <div className="template-status-bar">
           {status}
         </div>
       )}
 
-      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      <div className="templates-body">
 
         {/* Template list */}
-        <div style={{
-          width: 320, borderRight: `1px solid ${C.border}`, padding: "14px",
-          display: "flex", flexDirection: "column", overflowY: "auto"
-        }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{
-              fontSize: 9, letterSpacing: "0.12em", color: C.dim,
-              textTransform: "uppercase", fontWeight: 600
-            }}>Templates</div>
-            <button onClick={() => setEditing("new")} style={{
-              background: "var(--green-bg)", color: C.green, border: `1px solid var(--green-bdr)`,
-              borderRadius: 4, padding: "4px 12px", fontSize: 11, fontWeight: 600,
-              cursor: "pointer", fontFamily: "inherit",
-            }}>+ New</button>
+        <div className="templates-list-pane">
+          <div className="templates-list-header">
+            <div>
+              <span>Templates</span>
+              <strong>{templateCount}</strong>
+            </div>
+            <button className="template-btn template-btn-secondary template-btn-compact" onClick={() => setEditing("new")}>
+              + New
+            </button>
           </div>
 
           {loading ? (
-            <div style={{ color: C.dim, fontSize: 11 }}>Loading…</div>
-          ) : Object.keys(templates).length === 0 ? (
-            <div style={{ color: C.dim, fontSize: 11 }}>No templates yet. Create one →</div>
+            <div className="template-list-message">Loading...</div>
+          ) : templateCount === 0 ? (
+            <div className="template-empty-state">
+              <strong>No templates yet</strong>
+              <span>Create a placement preset when you need repeatable layouts.</span>
+              <button className="template-btn template-btn-primary" onClick={() => setEditing("new")}>
+                Create Template
+              </button>
+            </div>
           ) : (
-            Object.entries(templates).map(([name, tpl]) => (
-              <div key={name} style={{
-                background: editing === name ? C.panel2 : "transparent",
-                border: `1px solid ${editing === name ? C.border : "transparent"}`,
-                borderRadius: 4, padding: "8px 10px", marginBottom: 4,
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                cursor: "pointer",
-              }} onClick={() => setEditing(name)}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <div style={{
-                      width: 6, height: 6, borderRadius: "50%",
-                      background: ZONE_COLOR[tpl.zone] || C.dim
-                    }} />
-                    <span style={{ fontSize: 12, color: C.text }}>{name}</span>
-                  </div>
-                  {tpl.hint && (
-                    <div style={{ fontSize: 10, color: C.dim, marginLeft: 13, marginTop: 2 }}>{tpl.hint}</div>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {tpl.ref_image && (
-                    <div style={{
-                      width: 28, height: 28, borderRadius: 3, overflow: "hidden",
-                      border: `1px solid ${C.border}`, flexShrink: 0
-                    }}>
-                      <img
-                        src={
-                          !tpl.ref_image ? null
-                          : tpl.ref_image.startsWith("data:") ? tpl.ref_image
-                          : tpl.ref_image.includes("/") || tpl.ref_image.includes("\\")
-                            ? `${BASE}/image?path=${encodeURIComponent(tpl.ref_image)}`
-                            : `${BASE}/templates/image?name=${encodeURIComponent(tpl.ref_image)}`
-                        }
-                        alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                        onError={e => { e.target.style.display = "none"; }} />
+            <div className="template-card-list">
+              {templateEntries.map(([name, tpl]) => (
+                <div
+                  key={name}
+                  className={editing === name ? "template-card template-card-active" : "template-card"}
+                  onClick={() => setEditing(name)}
+                >
+                  <div className="template-card-main">
+                    <div className="template-card-title-row">
+                      <div
+                        className="template-zone-dot"
+                        style={{ background: ZONE_COLOR[tpl.zone] || C.dim }}
+                      />
+                      <span>{name}</span>
                     </div>
-                  )}
-                  <button onClick={e => { e.stopPropagation(); handleDelete(name); }} style={{
-                    background: "transparent", color: C.dim, border: "none",
-                    fontSize: 14, cursor: "pointer", padding: "0 4px", lineHeight: 1,
-                  }}>×</button>
+                    <div className="template-card-meta">
+                      <span>{tpl.zone || "none"} zone</span>
+                      <span>{tpl.ref_image ? "reference image" : "no reference"}</span>
+                    </div>
+                    {tpl.hint && (
+                      <div className="template-card-hint">{tpl.hint}</div>
+                    )}
+                  </div>
+                  <div className="template-card-side">
+                    {tpl.ref_image && (
+                      <div className="template-card-thumb">
+                        <img
+                          src={
+                            !tpl.ref_image ? null
+                            : tpl.ref_image.startsWith("data:") ? tpl.ref_image
+                            : tpl.ref_image.includes("/") || tpl.ref_image.includes("\\")
+                              ? `${BASE}/image?path=${encodeURIComponent(tpl.ref_image)}`
+                              : `${BASE}/templates/image?name=${encodeURIComponent(tpl.ref_image)}`
+                          }
+                          alt=""
+                          onError={e => { e.target.style.display = "none"; }}
+                        />
+                      </div>
+                    )}
+                    <button
+                      className="template-delete-icon"
+                      onClick={e => { e.stopPropagation(); handleDelete(name); }}
+                      aria-label={`Delete ${name}`}
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
 
         {/* Edit pane */}
-        <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
+        <div className="templates-edit-pane">
           {editingTemplate ? (
             <TemplateForm
               key={editing}
@@ -421,8 +408,9 @@ export default function Templates({ onBack, hideHeader }) {
               onDelete={editing && editing !== "new" ? () => handleDelete(editing) : null}
             />
           ) : (
-            <div style={{ color: C.dim, fontSize: 11, marginTop: 8 }}>
-              Select a template to edit, or click + New.
+            <div className="template-editor-empty">
+              <strong>Select a template</strong>
+              <span>Pick a saved layout from the list, or create a new reusable placement preset.</span>
             </div>
           )}
         </div>
@@ -444,22 +432,16 @@ export default function Templates({ onBack, hideHeader }) {
 
 function Field({ label, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 10, color: C.dim, marginBottom: 4 }}>{label}</div>
+    <div className="template-field">
+      <div className="template-field-label">{label}</div>
       {children}
     </div>
   );
 }
 
 const inputStyle = {
-  width: "100%", background: C.panel, color: C.text,
-  border: `1px solid ${C.border}`, borderRadius: 4,
-  padding: "5px 8px", fontSize: 11, fontFamily: "inherit",
+  width: "100%", background: "var(--field-bg)", color: C.text,
+  border: `1px solid ${C.border}`, borderRadius: 8,
+  padding: "7px 9px", fontSize: 11, fontFamily: "inherit",
   outline: "none", boxSizing: "border-box",
-};
-
-const smallBtnStyle = {
-  background: C.panel, color: C.dim, border: `1px solid ${C.border}`,
-  borderRadius: 4, padding: "5px 8px", fontSize: 11,
-  cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
 };
