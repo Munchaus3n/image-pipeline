@@ -1221,6 +1221,62 @@
   padding-bottom: 48px;
 }
 
+.pipeline-screen .pipeline-panel-section {
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.pipeline-screen .pipeline-panel-section:first-of-type {
+  border-top: 1px solid var(--border);
+}
+
+.pipeline-screen .pipeline-panel-toggle {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 10px 0 11px;
+  color: var(--dim);
+  background: transparent;
+}
+
+.pipeline-screen .pipeline-panel-title {
+  color: color-mix(in srgb, var(--dim) 78%, var(--text));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.pipeline-screen .pipeline-panel-chevron {
+  flex-shrink: 0;
+  color: var(--dim);
+  transform: rotate(180deg);
+}
+
+.pipeline-screen .pipeline-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 11px;
+}
+
+.pipeline-screen .pipeline-panel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pipeline-screen .pipeline-panel-field + .pipeline-panel-field {
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+}
+
 .pipeline-screen .pipeline-section-label {
   min-height: 32px;
   display: flex;
@@ -1292,9 +1348,30 @@
   border-radius: 8px !important;
 }
 
+.pipeline-screen .pipeline-folder-input select {
+  appearance: none;
+  color: transparent !important;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 6.25L8 10.75L12.5 6.25' stroke='%238392a8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 14px 14px no-repeat !important;
+}
+
+.pipeline-screen .pipeline-folder-input select option {
+  color: var(--text);
+}
+
 .pipeline-screen .pipeline-browse-button {
   min-width: 31px;
   padding: 0 8px !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--dim) 82%, var(--text)) !important;
+}
+
+.pipeline-screen .pipeline-browse-button svg {
+  width: 14px;
+  height: 14px;
 }
 
 .pipeline-screen .pipeline-row .pipeline-btn {

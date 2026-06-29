@@ -111,27 +111,50 @@ function FolderInput({ value, onChange, placeholder, recent = [], onRemember }) 
           }}
           title="Recent folders"
         >
-          <option value="">↕</option>
+          <option value="">Recent folders</option>
           {recent.map(path => <option key={path} value={path}>{path}</option>)}
         </select>
       )}
-      <button className="pipeline-btn pipeline-browse-button pipeline-secondary-button" onClick={browse} style={{
-        background: C.panel2, color: C.dim,
-        border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 9px",
-        fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0
-      }}>…</button>
+      <button
+        className="pipeline-btn pipeline-browse-button pipeline-secondary-button"
+        onClick={browse}
+        aria-label="Browse folder"
+        title="Browse folder"
+        style={{
+          background: C.panel2, color: C.dim,
+          border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 9px",
+          fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2.5 5.5h11v6.25a1.25 1.25 0 0 1-1.25 1.25h-8.5A1.25 1.25 0 0 1 2.5 11.75V5.5Z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+          <path d="M2.5 5.5V4.25A1.25 1.25 0 0 1 3.75 3h3.1l1.25 1.25h4.15A1.25 1.25 0 0 1 13.5 5.5" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+        </svg>
+      </button>
     </div>
   );
 }
 
-function SectionLabel({ children }) {
+function ProcessPanelSection({ title, children }) {
   return (
-    <div className="pipeline-section-label" style={{
-      fontSize: 10, letterSpacing: "0.12em", color: C.dim,
-      textTransform: "uppercase", fontWeight: 700, marginBottom: 8
-    }}>
-      {children}
-    </div>
+    <section className="pipeline-panel-section">
+      <div className="pipeline-panel-toggle">
+        <span className="pipeline-panel-title">{title}</span>
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          className="pipeline-panel-chevron"
+          aria-hidden="true"
+        >
+          <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </div>
+      <div className="pipeline-panel-content">
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -1037,114 +1060,111 @@ export default function Pipeline({
             </div>
           )}
 
-          <SectionLabel>Folders</SectionLabel>
-          <div className="pipeline-section" style={{ marginBottom: 8 }}>
-            <FieldLabel>Input folder</FieldLabel>
-            <FolderInput
-              value={inputDir}
-              onChange={setInputDir}
-              placeholder="default: ./input"
-              recent={recentInputDirs}
-              onRemember={rememberInputDir}
-            />
-          </div>
-          <div className="pipeline-section" style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
-            <FieldLabel>Output folder</FieldLabel>
-            <FolderInput
-              value={outputDir}
-              onChange={setOutputDir}
-              placeholder="default: ./output"
-              recent={recentOutputDirs}
-              onRemember={rememberOutputDir}
-            />
-          </div>
+          <ProcessPanelSection title="Folders">
+            <div className="pipeline-panel-field">
+              <FieldLabel>Input folder</FieldLabel>
+              <FolderInput
+                value={inputDir}
+                onChange={setInputDir}
+                placeholder="default: ./input"
+                recent={recentInputDirs}
+                onRemember={rememberInputDir}
+              />
+            </div>
+            <div className="pipeline-panel-field">
+              <FieldLabel>Output folder</FieldLabel>
+              <FolderInput
+                value={outputDir}
+                onChange={setOutputDir}
+                placeholder="default: ./output"
+                recent={recentOutputDirs}
+                onRemember={rememberOutputDir}
+              />
+            </div>
+          </ProcessPanelSection>
 
-          <SectionLabel>Processing</SectionLabel>
-          <div className="pipeline-section" style={{ marginBottom: 14 }}>
-
-          <Row label="Folder mode">
-            <Btn label="Bulk" active={folderMode === "bulk"} onClick={() => setFolderMode("bulk")} />
-            <Btn label="Clean" active={folderMode === "clean"} onClick={() => setFolderMode("clean")} />
-          </Row>
-
-          <Row label="Upscale (NCNN)">
-            <PillToggle value={doUpscale} onChange={setDoUpscale} />
-          </Row>
-
-          {doUpscale && (
-            <Row label="Scale factor">
-              <Btn label="2×" active={scale === "2"} onClick={() => setScale("2")} />
-              <Btn label="4×" active={scale === "4"} onClick={() => setScale("4")} />
+          <ProcessPanelSection title="Processing">
+            <Row label="Folder mode">
+              <Btn label="Bulk" active={folderMode === "bulk"} onClick={() => setFolderMode("bulk")} />
+              <Btn label="Clean" active={folderMode === "clean"} onClick={() => setFolderMode("clean")} />
             </Row>
-          )}
 
-          <Row label="Remove BG">
-            <PillToggle value={doRembg} onChange={setDoRembg} />
-          </Row>
-          {doRembg && (
-            <>
-              <Row label="BG model">
-                <select
-                  value={rembgModel} onChange={e => setRembgModel(e.target.value)}
+            <Row label="Upscale (NCNN)">
+              <PillToggle value={doUpscale} onChange={setDoUpscale} />
+            </Row>
+
+            {doUpscale && (
+              <Row label="Scale factor">
+                <Btn label="2×" active={scale === "2"} onClick={() => setScale("2")} />
+                <Btn label="4×" active={scale === "4"} onClick={() => setScale("4")} />
+              </Row>
+            )}
+
+            <Row label="Remove BG">
+              <PillToggle value={doRembg} onChange={setDoRembg} />
+            </Row>
+            {doRembg && (
+              <>
+                <Row label="BG model">
+                  <select
+                    value={rembgModel} onChange={e => setRembgModel(e.target.value)}
+                    style={{
+                      background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
+                      borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
+                      outline: "none", fontFamily: "inherit", colorScheme: "dark",
+                    }}
+                  >
+                    {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </Row>
+                <Row label="Fallback">
+                  <span style={{ fontSize: 11, color: C.dim }}>auto</span>
+                </Row>
+              </>
+            )}
+          </ProcessPanelSection>
+
+          <ProcessPanelSection title="Output Settings">
+            <Row label="Skip upscale if any side >=" className="pipeline-row-output-limit" controlsClassName="pipeline-row-controls-wrap">
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="number"
+                  value={upscaleMaxPx}
+                  onChange={e => setUpscaleMaxPx(e.target.value)}
+                  placeholder="no limit"
+                  min={256} max={8192}
                   style={{
-                    background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
-                    borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
-                    outline: "none", fontFamily: "inherit", colorScheme: "dark",
+                    width: 90, background: C.panel2, color: C.text,
+                    border: `1px solid ${C.border}`, borderRadius: 4,
+                    padding: "4px 5px", fontSize: 11, fontFamily: "JetBrains Mono",
+                    outline: "none", textAlign: "center"
                   }}
-                >
-                  {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </Row>
-              <Row label="Fallback">
-                <span style={{ fontSize: 11, color: C.dim }}>auto</span>
-              </Row>
-            </>
-          )}
+                />
+                <span style={{ fontSize: 10, color: C.dim }}>empty = no limit</span>
+              </div>
+            </Row>
 
-          </div>
-          <SectionLabel>Output settings</SectionLabel>
-          <div className="pipeline-section" style={{ marginBottom: 14 }}>
+            <Row label="Canvas size (px)" className="pipeline-row-canvas-size" controlsClassName="pipeline-row-controls-wrap">
+              <div className="pipeline-canvas-size-controls" style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                {["1080", "1440", "2048"].map(s => (
+                  <Btn key={s} label={s} active={canvasSize === s} onClick={() => setCanvasSize(s)} />
+                ))}
+                <input type="number" value={canvasSize} onChange={e => setCanvasSize(e.target.value)}
+                  min={256} max={8192}
+                  style={{
+                    width: 54, background: C.panel2, color: C.text,
+                    border: `1px solid ${C.border}`, borderRadius: 4,
+                    padding: "4px 5px", fontSize: 11, fontFamily: "JetBrains Mono",
+                    outline: "none", textAlign: "center"
+                  }}
+                />
+              </div>
+            </Row>
 
-          <Row label="Skip upscale if any side ≥" className="pipeline-row-output-limit" controlsClassName="pipeline-row-controls-wrap">
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
-                value={upscaleMaxPx}
-                onChange={e => setUpscaleMaxPx(e.target.value)}
-                placeholder="no limit"
-                min={256} max={8192}
-                style={{
-                  width: 90, background: C.panel2, color: C.text,
-                  border: `1px solid ${C.border}`, borderRadius: 4,
-                  padding: "4px 5px", fontSize: 11, fontFamily: "JetBrains Mono",
-                  outline: "none", textAlign: "center"
-                }}
-              />
-              <span style={{ fontSize: 10, color: C.dim }}>empty = no limit</span>
-            </div>
-          </Row>
-
-          <Row label="Canvas size (px)" className="pipeline-row-canvas-size" controlsClassName="pipeline-row-controls-wrap">
-            <div className="pipeline-canvas-size-controls" style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              {["1080", "1440", "2048"].map(s => (
-                <Btn key={s} label={s} active={canvasSize === s} onClick={() => setCanvasSize(s)} />
-              ))}
-              <input type="number" value={canvasSize} onChange={e => setCanvasSize(e.target.value)}
-                min={256} max={8192}
-                style={{
-                  width: 54, background: C.panel2, color: C.text,
-                  border: `1px solid ${C.border}`, borderRadius: 4,
-                  padding: "4px 5px", fontSize: 11, fontFamily: "JetBrains Mono",
-                  outline: "none", textAlign: "center"
-                }}
-              />
-            </div>
-          </Row>
-
-          <Row label="Thumbnail (400px)">
-            <PillToggle value={thumbnail} onChange={setThumbnail} />
-          </Row>
-          </div>
+            <Row label="Thumbnail (400px)">
+              <PillToggle value={thumbnail} onChange={setThumbnail} />
+            </Row>
+          </ProcessPanelSection>
 
           </div>
 

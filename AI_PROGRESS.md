@@ -474,3 +474,17 @@
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
 - Backend/API tests were intentionally skipped because this was frontend visual/UX polish only.
+
+## 2026-06-30 Process Panels/Icon Alignment Follow-Up
+
+### Code Changes
+- Reworked the Process left parameter groups into Editor-style stacked panel sections with flat header rows, SVG chevrons, compact dividers, and no nested card/bubble treatment.
+- Preserved all Process controls, defaults, folder/path behavior, and processing behavior.
+- Replaced Settings path Browse text/dots with compact folder SVG icon buttons while preserving accessible labels and existing browse behavior.
+- Replaced raw Input/Process recent-folder arrow text with polished SVG-chevron select styling while preserving native select/history behavior.
+- Kept backend/API behavior, processing logic, output conventions, save/skip/export behavior, and Editor/Templates code unchanged.
+
+### Validation
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Backend/API tests were intentionally skipped because this was frontend visual/icon polish only.

@@ -175,5 +175,9 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-30 final UI polish frontend validation: `cd editor-ui && npm.cmd run build` and `cd editor-ui && npm.cmd run lint`.
 - Final UI polish keeps backend/API, processing logic, output conventions, save/skip/export behavior, and path/session behavior unchanged while touching only scoped frontend UI files and AI notes.
 - Backend/API tests were intentionally skipped for the final UI polish because no backend/API behavior changed.
+- Passed 2026-06-30 Process panels/icon alignment follow-up frontend validation: `cd editor-ui && npm.cmd run build` and `cd editor-ui && npm.cmd run lint`.
+- Process panels/icon alignment follow-up keeps all Process controls and behavior unchanged while aligning the left settings panel to the Editor accordion visual language.
+- Settings and Input icon polish uses inline SVG/CSS SVG icons without adding dependencies or changing folder browse/history behavior.
+- Backend/API tests were intentionally skipped for the Process panels/icon alignment follow-up because no backend/API behavior changed.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no persistent browser automation dependency, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

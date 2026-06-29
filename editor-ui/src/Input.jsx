@@ -337,7 +337,7 @@ export default function Input({
                 fontSize: 10, cursor: "pointer", flexShrink: 0,
               }}
             >
-              <option value="">↕</option>
+              <option value="">Recent folders</option>
               {recentInputDirs.map(path => <option key={path} value={path}>{path}</option>)}
             </select>
           )}
