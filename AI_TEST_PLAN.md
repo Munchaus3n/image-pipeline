@@ -81,6 +81,9 @@ These remain browser/manual checks unless a future browser automation dependency
 8. Confirm `Wipe input after run` is separated in the amber Safety section, is not visually encouraged, and remains off unless explicitly toggled.
 9. Toggle dark mode and confirm Settings cards, fields, toggles, warnings, and buttons remain intentional and readable.
 10. Confirm Input, Process, Templates, and Editor still open, and no System/GPU card or old visual-language panel appears in Settings.
+11. Confirm Settings accordion timing feels calmer than the first controls follow-up and respects reduced-motion preferences.
+12. Confirm Settings path Browse actions render as compact `...` buttons with accessible labels.
+13. Confirm opacity labels never render above `100%`, including stored values `1`, `5`, and `100`.
 
 ## Input Visual Checks
 These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
@@ -111,6 +114,9 @@ These remain browser/manual checks unless a future browser automation dependency
 10. Confirm live preview tiles are 1:1 squares and preview images fill the tile with no letterboxed tiny image.
 11. Confirm four live preview tiles distribute across the available row width instead of staying fixed and tiny.
 12. Confirm the Activity panel still moves below the expanded preview strip cleanly.
+13. Confirm Run Pipeline hover matches the Input and Editor blue top-bar primary hover treatment.
+14. Confirm Process parameter groups visually read as compact accordion-style panels with clean headers and chevrons, while all controls remain visible and unchanged.
+15. Confirm the ready/idle card feels intentional without fake preview content.
 
 ## Editor Visual Checks
 These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
@@ -166,5 +172,8 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-29 Settings controls follow-up frontend validation: `cd editor-ui && npm.cmd run build` and `cd editor-ui && npm.cmd run lint`.
 - Settings controls follow-up reuses the existing `/api/browse` picker via the frontend helper for default input/output folder Browse buttons and fixes opacity display without changing stored setting format.
 - Backend/API tests were intentionally skipped for the Settings controls follow-up because only frontend Settings UI/styles and AI validation notes changed.
+- Passed 2026-06-30 final UI polish frontend validation: `cd editor-ui && npm.cmd run build` and `cd editor-ui && npm.cmd run lint`.
+- Final UI polish keeps backend/API, processing logic, output conventions, save/skip/export behavior, and path/session behavior unchanged while touching only scoped frontend UI files and AI notes.
+- Backend/API tests were intentionally skipped for the final UI polish because no backend/API behavior changed.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no persistent browser automation dependency, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

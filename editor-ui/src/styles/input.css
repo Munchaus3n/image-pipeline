@@ -1097,6 +1097,80 @@ input[type=number] { color-scheme: dark; }
   letter-spacing: 0.07em;
 }
 
+/* Final UI polish: cleaner compact header, less dominant path control, and refined toolbar actions. */
+.input-screen .input-page-header {
+  min-height: 52px;
+  padding: 4px 20px 3px;
+  align-items: center;
+}
+
+.input-screen .input-page-title-group {
+  padding-top: 1px;
+}
+
+.input-screen .input-page-title {
+  line-height: 1.18;
+}
+
+.input-screen .input-page-subtitle {
+  line-height: 1.25;
+}
+
+.input-screen .input-toolbar {
+  grid-template-columns: minmax(250px, 0.95fr) minmax(240px, 1.15fr) auto auto auto !important;
+  gap: 9px !important;
+}
+
+.input-screen .input-folder-group {
+  border-color: color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 78%, var(--panel));
+  box-shadow: 0 6px 14px rgba(5, 10, 24, 0.08);
+}
+
+.input-screen .input-folder-group select {
+  appearance: none;
+  color: transparent !important;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 6.25L8 10.75L12.5 6.25' stroke='%238392a8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 14px 14px no-repeat !important;
+}
+
+.input-screen .input-folder-group select option {
+  color: var(--text);
+}
+
+.input-screen .input-folder-group select:hover {
+  background-color: color-mix(in srgb, var(--accent) 9%, transparent) !important;
+}
+
+.input-screen .input-toolbar .input-load-button {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accent) 11%, transparent) !important;
+  color: color-mix(in srgb, var(--accent) 86%, var(--text)) !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
+}
+
+.input-screen .input-toolbar .input-load-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accent) 17%, transparent) !important;
+  filter: none !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.input-screen .input-toolbar .input-browse-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 8%, transparent) !important;
+  filter: none !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.input-screen .input-page-actions .input-next-button:hover:not(:disabled) {
+  filter: none !important;
+  transform: translateY(-1px);
+}
+
 .input-selection-actions {
   gap: 5px;
 }

@@ -68,6 +68,30 @@ function Slider({ value, onChange, min = 0, max = 100, step = 1, format = value 
   );
 }
 
+function opacityPercent(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return 0;
+
+  const percentValue = numericValue <= 1 ? numericValue * 100 : numericValue;
+  return Math.max(0, Math.min(100, percentValue));
+}
+
+function OpacitySlider({ value, onChange }) {
+  const displayValue = opacityPercent(value);
+  const usesPercentStorage = Number(value) > 1;
+
+  return (
+    <Slider
+      value={displayValue}
+      min={0}
+      max={100}
+      step={1}
+      onChange={nextPercent => onChange(usesPercentStorage ? nextPercent : nextPercent / 100)}
+      format={nextValue => `${Math.round(opacityPercent(nextValue))}%`}
+    />
+  );
+}
+
 function NumInput({ value, onChange, min, max, width = 80 }) {
   return (
     <input
@@ -116,7 +140,7 @@ function TextInput({ value, onChange, placeholder, width = 240, mono = true, max
   );
 }
 
-function FolderPathInput({ value, onChange, placeholder }) {
+function FolderPathInput({ value, onChange, placeholder, browseLabel }) {
   const [browsing, setBrowsing] = useState(false);
 
   const browse = useCallback(async () => {
@@ -144,8 +168,10 @@ function FolderPathInput({ value, onChange, placeholder }) {
         className="settings-path-browse"
         onClick={browse}
         disabled={browsing}
+        title={browseLabel}
+        aria-label={browseLabel}
       >
-        {browsing ? "..." : "Browse"}
+        ...
       </button>
     </div>
   );
@@ -268,6 +294,7 @@ export default function Settings({ onThemeChange }) {
                 <FolderPathInput
                   value={settings.output.input_dir || ""}
                   placeholder="blank = ./input"
+                  browseLabel="Browse input folder"
                   onChange={value => setSetting("output", "input_dir", value)}
                 />
               </Row>
@@ -275,6 +302,7 @@ export default function Settings({ onThemeChange }) {
                 <FolderPathInput
                   value={settings.output.output_dir || ""}
                   placeholder="blank = ./output"
+                  browseLabel="Browse output folder"
                   onChange={value => setSetting("output", "output_dir", value)}
                 />
               </Row>
@@ -318,23 +346,15 @@ export default function Settings({ onThemeChange }) {
                 </div>
               </Row>
               <Row label="Guide opacity">
-                <Slider
+                <OpacitySlider
                   value={settings.appearance.guide_opacity}
-                  min={0}
-                  max={1}
-                  step={0.01}
                   onChange={value => setSetting("appearance", "guide_opacity", value)}
-                  format={value => `${Math.round(value * 100)}%`}
                 />
               </Row>
               <Row label="Reference image opacity">
-                <Slider
+                <OpacitySlider
                   value={settings.appearance.ref_img_opacity}
-                  min={0}
-                  max={1}
-                  step={0.01}
                   onChange={value => setSetting("appearance", "ref_img_opacity", value)}
-                  format={value => `${Math.round(value * 100)}%`}
                 />
               </Row>
             </Section>

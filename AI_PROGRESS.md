@@ -459,3 +459,18 @@
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
 - Backend/API tests were intentionally skipped because no backend behavior or API contract changed.
+
+## 2026-06-30 Final UI Polish Before Features
+
+### Code Changes
+- Slowed Settings accordion body and chevron transitions by roughly 1.5x while preserving reduced-motion behavior.
+- Hardened Settings opacity display so unit-style values and percent-style values clamp to human 0–100% labels without changing stored format until the user moves the slider.
+- Replaced Settings path Browse labels with compact `...` buttons while retaining accessible labels and the existing `/api/browse` picker behavior.
+- Matched the Process `Run Pipeline` hover to the other blue top-bar primary actions with subtle lift, blue hover fill, and no glow.
+- Restyled Process left parameter groups with compact header rows, CSS chevrons, subtler borders/backgrounds, and a more intentional ready card without changing processing controls or behavior.
+- Tightened the Input header spacing, reduced path-field dominance, restyled the path history select with a cleaner SVG chevron, and removed the rough Load hover/filter treatment.
+
+### Validation
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Backend/API tests were intentionally skipped because this was frontend visual/UX polish only.

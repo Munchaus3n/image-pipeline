@@ -232,7 +232,7 @@
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(-45deg);
-  transition: transform 0.18s ease;
+  transition: transform 0.27s ease;
 }
 
 .settings-section-toggle[aria-expanded="true"] .settings-section-arrow::before {
@@ -244,7 +244,7 @@
   grid-template-rows: 0fr;
   opacity: 0;
   visibility: hidden;
-  transition: grid-template-rows 0.18s ease, opacity 0.14s ease, visibility 0.18s linear;
+  transition: grid-template-rows 0.27s ease, opacity 0.21s ease, visibility 0.27s linear;
 }
 
 .settings-section-body.is-open {
@@ -260,7 +260,7 @@
   flex-direction: column;
   gap: 9px;
   padding: 0 13px;
-  transition: padding 0.18s ease;
+  transition: padding 0.27s ease;
 }
 
 .settings-section-body.is-open .settings-section-body-inner {
@@ -494,17 +494,18 @@
 
 .settings-path-browse {
   min-height: 34px;
+  width: 34px;
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
   border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-elevated));
   color: color-mix(in srgb, var(--accent) 80%, var(--text));
-  padding: 0 10px;
-  font-family: inherit;
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
   cursor: pointer;
   transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
 }
