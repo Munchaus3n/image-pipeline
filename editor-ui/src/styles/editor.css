@@ -354,6 +354,17 @@
   background: color-mix(in srgb, var(--accent) 92%, white 8%);
 }
 
+[data-theme] .editor-action-secondary:hover:not(:disabled) {
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--yellow-bdr) 82%, var(--border));
+  background: color-mix(in srgb, var(--yellow-bg) 58%, var(--surface-elevated));
+  color: color-mix(in srgb, var(--yellow) 86%, var(--text));
+}
+
+[data-theme] .editor-action-secondary:hover:not(:disabled) kbd {
+  opacity: 0.82;
+}
+
 [data-theme] .editor-sidebar .ed-btn:hover:not(:disabled) {
   transform: none;
   box-shadow: none;

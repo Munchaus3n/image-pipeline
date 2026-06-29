@@ -1173,20 +1173,21 @@
 
 .pipeline-screen .pipeline-header-run-button,
 .pipeline-screen .pipeline-open-editor-button {
-  min-height: 34px !important;
-  padding: 0 15px !important;
-  border-radius: 10px !important;
-  font-size: 10px !important;
-  letter-spacing: 0.11em;
+  min-height: 38px !important;
+  padding: 0 16px !important;
+  border-radius: 12px !important;
+  font-size: 12px !important;
+  letter-spacing: 0.08em;
   line-height: 1;
 }
 
 .pipeline-screen .pipeline-header-run-button {
-  background: linear-gradient(180deg, #536dff, #3155f6) !important;
-  border-color: color-mix(in srgb, #8da0ff 46%, #3155f6) !important;
-  box-shadow:
-    0 6px 14px rgba(49, 85, 246, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--border)) !important;
+  background: var(--accent) !important;
+  color: var(--accent-fg) !important;
+  box-shadow: none;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .pipeline-screen .pipeline-header-stop-button {
@@ -1199,10 +1200,12 @@
 }
 
 .pipeline-screen .pipeline-open-editor-button {
-  background: color-mix(in srgb, var(--surface-elevated) 84%, var(--accent)) !important;
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border)) !important;
-  color: color-mix(in srgb, var(--accent) 74%, var(--text)) !important;
-  box-shadow: 0 5px 12px color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-elevated)) !important;
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border)) !important;
+  color: color-mix(in srgb, var(--accent) 86%, var(--text)) !important;
+  box-shadow: none;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .pipeline-screen .pipeline-settings-panel {
@@ -1539,6 +1542,20 @@
   box-shadow:
     0 4px 10px color-mix(in srgb, var(--accent) 10%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--border) 12%, transparent);
+}
+
+.pipeline-screen .pipeline-header-run-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accent) 92%, white 8%) !important;
+  box-shadow: none;
+  filter: none !important;
+}
+
+.pipeline-screen .pipeline-open-editor-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-elevated)) !important;
+  box-shadow: none;
+  filter: none !important;
 }
 
 @media (max-height: 820px) {

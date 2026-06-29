@@ -1001,6 +1001,35 @@ input[type=number] { color-scheme: dark; }
   letter-spacing: 0.1em;
 }
 
+.input-screen .input-page-actions .input-next-button {
+  min-height: 38px !important;
+  padding: 0 16px !important;
+  border-radius: 12px !important;
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--border)) !important;
+  background: var(--accent) !important;
+  color: var(--accent-fg) !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.input-screen .input-page-actions .input-next-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accent) 92%, white 8%) !important;
+  box-shadow: none !important;
+  filter: none;
+}
+
+.input-screen .input-page-actions .input-next-button:disabled {
+  border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
+  background: var(--disabled-bg) !important;
+  color: var(--disabled-text) !important;
+  box-shadow: none !important;
+}
+
 .input-toolbar {
   margin: 14px 20px 8px !important;
   grid-template-columns: minmax(300px, 1.4fr) minmax(180px, 0.72fr) auto auto auto !important;
