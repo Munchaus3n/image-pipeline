@@ -87,7 +87,7 @@
   border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
   background: var(--accent);
   color: var(--accent-fg);
-  box-shadow: 0 12px 26px color-mix(in srgb, var(--accent) 23%, transparent);
+  box-shadow: none;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -146,16 +146,52 @@
 .editor-canvas-frame {
   overflow: hidden;
   flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  border: 0;
   border-radius: 0;
-  background: var(--preview-bg);
-  box-shadow: var(--shadow-lg);
+  background: transparent;
+  box-shadow:
+    0 2px 8px color-mix(in srgb, black 8%, transparent),
+    0 12px 30px color-mix(in srgb, black 13%, transparent);
 }
 
 .editor-canvas-frame canvas {
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+.editor-file-status {
+  min-height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 30px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 54%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 16%, var(--bg));
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.editor-file-status span {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--dim) 76%, transparent);
+  text-transform: uppercase;
+}
+
+.editor-file-status strong {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--text) 62%, var(--dim));
+  display: block;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
 }
 
 .editor-footer {
@@ -175,7 +211,6 @@
 }
 
 .editor-footer-hints,
-.editor-footer-file,
 .editor-zoom-controls {
   display: flex;
   align-items: center;
@@ -184,33 +219,9 @@
 .editor-footer-hints {
   flex-shrink: 0;
   gap: 16px;
-  min-width: fit-content;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.editor-footer-file {
-  gap: 7px;
-  flex: 1;
-  min-width: 0;
-  max-width: none;
-  margin-left: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.editor-footer-file span {
-  flex-shrink: 0;
-  color: color-mix(in srgb, var(--dim) 82%, transparent);
-}
-
-.editor-footer-file strong {
   min-width: 0;
   overflow: hidden;
-  color: color-mix(in srgb, var(--text) 70%, var(--dim));
-  display: block;
-  font-weight: 600;
-  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .editor-zoom-controls {
@@ -317,6 +328,12 @@
   box-shadow: var(--shadow);
 }
 
+[data-theme] .editor-action-primary:hover:not(:disabled) {
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--border));
+  background: color-mix(in srgb, var(--accent) 92%, white 8%);
+}
+
 [data-theme] .editor-sidebar .ed-btn:hover:not(:disabled) {
   transform: none;
   box-shadow: none;
@@ -357,6 +374,10 @@
   outline: 2px solid color-mix(in srgb, var(--accent) 68%, transparent);
   outline-offset: 1px;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+[data-theme] .editor-action-primary:focus-visible {
+  box-shadow: none;
 }
 
 .editor-sidebar input:not([type="checkbox"]):not([type="range"]):not([type="color"]),
