@@ -2,93 +2,67 @@ import { useState, useEffect, useCallback } from "react";
 
 const BASE = "/api";
 
-function Section({ title, children, defaultOpen = false }) {
+function Section({ title, description, children, defaultOpen = false, tone = "default" }) {
   const [open, setOpen] = useState(defaultOpen);
+
   return (
-    <div style={{ border:"1px solid var(--border)", borderRadius:8, overflow:"hidden", marginBottom:6, background:"var(--panel)" }}>
+    <section className={`settings-section settings-section-${tone}`}>
       <button
+        type="button"
+        className="settings-section-toggle"
         onClick={() => setOpen(!open)}
-        style={{
-          width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between",
-          padding:"9px 14px", background:"transparent", border:"none",
-          cursor:"pointer", textAlign:"left", transition:"background 0.15s",
-        }}
-        onMouseEnter={e => e.currentTarget.style.background = "var(--panel2)"}
-        onMouseLeave={e => e.currentTarget.style.background = "var(--panel)"}
+        aria-expanded={open}
       >
-        <span style={{ fontSize:12, fontWeight:600, color:"var(--text)" }}>{title}</span>
-        <span style={{ color:"var(--dim)", fontSize:13, transition:"transform 0.2s", transform: open ? "rotate(90deg)" : "rotate(0)" }}>
-          ›
+        <span className="settings-section-copy">
+          <span className="settings-section-title">{title}</span>
+          {description && <span className="settings-section-description">{description}</span>}
+        </span>
+        <span className="settings-section-arrow" aria-hidden="true">
+          {open ? "v" : ">"}
         </span>
       </button>
-      {open && (
-        <div className="animate-fade-in" style={{ padding:"0 14px 12px", borderTop:"1px solid var(--border)", background:"var(--panel)" }}>
-          <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:10 }}>
-            {children}
-          </div>
-        </div>
-      )}
+      {open && <div className="settings-section-body">{children}</div>}
+    </section>
+  );
+}
+
+function Row({ label, hint, children, tone = "default" }) {
+  return (
+    <div className={`settings-row settings-row-${tone}`}>
+      <div className="settings-row-copy">
+        <div className="settings-row-label">{label}</div>
+        {hint && <div className="settings-row-hint">{hint}</div>}
+      </div>
+      <div className="settings-row-control">{children}</div>
     </div>
   );
 }
 
-function Row({ label, hint, children }) {
+function Toggle({ value, onChange, tone = "default" }) {
   return (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:16 }}>
-      <div style={{ minWidth:0, flex:1 }}>
-        <div style={{ fontSize:11, color:"var(--text)", marginBottom: hint ? 1 : 0 }}>{label}</div>
-        {hint && <div style={{ fontSize:10, color:"var(--dim)" }}>{hint}</div>}
-      </div>
-      <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Toggle({ value, onChange }) {
-  return (
-    <div
+    <button
+      type="button"
+      className={`settings-toggle settings-toggle-${tone}${value ? " is-on" : " is-off"}`}
       onClick={() => onChange(!value)}
-      style={{
-        width:40, height:22, borderRadius:11, cursor:"pointer", position:"relative",
-        background: value ? "var(--green-bg)" : "var(--red-bg)",
-        border: `1px solid ${value ? "var(--green-bdr)" : "var(--red-bdr)"}`,
-        transition:"all 0.2s ease",
-      }}
+      aria-pressed={value}
     >
-      <div style={{
-        width:16, height:16, borderRadius:"50%", position:"absolute", top:2,
-        left: value ? 20 : 2, transition:"left 0.2s ease",
-        background: value ? "var(--green)" : "var(--red)",
-        boxShadow:"0 1px 3px rgba(0,0,0,0.3)",
-      }} />
-    </div>
+      <span className="settings-toggle-thumb" />
+    </button>
   );
 }
 
-function Slider({ value, onChange, min = 0, max = 100, step = 1, format = v => `${v}%` }) {
+function Slider({ value, onChange, min = 0, max = 100, step = 1, format = value => `${value}%` }) {
   return (
-    <div style={{ display:"flex", alignItems:"center", gap:10, width:200 }}>
+    <div className="settings-slider">
       <input
         type="range"
         min={min}
         max={max}
         step={step}
         value={value}
-        onChange={e => onChange(parseFloat(e.target.value))}
-        style={{
-          flex:1, accentColor:"var(--accent)", cursor:"pointer",
-          height:4, borderRadius:2, appearance:"none",
-          background:"var(--panel2)",
-        }}
+        onChange={event => onChange(parseFloat(event.target.value))}
       />
-      <span style={{
-        fontSize:11, fontFamily:"JetBrains Mono", minWidth:42, textAlign:"right",
-        color:"var(--dim)",
-      }}>
-        {format(value)}
-      </span>
+      <span>{format(value)}</span>
     </div>
   );
 }
@@ -96,40 +70,47 @@ function Slider({ value, onChange, min = 0, max = 100, step = 1, format = v => `
 function NumInput({ value, onChange, min, max, width = 80 }) {
   return (
     <input
+      className="settings-number-input"
       type="number"
       value={value}
       min={min}
       max={max}
-      onChange={e => onChange(Number(e.target.value))}
-      style={{
-        width, background:"var(--panel2)", color:"var(--text)",
-        border:"1px solid var(--border)", borderRadius:6,
-        padding:"6px 8px", fontSize:12, fontFamily:"JetBrains Mono",
-        textAlign:"center",
-      }}
+      onChange={event => onChange(Number(event.target.value))}
+      style={{ width }}
     />
   );
 }
 
 function OptionalNumInput({ value, onChange, min, max, width = 80, placeholder = "" }) {
   const shown = Number(value) > 0 ? String(value) : "";
+
   return (
     <input
+      className="settings-number-input"
       type="number"
       value={shown}
       min={min}
       max={max}
       placeholder={placeholder}
-      onChange={e => {
-        const raw = e.target.value.trim();
+      onChange={event => {
+        const raw = event.target.value.trim();
         onChange(raw === "" ? 0 : Number(raw));
       }}
-      style={{
-        width, background:"var(--panel2)", color:"var(--text)",
-        border:"1px solid var(--border)", borderRadius:6,
-        padding:"6px 5px", fontSize:12, fontFamily:"JetBrains Mono",
-        textAlign:"center",
-      }}
+      style={{ width }}
+    />
+  );
+}
+
+function TextInput({ value, onChange, placeholder, width = 240, mono = true, maxLength }) {
+  return (
+    <input
+      className={mono ? "settings-text-input settings-mono-input" : "settings-text-input"}
+      type="text"
+      value={value}
+      placeholder={placeholder}
+      maxLength={maxLength}
+      onChange={event => onChange(event.target.value)}
+      style={{ width }}
     />
   );
 }
@@ -137,351 +118,358 @@ function OptionalNumInput({ value, onChange, min, max, width = 80, placeholder =
 function Select({ value, onChange, options, wide }) {
   return (
     <select
+      className="settings-select"
       value={value}
-      onChange={e => onChange(e.target.value)}
-      style={{
-        background:"var(--panel2)", color:"var(--text)",
-        border:"1px solid var(--border)", borderRadius:6,
-        padding:"6px 10px", fontSize:12, cursor:"pointer",
-        minWidth: wide ? 260 : 140,
-        colorScheme:"dark light",
-      }}
+      onChange={event => onChange(event.target.value)}
+      style={{ minWidth: wide ? 260 : 140 }}
     >
-      {options.map(([v, l]) => (
-        <option key={v} value={v} style={{ background:"var(--panel2)", color:"var(--text)" }}>{l}</option>
+      {options.map(([optionValue, label]) => (
+        <option key={optionValue} value={optionValue}>
+          {label}
+        </option>
       ))}
     </select>
   );
 }
 
 const DEFAULT = {
-  processing:   { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false, upscale_max_px: 0  },
-  rembg_api:    { provider: "local", url: "", key: "" },
+  processing: { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false, upscale_max_px: 0 },
+  rembg_api: { provider: "local", url: "", key: "" },
   upscaler_api: { provider: "local", url: "", key: "", model: "" },
-  output:       { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, do_rembg: true, upscale_scale: "2" },
-  appearance:   { guide_opacity: 1.0, ref_img_opacity: 0.05, canvas_bg_color: "#ffffff", theme: "dark" },
-  guides:       { use_custom: false, custom: {} },
+  output: { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, do_rembg: true, upscale_scale: "2" },
+  appearance: { guide_opacity: 1.0, ref_img_opacity: 0.05, canvas_bg_color: "#ffffff", theme: "dark" },
+  guides: { use_custom: false, custom: {} },
 };
 
 export default function Settings({ onThemeChange }) {
-  const [s, setS] = useState(DEFAULT);
+  const [settings, setSettings] = useState(DEFAULT);
   const [status, setStatus] = useState("");
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     fetch(`${BASE}/settings`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.settings) setS(data.settings); })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => { if (data?.settings) setSettings(data.settings); })
       .catch(() => {});
   }, []);
 
-  const set = useCallback((section, key, val) => {
-    setS(prev => ({ ...prev, [section]: { ...prev[section], [key]: val } }));
+  const setSetting = useCallback((section, key, value) => {
+    setSettings(previous => ({ ...previous, [section]: { ...previous[section], [key]: value } }));
     setDirty(true);
-    if (section === "appearance" && key === "theme" && onThemeChange) onThemeChange(val);
+    if (section === "appearance" && key === "theme" && onThemeChange) onThemeChange(value);
   }, [onThemeChange]);
 
   const save = useCallback(async () => {
     try {
-      const r = await fetch(`${BASE}/settings`, {
+      const response = await fetch(`${BASE}/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: s }),
+        body: JSON.stringify({ settings }),
       });
-      if (r.ok) {
-        setStatus("Saved ✓"); setDirty(false);
-        setTimeout(() => setStatus(""), 2000);
-      } else { setStatus("Save failed"); }
-    } catch { setStatus("Save failed"); }
-  }, [s]);
 
-  const reset = useCallback(() => { setS(DEFAULT); setDirty(true); }, []);
+      if (response.ok) {
+        setStatus("Saved");
+        setDirty(false);
+        setTimeout(() => setStatus(""), 2000);
+      } else {
+        setStatus("Save failed");
+      }
+    } catch {
+      setStatus("Save failed");
+    }
+  }, [settings]);
+
+  const reset = useCallback(() => {
+    setSettings(DEFAULT);
+    setDirty(true);
+  }, []);
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", background:"var(--bg)", height:"100%", overflow:"hidden" }}>
+    <div className="settings-screen">
       <style>{`
         [data-theme="dark"] select option { background: hsl(222,20%,16%); color: hsl(210,40%,95%); }
         [data-theme="light"] select option { background: hsl(220,14%,94%); color: hsl(224,20%,15%); }
         select option { background: var(--panel2); color: var(--text); }
       `}</style>
-      {/* Header */}
-      <div style={{
-        display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"0 20px", height:48, borderBottom:"1px solid var(--border)",
-        background:"var(--panel)", flexShrink:0,
-      }}>
-        <span style={{ fontSize:14, fontWeight:600 }}>Settings</span>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+
+      <header className="settings-header">
+        <div className="settings-title-group">
+          <h1 className="settings-title">Settings &middot; Workspace</h1>
+          <p className="settings-subtitle">Configure defaults, appearance, and safety options.</p>
+        </div>
+        <div className="settings-actions">
           {status && (
-            <span style={{
-              fontSize:11, fontFamily:"JetBrains Mono",
-              color: status.includes("✓") ? "var(--green)" : "var(--red)"
-            }}>
+            <span className={status === "Saved" ? "settings-status is-ok" : "settings-status is-error"}>
               {status}
             </span>
           )}
           <button
+            type="button"
+            className={dirty ? "settings-button settings-button-warning" : "settings-button settings-button-secondary"}
             onClick={reset}
-            style={{
-              background: dirty ? "var(--red-bg)" : "transparent",
-              color: dirty ? "var(--red)" : "var(--dim)",
-              border: `1px solid ${dirty ? "var(--red-bdr)" : "var(--border)"}`,
-              borderRadius:8, padding:"6px 14px", fontSize:12,
-            }}
           >
-            Reset
+            Reset Draft
           </button>
           <button
+            type="button"
+            className={dirty ? "settings-button settings-button-primary" : "settings-button settings-button-secondary"}
             onClick={save}
-            style={{
-              background: dirty ? "var(--accent)" : "transparent",
-              color: dirty ? "var(--accent-fg)" : "var(--dim)",
-              border: `1px solid ${dirty ? "var(--accent)" : "var(--border)"}`,
-              borderRadius:8, padding:"6px 18px", fontSize:12, fontWeight:600,
-            }}
           >
-            Save
+            Save Settings
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Body */}
-      <div style={{ flex:1, overflowY:"auto", padding:"12px 16px" }}>
-        <div style={{ maxWidth:800, margin:"0 auto" }}>
-
-          <Section title="Appearance" defaultOpen>
-            <Row label="Theme" hint="UI color scheme">
-              <Select
-                value={s.appearance.theme || "dark"}
-                onChange={v => set("appearance", "theme", v)}
-                options={[["dark", "Dark"], ["light", "Light"]]}
-              />
-            </Row>
-            <Row label="Canvas background">
-              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                <input
-                  type="color"
-                  value={s.appearance.canvas_bg_color || "#ffffff"}
-                  onChange={e => set("appearance", "canvas_bg_color", e.target.value)}
-                  style={{
-                    width:32, height:24, border:"1px solid var(--border)",
-                    borderRadius:6, cursor:"pointer", padding:0,
-                  }}
+      <main className="settings-body">
+        <div className="settings-grid">
+          <div className="settings-column">
+            <Section
+              title="Workspace Paths"
+              description="Default folders used when the app starts."
+              defaultOpen
+            >
+              <Row label="Default input folder" hint="Leave blank to use ./input.">
+                <TextInput
+                  value={settings.output.input_dir || ""}
+                  placeholder="blank = ./input"
+                  onChange={value => setSetting("output", "input_dir", value)}
                 />
-                <input
-                  type="text"
-                  value={s.appearance.canvas_bg_color || "#ffffff"}
-                  onChange={e => {
-                    const v = e.target.value;
-                    if (/^#[0-9a-fA-F]{0,6}$/.test(v)) set("appearance", "canvas_bg_color", v);
-                  }}
-                  maxLength={7}
-                  style={{
-                    width:80, background:"var(--panel2)", color:"var(--text)",
-                    border:"1px solid var(--border)", borderRadius:6,
-                    padding:"5px 8px", fontSize:12, fontFamily:"JetBrains Mono",
-                    textTransform:"uppercase",
-                  }}
-                />
-              </div>
-            </Row>
-            <Row label="Guide opacity">
-              <Slider
-                value={s.appearance.guide_opacity}
-                onChange={v => set("appearance", "guide_opacity", v)}
-                format={v => `${Math.round(v)}%`}
-              />
-            </Row>
-            <Row label="Reference image opacity">
-              <Slider
-                value={s.appearance.ref_img_opacity}
-                onChange={v => set("appearance", "ref_img_opacity", v)}
-                format={v => `${Math.round(v * 100)}%`}
-              />
-            </Row>
-          </Section>
-
-          <Section title="Input / Output Defaults">
-            <Row label="Default input folder" hint="Leave blank for ./input">
-              <input
-                value={s.output.input_dir || ""}
-                placeholder="blank = ./input"
-                onChange={e => set("output", "input_dir", e.target.value)}
-                style={{
-                  width:240, background:"var(--panel2)", color:"var(--text)",
-                  border:"1px solid var(--border)", borderRadius:6,
-                  padding:"6px 10px", fontSize:12, fontFamily:"JetBrains Mono",
-                }}
-              />
-            </Row>
-            <Row label="Default output folder" hint="Leave blank for ./output">
-              <input
-                value={s.output.output_dir}
-                placeholder="blank = ./output"
-                onChange={e => set("output", "output_dir", e.target.value)}
-                style={{
-                  width:240, background:"var(--panel2)", color:"var(--text)",
-                  border:"1px solid var(--border)", borderRadius:6,
-                  padding:"6px 10px", fontSize:12, fontFamily:"JetBrains Mono",
-                }}
-              />
-            </Row>
-            <Row label="Canvas size (px)">
-              <NumInput value={s.output.canvas_size} min={256} max={8192}
-                onChange={v => set("output", "canvas_size", v)} />
-            </Row>
-            <Row label="Thumbnail" hint="Generate resized preview on save">
-              <Toggle value={s.output.thumbnail} onChange={v => set("output", "thumbnail", v)} />
-            </Row>
-            {s.output.thumbnail && (
-              <Row label="Thumbnail size (px)" hint="Width × height of generated preview">
-                <NumInput value={s.output.thumbnail_size || 400} min={64} max={2048}
-                  onChange={v => set("output", "thumbnail_size", v)} />
               </Row>
-            )}
-            <Row label="Folder mode">
-              <Select
-                value={s.output.folder_mode}
-                onChange={v => set("output", "folder_mode", v)}
-                options={[["bulk", "Bulk — flat folder"], ["clean", "Clean — subfolders"]]}
-              />
-            </Row>
-            <Row label="Default upscale">
-              <Toggle value={s.output.do_upscale ?? true} onChange={v => set("output", "do_upscale", v)} />
-            </Row>
-            <Row label="Default remove BG">
-              <Toggle value={s.output.do_rembg ?? true} onChange={v => set("output", "do_rembg", v)} />
-            </Row>
-            {(s.output.do_upscale ?? true) && (
-              <Row label="Default upscale factor">
+              <Row label="Default output folder" hint="Leave blank to use ./output.">
+                <TextInput
+                  value={settings.output.output_dir || ""}
+                  placeholder="blank = ./output"
+                  onChange={value => setSetting("output", "output_dir", value)}
+                />
+              </Row>
+              <Row label="Folder mode" hint="Default processing folder layout.">
                 <Select
-                  value={s.output.upscale_scale || "2"}
-                  onChange={v => set("output", "upscale_scale", v)}
-                  options={[["2", "2×"], ["4", "4×"]]}
+                  value={settings.output.folder_mode}
+                  onChange={value => setSetting("output", "folder_mode", value)}
+                  options={[["bulk", "Bulk - flat folder"], ["clean", "Clean - subfolders"]]}
                 />
               </Row>
-            )}
-          </Section>
+            </Section>
 
-          <Section title="Background Removal">
-            <Row label="Model">
-              <Select
-                value={s.processing.rembg_model}
-                onChange={v => set("processing", "rembg_model", v)}
-                wide
-                options={[
-                  ["birefnet-general",      "birefnet-general  (recommended)"],
-                  ["birefnet-general-lite", "birefnet-general-lite  (faster)"],
-                  ["birefnet-massive",      "birefnet-massive  (high quality)"],
-                  ["birefnet-dis",          "birefnet-dis  (illustration)"],
-                  ["birefnet-hrsod",        "birefnet-hrsod  (salient object)"],
-                  ["bria-rmbg",             "BRIA RMBG-2.0  (non-commercial)"],
-                ]}
-              />
-            </Row>
-            <Row label="Force CPU" hint="Skip DirectML/CUDA (GPU OOM fallback to CPU is automatic)">
-              <Toggle value={s.processing.force_cpu ?? false} onChange={v => set("processing", "force_cpu", v)} />
-            </Row>
-            <Row label="Crop padding" hint="Fraction added after crop">
-              <Slider value={s.processing.crop_padding} min={0} max={0.2} step={0.005}
-                onChange={v => set("processing", "crop_padding", v)}
-                format={v => `${(v * 100).toFixed(1)}%`} />
-            </Row>
-            <Row label="Edge blur radius" hint="0 = off">
-              <Slider value={s.processing.edge_blur} min={0} max={5} step={0.1}
-                onChange={v => set("processing", "edge_blur", v)}
-                format={v => v.toFixed(1)} />
-            </Row>
-            <Row label="History folders to keep">
-              <NumInput value={s.processing.history_keep} min={1} max={200} width={64}
-                onChange={v => set("processing", "history_keep", v)} />
-            </Row>
-            <Row label="Wipe input after run" hint="ON: delete files • OFF: files remain in place">
-              <Toggle value={!!s.processing.wipe_input_after_run} onChange={v => set("processing", "wipe_input_after_run", v)} />
-            </Row>
-          </Section>
-
-          <Section title="Upscaling Rules">
-            <Row label="Skip upscale if any side ≥" hint="Empty means no quality skip rule">
-              <OptionalNumInput value={s.processing.upscale_max_px} min={512} max={8192} placeholder="no skip"
-                onChange={v => set("processing", "upscale_max_px", v)} />
-              <span style={{ fontSize:10, color:"var(--dim)" }}>px</span>
-            </Row>
-          </Section>
-          
-          <Section title="Guides">
-            <Row label="Use custom guides" hint="Override config.ini">
-              <Toggle value={!!s.guides?.use_custom} onChange={v => set("guides", "use_custom", v)} />
-            </Row>
-            {["green", "blue", "magenta", "red"].map(zone => (
-              <div key={zone} style={{ marginTop:8 }}>
-                <div style={{ fontSize:12, color:"var(--text)", marginBottom:6, textTransform:"capitalize" }}>
-                  {zone} guide
+            <Section
+              title="Appearance"
+              description="Theme and editor display defaults."
+              defaultOpen
+            >
+              <Row label="Theme" hint="Theme selection is still persisted through settings.">
+                <Select
+                  value={settings.appearance.theme || "dark"}
+                  onChange={value => setSetting("appearance", "theme", value)}
+                  options={[["dark", "Dark"], ["light", "Light"]]}
+                />
+              </Row>
+              <Row label="Canvas background">
+                <div className="settings-color-group">
+                  <input
+                    className="settings-color-input"
+                    type="color"
+                    value={settings.appearance.canvas_bg_color || "#ffffff"}
+                    onChange={event => setSetting("appearance", "canvas_bg_color", event.target.value)}
+                  />
+                  <TextInput
+                    value={settings.appearance.canvas_bg_color || "#ffffff"}
+                    maxLength={7}
+                    width={88}
+                    onChange={value => {
+                      if (/^#[0-9a-fA-F]{0,6}$/.test(value)) setSetting("appearance", "canvas_bg_color", value);
+                    }}
+                  />
                 </div>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8 }}>
-                  {["top", "bottom", "left", "right"].map(k => (
-                    <div key={k}>
-                      <label style={{ fontSize:10, color:"var(--dim)", display:"block", marginBottom:4 }}>
-                        {k}
+              </Row>
+              <Row label="Guide opacity">
+                <Slider
+                  value={settings.appearance.guide_opacity}
+                  onChange={value => setSetting("appearance", "guide_opacity", value)}
+                  format={value => `${Math.round(value)}%`}
+                />
+              </Row>
+              <Row label="Reference image opacity">
+                <Slider
+                  value={settings.appearance.ref_img_opacity}
+                  onChange={value => setSetting("appearance", "ref_img_opacity", value)}
+                  format={value => `${Math.round(value * 100)}%`}
+                />
+              </Row>
+            </Section>
+
+            <Section
+              title="Safety"
+              description="Options that can remove or reset work."
+              defaultOpen
+              tone="warning"
+            >
+              <Row
+                label="Wipe input after run"
+                hint="When enabled, source files can be deleted after processing completes. Leave off unless the input folder is disposable."
+                tone="warning"
+              >
+                <Toggle
+                  value={!!settings.processing.wipe_input_after_run}
+                  onChange={value => setSetting("processing", "wipe_input_after_run", value)}
+                  tone="warning"
+                />
+              </Row>
+            </Section>
+          </div>
+
+          <div className="settings-column">
+            <Section
+              title="Processing Defaults"
+              description="Defaults used by Process and Editor."
+              defaultOpen
+            >
+              <Row label="Canvas size (px)">
+                <NumInput
+                  value={settings.output.canvas_size}
+                  min={256}
+                  max={8192}
+                  onChange={value => setSetting("output", "canvas_size", value)}
+                />
+              </Row>
+              <Row label="Thumbnail" hint="Generate resized preview on save.">
+                <Toggle
+                  value={settings.output.thumbnail}
+                  onChange={value => setSetting("output", "thumbnail", value)}
+                />
+              </Row>
+              {settings.output.thumbnail && (
+                <Row label="Thumbnail size (px)" hint="Width and height of generated preview.">
+                  <NumInput
+                    value={settings.output.thumbnail_size || 400}
+                    min={64}
+                    max={2048}
+                    onChange={value => setSetting("output", "thumbnail_size", value)}
+                  />
+                </Row>
+              )}
+              <Row label="Default upscale">
+                <Toggle
+                  value={settings.output.do_upscale ?? true}
+                  onChange={value => setSetting("output", "do_upscale", value)}
+                />
+              </Row>
+              <Row label="Default remove BG">
+                <Toggle
+                  value={settings.output.do_rembg ?? true}
+                  onChange={value => setSetting("output", "do_rembg", value)}
+                />
+              </Row>
+              {(settings.output.do_upscale ?? true) && (
+                <Row label="Default upscale factor">
+                  <Select
+                    value={settings.output.upscale_scale || "2"}
+                    onChange={value => setSetting("output", "upscale_scale", value)}
+                    options={[["2", "2x"], ["4", "4x"]]}
+                  />
+                </Row>
+              )}
+              <Row label="Skip upscale if any side >=" hint="Empty means no quality skip rule.">
+                <OptionalNumInput
+                  value={settings.processing.upscale_max_px}
+                  min={512}
+                  max={8192}
+                  placeholder="no skip"
+                  onChange={value => setSetting("processing", "upscale_max_px", value)}
+                />
+                <span className="settings-unit">px</span>
+              </Row>
+            </Section>
+
+            <Section
+              title="Background Removal"
+              description="Model and mask cleanup preferences."
+            >
+              <Row label="Model">
+                <Select
+                  value={settings.processing.rembg_model}
+                  onChange={value => setSetting("processing", "rembg_model", value)}
+                  wide
+                  options={[
+                    ["birefnet-general", "birefnet-general (recommended)"],
+                    ["birefnet-general-lite", "birefnet-general-lite (faster)"],
+                    ["birefnet-massive", "birefnet-massive (high quality)"],
+                    ["birefnet-dis", "birefnet-dis (illustration)"],
+                    ["birefnet-hrsod", "birefnet-hrsod (salient object)"],
+                    ["bria-rmbg", "BRIA RMBG-2.0 (non-commercial)"],
+                  ]}
+                />
+              </Row>
+              <Row label="Force CPU" hint="Skip DirectML/CUDA. GPU OOM fallback to CPU is automatic.">
+                <Toggle
+                  value={settings.processing.force_cpu ?? false}
+                  onChange={value => setSetting("processing", "force_cpu", value)}
+                />
+              </Row>
+              <Row label="Crop padding" hint="Fraction added after crop.">
+                <Slider
+                  value={settings.processing.crop_padding}
+                  min={0}
+                  max={0.2}
+                  step={0.005}
+                  onChange={value => setSetting("processing", "crop_padding", value)}
+                  format={value => `${(value * 100).toFixed(1)}%`}
+                />
+              </Row>
+              <Row label="Edge blur radius" hint="0 = off.">
+                <Slider
+                  value={settings.processing.edge_blur}
+                  min={0}
+                  max={5}
+                  step={0.1}
+                  onChange={value => setSetting("processing", "edge_blur", value)}
+                  format={value => value.toFixed(1)}
+                />
+              </Row>
+              <Row label="History folders to keep">
+                <NumInput
+                  value={settings.processing.history_keep}
+                  min={1}
+                  max={200}
+                  width={64}
+                  onChange={value => setSetting("processing", "history_keep", value)}
+                />
+              </Row>
+            </Section>
+
+            <Section
+              title="Guides"
+              description="Optional manual guide overrides."
+            >
+              <Row label="Use custom guides" hint="Override config.ini.">
+                <Toggle
+                  value={!!settings.guides?.use_custom}
+                  onChange={value => setSetting("guides", "use_custom", value)}
+                />
+              </Row>
+              {["green", "blue", "magenta", "red"].map(zone => (
+                <div key={zone} className="settings-guide-block">
+                  <div className="settings-guide-title">{zone} guide</div>
+                  <div className="settings-guide-grid">
+                    {["top", "bottom", "left", "right"].map(position => (
+                      <label key={position} className="settings-guide-field">
+                        <span>{position}</span>
+                        <NumInput
+                          width={60}
+                          value={Number(settings.guides?.custom?.[zone]?.[position] ?? 0)}
+                          onChange={value => setSetting("guides", "custom", {
+                            ...(settings.guides?.custom || {}),
+                            [zone]: { ...(settings.guides?.custom?.[zone] || {}), [position]: value },
+                          })}
+                        />
                       </label>
-                      <NumInput
-                        width={60}
-                        value={Number(s.guides?.custom?.[zone]?.[k] ?? 0)}
-                        onChange={v => set("guides", "custom", {
-                          ...(s.guides?.custom || {}),
-                          [zone]: { ...(s.guides?.custom?.[zone] || {}), [k]: v }
-                        })}
-                      />
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </Section>
-
-          <Section title="GPU Setup">
-            <div style={{
-              background:"color-mix(in srgb, var(--accent) 8%, transparent)",
-              border:"1px solid color-mix(in srgb, var(--accent) 20%, transparent)",
-              borderRadius:8, padding:"14px 16px", fontSize:12, lineHeight:1.7,
-              color:"var(--dim)",
-            }}>
-              <div style={{ color:"var(--text)", fontWeight:600, fontSize:13, marginBottom:8 }}>
-                GPU Acceleration
-              </div>
-              <div style={{ marginBottom:6 }}>
-                All models run on CPU by default. To use your GPU via DirectML (NVIDIA / AMD):
-              </div>
-              <div style={{ display:"flex", flexDirection:"column", gap:4, marginBottom:8 }}>
-                <code style={{
-                  color:"var(--yellow)", fontFamily:"JetBrains Mono", fontSize:11,
-                  background:"color-mix(in srgb, var(--yellow) 8%, transparent)",
-                  border:"1px solid color-mix(in srgb, var(--yellow) 20%, transparent)",
-                  borderRadius:4, padding:"4px 10px", display:"inline-block",
-                }}>
-                  pip uninstall onnxruntime
-                </code>
-                <code style={{
-                  color:"var(--yellow)", fontFamily:"JetBrains Mono", fontSize:11,
-                  background:"color-mix(in srgb, var(--yellow) 8%, transparent)",
-                  border:"1px solid color-mix(in srgb, var(--yellow) 20%, transparent)",
-                  borderRadius:4, padding:"4px 10px", display:"inline-block",
-                }}>
-                  pip install onnxruntime-directml
-                </code>
-              </div>
-              <div style={{ marginBottom:4 }}>
-                NCNN upscaling already uses the GPU automatically via Vulkan.
-              </div>
-              <div style={{ paddingTop:10, borderTop:"1px solid var(--border)" }}>
-                <span style={{ color:"var(--yellow)", fontWeight:500 }}>Out of memory errors?</span>
-                {" "}Enable <b style={{ color:"var(--text)" }}>Force CPU</b> above.
-              </div>
-            </div>
-          </Section>
-
+              ))}
+            </Section>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

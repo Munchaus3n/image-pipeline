@@ -69,6 +69,15 @@ These remain browser/manual checks unless a future browser automation dependency
 5. Confirm no System/GPU indicator card exists.
 6. Confirm sidebar navigation still changes screens without altering workflow behavior.
 
+## Settings Visual/Safety Checks
+These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
+1. Open Settings in light mode and confirm the `Settings · Workspace` header, helper copy, compact cards, and controls match the app design language.
+2. Confirm Workspace Paths, Appearance, Processing Defaults, Background Removal, Guides, and Safety groups are clear without oversized default browser controls.
+3. Confirm theme selection still updates and persists through the existing settings flow.
+4. Confirm `Wipe input after run` is separated in the amber Safety section, is not visually encouraged, and remains off unless explicitly toggled.
+5. Toggle dark mode and confirm Settings cards, fields, toggles, warnings, and buttons remain intentional and readable.
+6. Confirm Input, Process, Templates, and Editor still open, and no System/GPU card or old visual-language panel appears in Settings.
+
 ## Input Visual Checks
 These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
 1. Open Input in light mode and inspect the `Input · Review` header, count/excluded summary, path/search row, and `Go to Process` action.
@@ -147,5 +156,8 @@ Run these only during explicit real local workflow validation with disposable in
 - Templates visual match keeps template API/data behavior unchanged and uses token-based compact header, list cards, empty state, form controls, and light/dark-ready styling.
 - Templates browser visual validation against `http://127.0.0.1:5173/` was not completed because the running Vite server was not reachable during this pass; no duplicate Vite server was started.
 - Backend/API tests were intentionally skipped for the Templates visual match because only frontend visual files and AI validation notes changed.
+- Passed 2026-06-29 Settings visual/safety cleanup frontend validation: `cd editor-ui && npm.cmd run build` and `cd editor-ui && npm.cmd run lint`.
+- Settings visual/safety cleanup keeps settings persistence/API contracts unchanged, separates `wipe_input_after_run` in an amber Safety section, and removes the old GPU setup card.
+- Backend/API tests were intentionally skipped for the Settings visual/safety cleanup because only frontend Settings UI/styles and AI validation notes changed.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no persistent browser automation dependency, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.

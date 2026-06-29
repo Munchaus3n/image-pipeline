@@ -432,3 +432,17 @@
 - `cd editor-ui && npm.cmd run lint` passed.
 - `http://127.0.0.1:5173/` was not reachable during this pass, so browser visual validation against the running Vite server was not completed.
 - Backend/API smoke tests were intentionally skipped because this was a frontend-only visual pass.
+
+## 2026-06-29 Settings Visual/Safety Cleanup
+
+### Code Changes
+- Reworked the Settings screen into a compact `Settings · Workspace` header, two-column card layout, and token-based Settings-specific CSS classes.
+- Grouped controls into Workspace Paths, Appearance, Processing Defaults, Background Removal, Guides, and Safety sections without changing settings keys, API contracts, persistence, paths, or processing behavior.
+- Moved `wipe_input_after_run` into a separated amber Safety section with clearer helper text and a warning toggle style; the value is not enabled by default and is not changed silently.
+- Removed the old GPU setup information card from Settings so no System/GPU card or old visual-language panel remains.
+- Kept theme changes flowing through the existing `onThemeChange` path and kept light/dark styling token-based.
+
+### Validation
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Backend/API tests were intentionally skipped because this was a frontend-only Settings visual/safety pass.
