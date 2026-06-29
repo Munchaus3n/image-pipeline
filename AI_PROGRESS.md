@@ -398,3 +398,22 @@
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
 - Existing Vite at `http://127.0.0.1:5173` responded with the app HTML. A headless browser queue probe against the running Vite server did not complete reliably, so final browser assertions were limited to automated build/lint plus source/static verification in this pass.
+
+## 2026-06-29 Editor Compact Panel/Fit Follow-Up
+
+### Code Changes
+- Reduced the display-only Editor zoom calibration to `DISPLAY_ZOOM_MULTIPLIER = 0.74` so the 100% canvas fits inside the available viewport without introducing vertical canvas scrolling.
+- Added a 100% display-size cap using the viewport height and canvas container width; export pixels, saved output dimensions, placement math, guide math, and output conventions are unchanged.
+- Tightened the right Editor sidebar from 320px to 300px and compacted accordion headers, body padding, buttons, selects, and text inputs.
+- Kept the current filename in the bottom footer/status bar as a truncating flex item instead of returning it to the top command bar.
+- Preserved no footer stage chips, sharp canvas corners, no sidebar color indicators, queue chip beside Skip, no System/GPU card, and no Electron/dependency/API/backend/path/session/output behavior changes.
+
+### Validation
+- `python scripts\safe_smoke_test.py` passed.
+- `python -m py_compile api.py pipeline.py scripts\safe_smoke_test.py` passed.
+- `python scripts\safe_smoke_test.py --api-url http://127.0.0.1:7421 --cleanup` passed against the already-running API.
+- `cd editor-ui && npm.cmd install` passed; npm reported existing audit warnings: 1 low, 2 moderate, 1 high.
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Headless Chrome compact-fit probe against temporary local Vite at `http://127.0.0.1:5173` confirmed: no footer stage pills, footer filename present, no topbar filename chip, queue chip beside Skip, 0px canvas radius, no sidebar accents, no System/GPU card, sidebar width 300px, accordion header height 42px, and zoom labels `75%`, `100%`, `125%`, `150%`.
+- Headless Chrome compact-fit probe confirmed the 100% canvas frame measured 533px high inside an 845px canvas viewport, with `viewportScrollHeight == viewportClientHeight`, `workspaceScrollHeight == workspaceClientHeight`, and no document vertical overflow.

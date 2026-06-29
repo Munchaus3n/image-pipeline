@@ -19,7 +19,7 @@ import {
 // zoom: CSS scale applied to the canvas element for view zoom
 let CANVAS_SIZE = 1440;  // mutable module var — kept for non-React drawing functions
 const DS = 720;
-const DISPLAY_ZOOM_MULTIPLIER = 0.78;
+const DISPLAY_ZOOM_MULTIPLIER = 0.74;
 const scaleFactor = () => DS / CANVAS_SIZE;
 
 const BASE = "/api";
@@ -878,6 +878,10 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     { label:"150%", value:1.5  },
   ];
   const displayZoom = zoom * DISPLAY_ZOOM_MULTIPLIER;
+  const canvasDisplayPixels = Math.round(DS * displayZoom);
+  const canvasDisplaySize = zoom === 1.0
+    ? `min(${canvasDisplayPixels}px, calc(100vh - 132px), calc(100% - 12px))`
+    : `${canvasDisplayPixels}px`;
   const queueChip = queue.length ? `${Math.min(queueIdx + 1, queue.length)} / ${queue.length}` : "— / —";
   const currentFileLabel = queue[queueIdx] ? imageQueueLabel(queue[queueIdx], srcFolder) : (srcLabel || "No image loaded");
 
@@ -918,11 +922,11 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       {/* ── Canvas area ──────────────────────────────────────────── */}
       <div className="editor-canvas-column">
         <div className="editor-canvas-viewport">
-          <div className="editor-canvas-frame" style={{ width: DS * displayZoom, height: DS * displayZoom }}>
+          <div className="editor-canvas-frame" style={{ width: canvasDisplaySize, height: canvasDisplaySize }}>
             <canvas
               ref={canvasRef} width={DS} height={DS}
               onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
-              style={{ cursor:"crosshair", display:"block", width:DS*displayZoom, height:DS*displayZoom, transformOrigin:"top left" }}
+              style={{ cursor:"crosshair", display:"block", width:canvasDisplaySize, height:canvasDisplaySize, transformOrigin:"top left" }}
             />
           </div>
         </div>
