@@ -144,19 +144,36 @@
 }
 
 .editor-canvas-frame {
-  overflow: hidden;
+  position: relative;
+  overflow: visible;
   flex-shrink: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
+  box-sizing: border-box;
   box-shadow:
     0 2px 8px color-mix(in srgb, black 8%, transparent),
     0 12px 30px color-mix(in srgb, black 13%, transparent);
 }
 
-.editor-canvas-frame canvas {
+.editor-artboard {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
   border: 0;
   border-radius: 0;
+}
+
+.editor-canvas-frame canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-sizing: border-box;
   box-shadow: none;
 }
 

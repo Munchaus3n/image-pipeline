@@ -923,11 +923,13 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       <div className="editor-canvas-column">
         <div className="editor-canvas-viewport">
           <div className="editor-canvas-frame" style={{ width: canvasDisplaySize, height: canvasDisplaySize }}>
-            <canvas
-              ref={canvasRef} width={DS} height={DS}
-              onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
-              style={{ cursor:"crosshair", display:"block", width:canvasDisplaySize, height:canvasDisplaySize, transformOrigin:"top left" }}
-            />
+            <div className="editor-artboard" style={{ background: canvasBgColor }}>
+              <canvas
+                ref={canvasRef} width={DS} height={DS}
+                onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
+                style={{ cursor:"crosshair", display:"block" }}
+              />
+            </div>
           </div>
         </div>
 
