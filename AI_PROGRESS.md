@@ -488,3 +488,22 @@
 - `cd editor-ui && npm.cmd run build` passed.
 - `cd editor-ui && npm.cmd run lint` passed.
 - Backend/API tests were intentionally skipped because this was frontend visual/icon polish only.
+
+## 2026-06-30 Editor Single Image Import/Download
+
+### Code Changes
+- Added a local-only single image mode in Editor using browser File APIs for PNG, JPG/JPEG, and WebP files.
+- Added a compact Source-panel single image drop/browse control and an empty Editor drop zone when no image is loaded.
+- Added a top-bar Download action that exports the current browser-rendered PNG without advancing the queue.
+- In single image mode, the queue chip shows `single`, Skip is hidden, Save becomes `Save PNG`, and Save/Download stay on the current image without writing to a batch output path.
+- Preserved batch source loading, queue state, Save & Next, Skip, output folder conventions, and existing Editor handoff logic.
+- Kept changes scoped to `editor-ui/src/Editor.jsx`, `editor-ui/src/styles/editor.css`, and AI validation notes; `api.py` was not changed.
+
+### Validation
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing API at `http://127.0.0.1:7421/settings` returned 200; Vite at `http://127.0.0.1:5173/` was not reachable, so the browser probe started a temporary Vite process and stopped it afterward.
+- Headless Chrome probe created a disposable 2-image Editor session: initial queue was `1 / 2`, Download kept the queue at `1 / 2`, Save & Next advanced to `2 / 2` and wrote a PNG under the disposable output folder, and Skip completed the queue and wrote a skipped PNG.
+- The same probe loaded `probe-single.png` through the single-image file input, confirmed queue `single`, filename display, hidden Skip, visible Download, successful PNG download, and `Save PNG` made zero `/api/save` calls in single image mode.
+- The probe restored the previous session state after completion and stopped only the temporary Vite/Chrome processes it started.
+- Backend/API tests were intentionally skipped because no backend/API behavior changed; the local API was used only for the browser workflow probe.
