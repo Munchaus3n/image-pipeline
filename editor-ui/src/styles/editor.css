@@ -82,10 +82,6 @@
   color: var(--dim);
 }
 
-.editor-action-download {
-  min-width: 104px;
-}
-
 .editor-action-primary {
   min-width: 156px;
   border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
@@ -223,7 +219,7 @@
 }
 
 .editor-empty-dropzone.is-dragging,
-.editor-single-source.is-dragging {
+.editor-single-drop-field.is-dragging {
   border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-elevated));
 }
@@ -377,25 +373,28 @@
 }
 
 .editor-single-source {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 5px;
-  padding: 8px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 30%, var(--border));
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--surface-elevated) 34%, transparent);
-}
-
-.editor-single-source-copy {
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-elevated) 30%, transparent);
 }
 
-.editor-single-source-copy strong {
+.editor-single-source-head,
+.editor-single-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor-single-source-head {
+  justify-content: space-between;
+}
+
+.editor-single-source-head strong {
   color: var(--text);
   font-size: 10px;
   font-weight: 800;
@@ -403,7 +402,73 @@
   text-transform: uppercase;
 }
 
-.editor-single-source-copy span {
+.editor-single-source-head span {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--green) 76%, var(--dim));
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+}
+
+.editor-single-drop-field {
+  width: min(136px, 100%);
+  aspect-ratio: 1 / 1;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel2) 74%, transparent);
+  color: var(--dim);
+  cursor: pointer;
+  font-family: inherit;
+  padding: 8px;
+  text-align: center;
+}
+
+.editor-single-drop-field img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.editor-single-drop-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.editor-single-drop-title {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 780;
+}
+
+.editor-single-drop-hint {
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.editor-single-file-row {
+  min-width: 0;
+}
+
+.editor-single-file-name {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   color: var(--dim);
   font-family: var(--font-mono);

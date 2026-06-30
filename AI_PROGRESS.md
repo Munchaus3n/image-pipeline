@@ -514,7 +514,7 @@
 - Moved thumbnail export ownership into the Editor Output accordion with a persisted `Generate thumbnail` control backed by the existing `settings.output.thumbnail` flag.
 - Removed the Process-side thumbnail toggle and `thumbs on/off` ready-card summary so Process no longer feels like the thumbnail export owner.
 - Updated batch Save & Next to pass the Editor Output thumbnail setting to the existing `/save` endpoint; queue advance and Skip behavior are unchanged.
-- Updated direct single-image mode so the primary action is `Download PNG` when thumbnails are off and `Download Package` when thumbnails are on.
+- Updated direct single-image download behavior to respect the Editor Output thumbnail toggle; the follow-up below simplifies the visible primary label to `Download`.
 - Direct single-image download now writes `source-name.png` only when thumbnails are off, and writes `source-name.png` plus a real `{thumbnail_size}px` `source-name_thumb.png` when thumbnails are on.
 - Kept `api.py`, backend processing logic, dependencies, Electron scope, and output folder conventions unchanged.
 
@@ -525,4 +525,22 @@
 - Headless Chrome probe confirmed Editor Output shows `Generate thumbnail`, batch thumbnail OFF writes final only, batch thumbnail ON writes final plus a 400x400 thumbnail, and Process no longer shows `Thumbnail (400px)` or `thumbs on/off`.
 - The same probe confirmed direct single-image OFF downloads only `probe-single.png` at 1440x1440, direct single-image ON downloads `probe-single.png` at 1440x1440 plus `probe-single_thumb.png` at 400x400, and the queue remains `single`.
 - The probe restored the previous settings/session state after completion.
+- Backend/API tests were intentionally skipped because `api.py` was unchanged; the existing API was used only for the browser workflow probe.
+
+## 2026-06-30 Editor Single Image Download Simplification
+
+### Code Changes
+- Removed the separate top-bar Download/Download Package action so batch mode keeps the clean `Skip` plus `Save & Next` command group.
+- Changed direct single-image mode to use one primary `Download` action regardless of thumbnail setting; the Output accordion toggle controls whether a thumbnail PNG is also downloaded.
+- Preserved direct single-image export behavior so thumbnail OFF downloads only the final PNG, thumbnail ON downloads final PNG plus a real thumbnail PNG, and neither path writes to stale batch output or advances the queue.
+- Reworked the Editor Source accordion single-image area into a distinct direct-image section with current mode text, a compact square preview/drop/select field, selected filename, and Browse/Replace action.
+- Preserved batch `Save & Next`, batch `Skip`, batch thumbnail output behavior, backend/API behavior, processing logic, dependencies, Electron scope, and output folder conventions.
+
+### Validation
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Headless Chrome probe confirmed batch top bar has no separate Download/Download Package button, batch `Save & Next` advances from `1 / 2` to `2 / 2`, batch thumbnail OFF writes final only, and batch thumbnail ON writes final plus a 400x400 thumbnail.
+- The same probe confirmed the Source accordion shows direct image mode, `probe-single.png`, and a 136x136 square preview/drop field for single-image mode.
+- The same probe confirmed direct single-image primary label is `Download`, thumbnail OFF downloads only `probe-single.png`, thumbnail ON downloads `probe-single.png` plus `probe-single_thumb.png`, and the queue remains `single`.
+- `templates_custom.json` had no tracked diff and no stray `tatus` file was present.
 - Backend/API tests were intentionally skipped because `api.py` was unchanged; the existing API was used only for the browser workflow probe.

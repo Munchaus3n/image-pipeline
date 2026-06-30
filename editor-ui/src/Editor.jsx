@@ -1171,9 +1171,10 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const currentFileLabel = isSingleImageMode
     ? singleImageName || "Single image"
     : queue[queueIdx] ? imageQueueLabel(queue[queueIdx], srcFolder) : (srcLabel || "No image loaded");
+  const singlePreviewSrc = isSingleImageMode ? items[0]?.htmlImg?.src || "" : "";
   const saveButtonLabel = saved
     ? isSingleImageMode ? "Downloaded!" : "Saved!"
-    : isSingleImageMode ? (generateThumbnail ? "Download Package" : "Download PNG") : "Save & Next";
+    : isSingleImageMode ? "Download" : "Save & Next";
 
   return (
     <>
@@ -1210,11 +1211,6 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
             </button>
           )}
           <span className="editor-queue-chip">{queueChip}</span>
-          {!isSingleImageMode && (
-            <button type="button" className="ed-btn editor-action-secondary editor-action-download" onClick={() => doDownload()} disabled={!items.length}>
-              <span>{generateThumbnail ? "Download Package" : "Download"}</span>
-            </button>
-          )}
           <button type="button" className={saved ? "ed-btn editor-action-primary editor-action-saved" : "ed-btn editor-action-primary"} onClick={doSave}>
             <span>{saveButtonLabel}</span>
             <kbd>↵</kbd>
@@ -1285,19 +1281,38 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         <div className="editor-sidebar-scroll">
 
           <CollSection label="Source" accent="var(--green)" defaultOpen={false}>
-            <div
-              className={singleDropActive ? "editor-single-source is-dragging" : "editor-single-source"}
-              onDragOver={onSingleImageDragOver}
-              onDragLeave={onSingleImageDragLeave}
-              onDrop={onSingleImageDrop}
-            >
-              <div className="editor-single-source-copy">
+            <div className="editor-single-source">
+              <div className="editor-single-source-head">
                 <strong>Single image</strong>
-                <span>{isSingleImageMode ? singleImageName : "Drop one image or browse"}</span>
+                <span>{isSingleImageMode ? "Direct image active" : "Batch source active"}</span>
               </div>
-              <button type="button" className="ed-btn editor-single-source-browse" onClick={browseSingleImage}>
-                Browse
+              <button
+                type="button"
+                className={singleDropActive ? "ed-btn editor-single-drop-field is-dragging" : "ed-btn editor-single-drop-field"}
+                onClick={browseSingleImage}
+                onDragOver={onSingleImageDragOver}
+                onDragLeave={onSingleImageDragLeave}
+                onDrop={onSingleImageDrop}
+                aria-label={isSingleImageMode ? "Replace single image" : "Select single image"}
+              >
+                {singlePreviewSrc ? (
+                  <img src={singlePreviewSrc} alt="" />
+                ) : (
+                  <>
+                    <span className="editor-single-drop-icon">＋</span>
+                    <span className="editor-single-drop-title">Drop or select</span>
+                    <span className="editor-single-drop-hint">PNG · JPG · WebP</span>
+                  </>
+                )}
               </button>
+              <div className="editor-single-file-row">
+                <span className="editor-single-file-name" title={isSingleImageMode ? singleImageName : ""}>
+                  {isSingleImageMode ? singleImageName || "Single image selected" : "No direct image selected"}
+                </span>
+                <button type="button" className="ed-btn editor-single-source-browse" onClick={browseSingleImage}>
+                  {isSingleImageMode ? "Replace" : "Browse"}
+                </button>
+              </div>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:4, marginBottom:4 }}>
               <Btn className="ed-btn" onClick={async () => {

@@ -133,15 +133,16 @@ These remain browser/manual checks unless a future browser automation dependency
 ## Editor Single Image Checks
 These remain browser/manual checks unless a future browser automation dependency is explicitly approved:
 1. Open Editor with a normal completed batch/session and confirm queue, Save & Next, Skip, and source-relative labels still behave normally.
-2. Click Download in batch mode and confirm it downloads the current PNG without advancing the queue.
+2. Confirm batch mode has no separate Download/Download Package top-bar action; the primary action remains `Save & Next`.
 3. Open Editor with no usable current image and confirm the compact empty drop/browse state appears.
 4. Drop or browse one PNG/JPG/WebP directly in Editor and confirm it enters single image mode without running Process first.
 5. Confirm the queue chip shows `single`, Skip is hidden or disabled, the filename updates, and canvas placement/scale/guides still work.
-6. Confirm single image mode has no redundant secondary Download button.
-7. Click the single-image primary action and confirm `Download PNG` exports only the final PNG when thumbnails are off.
-8. Click the single-image primary action and confirm `Download Package` exports final PNG plus a real thumbnail PNG when thumbnails are on.
-9. Confirm single-image primary export does not call `/api/save` or write to a stale batch output path.
-10. Toggle dark mode and confirm the Source-panel drop/browse control, empty drop zone, Download action, and status note remain readable.
+6. Confirm the Source accordion shows a distinct single-image area with current mode, compact square drop/select field, and selected filename.
+7. Confirm single image mode has no redundant secondary Download button and the only primary action reads `Download`.
+8. Click the single-image primary `Download` action and confirm it exports only the final PNG when thumbnails are off.
+9. Click the single-image primary `Download` action and confirm it exports final PNG plus a real thumbnail PNG when thumbnails are on.
+10. Confirm single-image primary export does not call `/api/save`, advance the queue, or write to a stale batch output path.
+11. Toggle dark mode and confirm the Source-panel drop/browse control, empty drop zone, Download action, and status note remain readable.
 
 ## Dangerous/Real Pipeline Checks
 These are intentionally not automated by `safe_smoke_test.py`:
@@ -198,5 +199,8 @@ Run these only during explicit real local workflow validation with disposable in
 - Passed 2026-06-30 Editor thumbnail export control validation: frontend build, frontend lint, and a disposable headless Chrome probe against the existing API plus temporary Vite.
 - Editor thumbnail export probe confirmed the Output accordion owns `Generate thumbnail`, Process no longer shows the thumbnail toggle/summary, batch thumbnail OFF writes final only, batch thumbnail ON writes final plus a 400x400 thumbnail, direct single-image OFF downloads only final PNG, and direct single-image ON downloads final PNG plus a 400x400 thumbnail PNG.
 - Backend/API tests were intentionally skipped for the Editor thumbnail export control feature because `api.py` was unchanged; the existing API was used only for the browser workflow probe.
+- Passed 2026-06-30 Editor single image download simplification validation: frontend build, frontend lint, and a disposable headless Chrome probe against the existing API plus temporary Vite.
+- Editor single image simplification probe confirmed no separate batch Download/Download Package top-bar action, batch `Save & Next` still advances, direct Source shows mode/filename/square preview field, direct primary label is `Download`, direct thumbnail OFF downloads final PNG only, and direct thumbnail ON downloads final PNG plus a 400x400 thumbnail.
+- Backend/API tests were intentionally skipped for the Editor single image download simplification because `api.py` was unchanged; the existing API was used only for the browser workflow probe.
 - Existing npm audit warnings remain: 1 low, 2 moderate, 1 high.
 - Remaining smoke-test gaps are intentional: no persistent browser automation dependency, no real pipeline/model runs, no GPU OOM trigger, and no cancellation/stop automation.
