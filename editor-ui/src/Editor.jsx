@@ -1280,19 +1280,17 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         {/* Scrollable content */}
         <div className="editor-sidebar-scroll">
 
-          <CollSection label="Source" accent="var(--green)" defaultOpen={false}>
-            <div className="editor-single-source">
-              <div className="editor-single-source-head">
-                <strong>Single image</strong>
-                <span>{isSingleImageMode ? "Direct image active" : "Batch source active"}</span>
-              </div>
+          <CollSection label="Single Image" accent="var(--green)" defaultOpen={false}>
+            <div
+              className={singleDropActive ? "editor-single-source is-dragging" : "editor-single-source"}
+              onDragOver={onSingleImageDragOver}
+              onDragLeave={onSingleImageDragLeave}
+              onDrop={onSingleImageDrop}
+            >
               <button
                 type="button"
-                className={singleDropActive ? "ed-btn editor-single-drop-field is-dragging" : "ed-btn editor-single-drop-field"}
+                className="ed-btn editor-single-drop-field"
                 onClick={browseSingleImage}
-                onDragOver={onSingleImageDragOver}
-                onDragLeave={onSingleImageDragLeave}
-                onDrop={onSingleImageDrop}
                 aria-label={isSingleImageMode ? "Replace single image" : "Select single image"}
               >
                 {singlePreviewSrc ? (
