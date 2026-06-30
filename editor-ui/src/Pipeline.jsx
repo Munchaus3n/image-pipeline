@@ -13,6 +13,22 @@ const BASE = "/api";
 const openFolder = (path = "") =>
   fetch(`${BASE}/open-folder?path=${encodeURIComponent(path)}`).catch(() => {});
 
+async function saveProcessingSettingsPatch(patch) {
+  const response = await fetch(`${BASE}/settings`);
+  const data = response.ok ? await response.json() : { settings: {} };
+  const current = data?.settings ?? {};
+  await fetch(`${BASE}/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      settings: {
+        ...current,
+        processing: { ...(current.processing ?? {}), ...patch },
+      },
+    }),
+  });
+}
+
 const C = {
   bg:      "var(--bg)",      panel:   "var(--panel)",   panel2:  "var(--panel2)",
   border:  "var(--border)",  text:    "var(--text)",    dim:     "var(--dim)",
@@ -359,7 +375,7 @@ function usePipeline() {
     }
   }, [classify, pushLivePreview]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false, upscaleMaxPx = 0 }) => {
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false, upscaleMaxPx = 0, reuseExactDuplicates = true }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -387,6 +403,7 @@ function usePipeline() {
           do_rembg: doRembg, input_dir: inputDir.trim(), output_dir: outputDir.trim(),
           exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel, resume,
           upscale_max_px: upscaleMaxPx,
+          reuse_exact_duplicates: reuseExactDuplicates,
         }),
         signal: ctrl.signal,
       });
@@ -831,6 +848,7 @@ export default function Pipeline({
   const [thumbnail, setThumbnail] = useState(true);
   const [rembgModel, setRembgModel] = useState("birefnet-general");
   const [upscaleMaxPx, setUpscaleMaxPx] = useState("");
+  const [reuseExactDuplicates, setReuseExactDuplicates] = useState(true);
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
   const [logOpen, setLogOpen] = useState(true);
   const [resumeSession, setResumeSession] = useState(null);
@@ -862,6 +880,9 @@ export default function Pipeline({
         if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
         if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
         if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
+        if (typeof s.processing?.reuse_exact_duplicates === "boolean") {
+          setReuseExactDuplicates(s.processing.reuse_exact_duplicates);
+        }
         if (Object.prototype.hasOwnProperty.call(s.processing ?? {}, "upscale_max_px")) {
           const savedMaxPx = Number(s.processing.upscale_max_px);
           setUpscaleMaxPx(Number.isFinite(savedMaxPx) && savedMaxPx > 0 ? String(savedMaxPx) : "");
@@ -944,11 +965,12 @@ export default function Pipeline({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
       excludeList: activeExclude, skipList, rembgModel, resume: false,
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
+      reuseExactDuplicates,
     });
     rememberInputDir?.(inputDir);
     rememberOutputDir?.(outputDir);
     setShowResume(false);
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx, rememberInputDir, rememberOutputDir]);
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleResume = useCallback(() => {
     if (!resumeSession?.src_root) return;
@@ -964,16 +986,22 @@ export default function Pipeline({
       inputDir: resumeInputDir,
       outputDir: resumeOutputDir, excludeList: activeExclude, skipList, rembgModel, resume: true,
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
+      reuseExactDuplicates,
     });
     rememberInputDir?.(resumeInputDir);
     rememberOutputDir?.(resumeOutputDir);
     setShowResume(false);
-  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx, rememberInputDir, rememberOutputDir]);
+  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleStartFresh = useCallback(async () => {
     try { await fetch(`${BASE}/session`, { method: "DELETE" }); } catch { void 0; }
     setShowResume(false);
     setResumeSession(null);
+  }, []);
+
+  const handleReuseExactDuplicatesChange = useCallback((enabled) => {
+    setReuseExactDuplicates(enabled);
+    saveProcessingSettingsPatch({ reuse_exact_duplicates: enabled }).catch(() => {});
   }, []);
 
   const nothingSelected = !doUpscale && !doRembg;
@@ -1111,6 +1139,12 @@ export default function Pipeline({
 
             <Row label="Remove BG">
               <PillToggle value={doRembg} onChange={setDoRembg} />
+            </Row>
+            <Row label="Reuse exact duplicates" className="pipeline-row-duplicate-reuse" controlsClassName="pipeline-row-controls-wrap">
+              <div className="pipeline-duplicate-toggle">
+                <PillToggle value={reuseExactDuplicates} onChange={handleReuseExactDuplicatesChange} />
+                <span>Process identical files once and copy results to duplicates.</span>
+              </div>
             </Row>
             {doRembg && (
               <>

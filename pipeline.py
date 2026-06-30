@@ -12,10 +12,12 @@ if sys.stdout.encoding.lower() != "utf-8":
 if sys.stderr.encoding.lower() != "utf-8":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
+import hashlib
 import shutil
 import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, Future
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from PIL import Image, ImageFilter, ImageChops, UnidentifiedImageError
@@ -109,6 +111,128 @@ def collect_images(root: Path, recursive: bool) -> tuple[list[Path], set[Path]]:
 
 def mirror_path(src: Path, src_root: Path, dst_root: Path, suffix: str = ".png") -> Path:
     return dst_root / src.relative_to(src_root).with_suffix(suffix)
+
+
+@dataclass
+class DuplicateReusePlan:
+    representatives: list[Path]
+    duplicate_to_representative: dict[Path, Path] = field(default_factory=dict)
+    hash_failed: list[Path] = field(default_factory=list)
+
+    @property
+    def duplicate_count(self) -> int:
+        return len(self.duplicate_to_representative)
+
+    @property
+    def unique_count(self) -> int:
+        return len(self.representatives)
+
+
+def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _duplicate_policy_key(src: Path, do_rembg: bool, no_rembg_set: set[Path], excluded_paths: set[Path]) -> tuple[bool, bool]:
+    if not do_rembg:
+        return (False, False)
+    return (
+        src in no_rembg_set,
+        src in excluded_paths,
+    )
+
+
+def build_duplicate_reuse_plan(
+    images: list[Path],
+    input_root: Path,
+    do_rembg: bool,
+    no_rembg_set: set[Path],
+    exclude_tokens: set[str],
+    enabled: bool,
+) -> DuplicateReusePlan:
+    if not enabled:
+        return DuplicateReusePlan(representatives=images)
+
+    excluded_paths = _resolve_paths_from_tokens(images, input_root, exclude_tokens)
+    by_hash: dict[tuple[str, tuple[bool, bool]], Path] = {}
+    representatives: list[Path] = []
+    duplicate_to_representative: dict[Path, Path] = {}
+    hash_failed: list[Path] = []
+
+    for src in images:
+        try:
+            digest = _sha256_file(src)
+        except Exception as e:
+            warn(f"Could not hash {src.name}; processing normally: {e}")
+            representatives.append(src)
+            hash_failed.append(src)
+            continue
+
+        key = (digest, _duplicate_policy_key(src, do_rembg, no_rembg_set, excluded_paths))
+        representative = by_hash.get(key)
+        if representative is None:
+            by_hash[key] = src
+            representatives.append(src)
+        else:
+            duplicate_to_representative[src] = representative
+
+    return DuplicateReusePlan(
+        representatives=representatives,
+        duplicate_to_representative=duplicate_to_representative,
+        hash_failed=hash_failed,
+    )
+
+
+def _expected_final_output(src: Path, input_root: Path, final_root: Path) -> Path:
+    return mirror_path(src, input_root, final_root, suffix=".png")
+
+
+def copy_duplicate_outputs(
+    plan: DuplicateReusePlan,
+    representative_outputs: dict[Path, Path],
+    input_root: Path,
+    final_root: Path,
+    max_examples: int = 5,
+) -> int:
+    if not plan.duplicate_to_representative:
+        return 0
+
+    section("Exact Duplicate Reuse")
+    copied = 0
+    examples = 0
+    for duplicate, representative in plan.duplicate_to_representative.items():
+        representative_output = representative_outputs.get(representative)
+        duplicate_output = _expected_final_output(duplicate, input_root, final_root)
+
+        if not representative_output or not representative_output.exists() or not _is_valid_existing_output(representative_output):
+            warn(f"Could not reuse duplicate {duplicate.name}; representative output missing or invalid.")
+            continue
+
+        try:
+            duplicate_output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(representative_output, duplicate_output)
+            copied += 1
+            if examples < max_examples:
+                try:
+                    duplicate_label = duplicate.relative_to(input_root)
+                except ValueError:
+                    duplicate_label = Path(duplicate.name)
+                try:
+                    representative_label = representative.relative_to(input_root)
+                except ValueError:
+                    representative_label = Path(representative.name)
+                ok(f"Reused result: {duplicate_label} ← {representative_label}")
+                examples += 1
+        except Exception as e:
+            warn(f"Could not copy duplicate output for {duplicate.name}: {e}")
+
+    remaining = copied - examples
+    if remaining > 0:
+        info(f"Reused {remaining} additional duplicate output(s).")
+    return copied
 
 
 def _normalize_image_token(value: str) -> str:
@@ -737,6 +861,7 @@ def main():
     parser.add_argument("--rembg-fallback",   default="auto")
     parser.add_argument("--wipe-input-after-run", action="store_true")
     parser.add_argument("--upscale-max-px",   type=int, default=0)
+    parser.add_argument("--no-reuse-exact-duplicates", action="store_true")
     parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
     rembg_fallback_raw = args.rembg_fallback
@@ -842,6 +967,16 @@ def main():
         err(f"No images found in: {input_dir}")
         sys.exit(1)
 
+    duplicate_plan = build_duplicate_reuse_plan(
+        images,
+        input_dir,
+        do_rembg,
+        no_rembg_set,
+        exclude_tokens,
+        enabled=not args.no_reuse_exact_duplicates,
+    )
+    processing_images = duplicate_plan.representatives
+
     avif_inputs = [p for p in images if p.suffix.lower() == ".avif"]
     if avif_inputs:
         if not _AVIF_DECODE_SUPPORTED:
@@ -862,6 +997,13 @@ def main():
     table.add_column(style="bold cyan")
     table.add_row("Mode",      folder_mode)
     table.add_row("Images",    str(len(images)))
+    if args.no_reuse_exact_duplicates:
+        table.add_row("Exact duplicates", "reuse off")
+    else:
+        table.add_row(
+            "Exact duplicates",
+            f"{duplicate_plan.duplicate_count} reused; {duplicate_plan.unique_count} unique",
+        )
     if no_rembg_set:
         table.add_row("No-rembg", f"{len(no_rembg_set)} (upscale + crop only)")
     if exclude_tokens:
@@ -887,6 +1029,17 @@ def main():
     if not args.non_interactive:
         Prompt.ask("  [dim]Press ENTER to start[/dim]")
 
+    if not args.no_reuse_exact_duplicates:
+        if duplicate_plan.duplicate_count:
+            info(
+                f"Detected {duplicate_plan.duplicate_count} exact duplicate(s). "
+                f"Processing {duplicate_plan.unique_count} unique image(s) out of {len(images)}."
+            )
+        else:
+            info(f"No exact duplicates detected. Processing {len(images)} image(s).")
+        if duplicate_plan.hash_failed:
+            warn(f"Hashing failed for {len(duplicate_plan.hash_failed)} image(s); processing those normally.")
+
     clear_previous_output = (not args.resume) and (not preserve_custom_data)
 
     if args.resume:
@@ -901,7 +1054,7 @@ def main():
         output_base.mkdir(parents=True, exist_ok=True)
         info("Custom paths + wipe off — preserving existing input/output.")
 
-    current = images
+    current = processing_images
 
     if do_upscale:
         current = batch_upscale(
@@ -912,15 +1065,31 @@ def main():
     else:
         skip("upscaling")
 
+    final_root = rembg_dir if do_rembg else upscale_dir
+    final_outputs: list[Path] = []
+
     if do_rembg:
         src_root = upscale_dir if do_upscale else input_dir
-        batch_remove_bg(current, src_root, rembg_dir, input_dir, no_rembg_set,
-                        exclude_tokens=exclude_tokens,
-                        corrupted_dir=corrupted_dir,
-                        force_cpu=args.force_cpu,
-                        rembg_fallback=args.rembg_fallback)
+        final_outputs = batch_remove_bg(
+            current, src_root, rembg_dir, input_dir, no_rembg_set,
+            exclude_tokens=exclude_tokens,
+            corrupted_dir=corrupted_dir,
+            force_cpu=args.force_cpu,
+            rembg_fallback=args.rembg_fallback,
+        )
     else:
         skip("background removal")
+        final_outputs = current
+
+    representative_outputs = dict(zip(processing_images, final_outputs))
+    duplicate_outputs = copy_duplicate_outputs(
+        duplicate_plan,
+        representative_outputs,
+        input_dir,
+        final_root,
+    )
+    if duplicate_outputs:
+        ok(f"Reused {duplicate_outputs} exact duplicate output(s).")
 
     if args.wipe_input_after_run:
         for src in [p for p in input_dir.rglob("*") if p.is_file()]:

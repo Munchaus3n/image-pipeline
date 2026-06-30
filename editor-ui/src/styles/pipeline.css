@@ -55,6 +55,20 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+.pipeline-duplicate-toggle {
+  max-width: 178px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pipeline-duplicate-toggle span {
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
 .pipeline-settings-scroll {
   flex: 1;
   min-height: 0;

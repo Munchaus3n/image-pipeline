@@ -459,6 +459,7 @@ class PipelineConfig(BaseModel):
     rembg_model:    str = ""
     resume:         bool = False
     upscale_max_px: int = 0
+    reuse_exact_duplicates: bool = True
 
     @field_validator("upscale_max_px", mode="before")
     @classmethod
@@ -912,7 +913,7 @@ _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
                                           "rembg_model": "birefnet-general", "rembg_fallback": "auto",
                      "history_keep": 30, "force_cpu": False, "wipe_input_after_run": False,
-                     "upscale_max_px": 0},
+                     "reuse_exact_duplicates": True, "upscale_max_px": 0},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
@@ -1028,6 +1029,8 @@ async def run_pipeline(cfg: PipelineConfig):
         cmd += ["--skip-files", ",".join(f.strip() for f in cfg.skip_files if f.strip())]
     if cfg.upscale_max_px > 0:
         cmd += ["--upscale-max-px", str(cfg.upscale_max_px)]
+    if not cfg.reuse_exact_duplicates:
+        cmd.append("--no-reuse-exact-duplicates")
     if cfg.resume:
         cmd.append("--resume")
 
