@@ -251,6 +251,7 @@ export function Root() {
               setOutputDir={setOutputDir}
               excludeTags={excludeTags}
               removedImages={removedImages}
+              thumbs={thumbs}
               recentInputDirs={recentInputDirs}
               recentOutputDirs={recentOutputDirs}
               rememberInputDir={rememberInputDir}

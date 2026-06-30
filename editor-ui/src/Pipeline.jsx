@@ -13,6 +13,64 @@ const BASE = "/api";
 const openFolder = (path = "") =>
   fetch(`${BASE}/open-folder?path=${encodeURIComponent(path)}`).catch(() => {});
 
+function toForwardSlashes(path = "") {
+  return String(path || "").replace(/\\/g, "/");
+}
+
+function trimTrailingSlashes(path = "") {
+  return path.replace(/\/+$/, "");
+}
+
+function normalizeImagePathToken(path = "") {
+  return trimTrailingSlashes(toForwardSlashes(path).trim());
+}
+
+function relativePathFromInput(absPath, inputDir) {
+  const absNorm = normalizeImagePathToken(absPath);
+  const rootNorm = normalizeImagePathToken(inputDir);
+  if (!absNorm || !rootNorm) return "";
+  const absLower = absNorm.toLowerCase();
+  const rootLower = rootNorm.toLowerCase();
+  if (absLower === rootLower) return "";
+  if (absLower.startsWith(`${rootLower}/`)) return absNorm.slice(rootNorm.length + 1);
+  return "";
+}
+
+function imageIdForPath(absPath, inputDir) {
+  return normalizeImagePathToken(relativePathFromInput(absPath, inputDir) || absPath);
+}
+
+function addToken(tokens, value) {
+  const token = String(value || "").trim();
+  if (token) tokens.add(token);
+}
+
+function expandedImageTokens(ids, thumbs, inputDir) {
+  const tokens = new Set();
+  const aliasesById = new Map();
+
+  (Array.isArray(thumbs) ? thumbs : []).forEach((absPath) => {
+    const imageId = imageIdForPath(absPath, inputDir);
+    const relativePath = relativePathFromInput(absPath, inputDir);
+    const absolutePath = String(absPath || "").trim();
+    const normalizedAbsolutePath = normalizeImagePathToken(absPath);
+    const aliases = [imageId, relativePath, absolutePath, normalizedAbsolutePath].filter(Boolean);
+
+    aliasesById.set(imageId, aliases);
+    aliasesById.set(normalizedAbsolutePath, aliases);
+    aliasesById.set(absolutePath, aliases);
+  });
+
+  (Array.isArray(ids) ? ids : [...(ids || [])]).forEach((id) => {
+    addToken(tokens, id);
+    const normalizedId = normalizeImagePathToken(id);
+    addToken(tokens, normalizedId);
+    (aliasesById.get(id) || aliasesById.get(normalizedId) || []).forEach((alias) => addToken(tokens, alias));
+  });
+
+  return [...tokens];
+}
+
 async function saveProcessingSettingsPatch(patch) {
   const response = await fetch(`${BASE}/settings`);
   const data = response.ok ? await response.json() : { settings: {} };
@@ -334,6 +392,15 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "oom" } }));
       setOomGpuCount(c => c + 1);
       setLog(prev => [...prev.slice(-800), { raw: `GPU OOM fallback → CPU retry: ${fname}`, kind: "warn" }]);
+      return;
+    }
+
+    if (raw.startsWith("__exclude_match__:")) {
+      setLog(prev => [...prev.slice(-800), { raw: `Exclude matches: ${raw.slice(18)}`, kind: "info" }]);
+      return;
+    }
+    if (raw.startsWith("__skip_filter__:")) {
+      setLog(prev => [...prev.slice(-800), { raw: `Remove matches: ${raw.slice(16)}`, kind: "info" }]);
       return;
     }
 
@@ -835,6 +902,7 @@ export default function Pipeline({
   setOutputDir,
   excludeTags,
   removedImages,
+  thumbs = [],
   recentInputDirs = [],
   recentOutputDirs = [],
   rememberInputDir,
@@ -958,8 +1026,10 @@ export default function Pipeline({
   }, [done, onPipelineDone, canvasSize, thumbnail]);
 
   const handleStart = useCallback(() => {
-    const skipList     = removedImages ? [...removedImages] : [];
-    const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
+    const removedIds = removedImages ? [...removedImages] : [];
+    const skipList = expandedImageTokens(removedIds, thumbs, inputDir);
+    const activeExcludeIds = excludeTags.filter(n => !removedImages?.has(n));
+    const activeExclude = expandedImageTokens(activeExcludeIds, thumbs, inputDir);
     const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
     start({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
@@ -970,7 +1040,7 @@ export default function Pipeline({
     rememberInputDir?.(inputDir);
     rememberOutputDir?.(outputDir);
     setShowResume(false);
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, rembgModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, thumbs, rembgModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleResume = useCallback(() => {
     if (!resumeSession?.src_root) return;
@@ -978,8 +1048,10 @@ export default function Pipeline({
     const resumeOutputDir = resumeSession.output_dir ?? outputDir;
     setInputDir(resumeInputDir);
     setOutputDir(resumeOutputDir);
-    const skipList = removedImages ? [...removedImages] : [];
-    const activeExclude = excludeTags.filter(n => !removedImages?.has(n));
+    const removedIds = removedImages ? [...removedImages] : [];
+    const skipList = expandedImageTokens(removedIds, thumbs, resumeInputDir);
+    const activeExcludeIds = excludeTags.filter(n => !removedImages?.has(n));
+    const activeExclude = expandedImageTokens(activeExcludeIds, thumbs, resumeInputDir);
     const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
     start({
       folderMode, doUpscale, scale, doRembg,
@@ -991,7 +1063,7 @@ export default function Pipeline({
     rememberInputDir?.(resumeInputDir);
     rememberOutputDir?.(resumeOutputDir);
     setShowResume(false);
-  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
+  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, thumbs, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleStartFresh = useCallback(async () => {
     try { await fetch(`${BASE}/session`, { method: "DELETE" }); } catch { void 0; }

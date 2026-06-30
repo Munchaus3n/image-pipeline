@@ -245,19 +245,35 @@ def _normalize_image_token(value: str) -> str:
     return token.lower()
 
 
-def _relative_image_id(src: Path, root: Path, fallback_root: Path | None = None) -> str:
+def _relative_token_from_root(src: Path, root: Path | None) -> str:
+    if root is None:
+        return ""
     try:
-        rel = src.relative_to(root)
+        return _normalize_image_token(src.relative_to(root).as_posix())
     except ValueError:
-        rel = None
-    if rel is None and fallback_root is not None:
-        try:
-            rel = src.relative_to(fallback_root)
-        except ValueError:
-            rel = None
-    if rel is None:
-        rel = Path(src.name)
-    return _normalize_image_token(rel.as_posix())
+        pass
+
+    src_norm = _normalize_image_token(str(src))
+    root_norm = _normalize_image_token(str(root))
+    if root_norm and src_norm.startswith(f"{root_norm}/"):
+        return src_norm[len(root_norm) + 1:]
+
+    try:
+        src_resolved = _normalize_image_token(str(src.resolve(strict=False)))
+        root_resolved = _normalize_image_token(str(root.resolve(strict=False)))
+        if root_resolved and src_resolved.startswith(f"{root_resolved}/"):
+            return src_resolved[len(root_resolved) + 1:]
+    except Exception:
+        pass
+
+    return ""
+
+
+def _relative_image_id(src: Path, root: Path, fallback_root: Path | None = None) -> str:
+    rel = _relative_token_from_root(src, root)
+    if not rel and fallback_root is not None:
+        rel = _relative_token_from_root(src, fallback_root)
+    return rel or _normalize_image_token(Path(src.name).as_posix())
 
 
 def _token_without_ext(token: str) -> str:
@@ -273,6 +289,16 @@ def _resolve_paths_from_tokens(
     tokens: set[str] | list[str] | tuple[str, ...],
     fallback_root: Path | None = None,
 ) -> set[Path]:
+    matched, _ = _match_paths_from_tokens(images, root, tokens, fallback_root=fallback_root)
+    return matched
+
+
+def _match_paths_from_tokens(
+    images: list[Path],
+    root: Path,
+    tokens: set[str] | list[str] | tuple[str, ...],
+    fallback_root: Path | None = None,
+) -> tuple[set[Path], list[str]]:
     by_rel: dict[str, set[Path]] = defaultdict(set)
     by_rel_no_ext: dict[str, set[Path]] = defaultdict(set)
     by_abs: dict[str, set[Path]] = defaultdict(set)
@@ -286,20 +312,31 @@ def _resolve_paths_from_tokens(
             by_rel[rel_id].add(image)
             by_rel_no_ext[_token_without_ext(rel_id)].add(image)
 
-        abs_id = _normalize_image_token(str(image))
-        if abs_id:
+        abs_tokens = {_normalize_image_token(str(image))}
+        try:
+            abs_tokens.add(_normalize_image_token(str(image.resolve(strict=False))))
+        except Exception:
+            pass
+        for abs_id in abs_tokens:
+            if not abs_id:
+                continue
             by_abs[abs_id].add(image)
             by_abs_no_ext[_token_without_ext(abs_id)].add(image)
 
         by_name[image.name.lower()].add(image)
         by_stem[image.stem.lower()].add(image)
 
-    matched: set[Path] = set()
+    normalized_tokens: list[str] = []
+    seen_tokens: set[str] = set()
     for raw in tokens:
         token = _normalize_image_token(raw)
-        if not token:
-            continue
+        if token and token not in seen_tokens:
+            normalized_tokens.append(token)
+            seen_tokens.add(token)
 
+    matched: set[Path] = set()
+    unmatched: list[str] = []
+    for token in normalized_tokens:
         token_no_ext = _token_without_ext(token)
         exact_matches = set()
         exact_matches.update(by_rel.get(token, set()))
@@ -312,10 +349,29 @@ def _resolve_paths_from_tokens(
             continue
 
         # Legacy fallback: broad basename/stem matching when no exact path ID matches.
-        matched.update(by_name.get(token, set()))
-        matched.update(by_stem.get(token, set()))
+        fallback_matches = set()
+        fallback_matches.update(by_name.get(token, set()))
+        fallback_matches.update(by_stem.get(token, set()))
+        if fallback_matches:
+            matched.update(fallback_matches)
+        else:
+            unmatched.append(token)
 
-    return matched
+    return matched, unmatched
+
+
+def _compact_token_examples(tokens: list[str], limit: int = 5) -> str:
+    examples = tokens[:limit]
+    if len(tokens) > limit:
+        examples.append(f"+{len(tokens) - limit} more")
+    return ", ".join(examples)
+
+
+def _log_token_match(label: str, machine_token: str, tokens: set[str], matched: set[Path], unmatched: list[str]) -> None:
+    info(f"{label}: {len(tokens)} token(s) sent; {len(matched)} image(s) matched.")
+    print(f"{machine_token}:{len(matched)}/{len(tokens)}", flush=True)
+    if unmatched:
+        warn(f"{label}: {len(unmatched)} unmatched token(s): {_compact_token_examples(unmatched)}")
 
 
 def _open_image_checked(path: Path) -> Image.Image:
@@ -957,15 +1013,19 @@ def main():
 
     exclude_tokens = {_normalize_image_token(s) for s in args.exclude_rembg.split(",") if s.strip()}
     skip_tokens = {_normalize_image_token(s) for s in args.skip_files.split(",") if s.strip()}
-    if skip_tokens:
+    skipped_paths, unmatched_skip_tokens = _match_paths_from_tokens(images, input_dir, skip_tokens)
+    _log_token_match("Remove from session", "__skip_filter__", skip_tokens, skipped_paths, unmatched_skip_tokens)
+    if skipped_paths:
         before = len(images)
-        skipped_paths = _resolve_paths_from_tokens(images, input_dir, skip_tokens)
         images = [p for p in images if p not in skipped_paths]
-        info(f"Skipped {before - len(images)} file(s) (removed from session)")
+        info(f"Skipped {before - len(images)} file(s) (removed from session).")
 
     if not images:
         err(f"No images found in: {input_dir}")
         sys.exit(1)
+
+    excluded_paths, unmatched_exclude_tokens = _match_paths_from_tokens(images, input_dir, exclude_tokens)
+    _log_token_match("Exclude from BG", "__exclude_match__", exclude_tokens, excluded_paths, unmatched_exclude_tokens)
 
     duplicate_plan = build_duplicate_reuse_plan(
         images,
@@ -1007,7 +1067,9 @@ def main():
     if no_rembg_set:
         table.add_row("No-rembg", f"{len(no_rembg_set)} (upscale + crop only)")
     if exclude_tokens:
-        table.add_row("Skip list", f"{len(exclude_tokens)} file(s)")
+        table.add_row("Exclude from BG", f"{len(excluded_paths)} image(s)")
+    if skip_tokens:
+        table.add_row("Removed", f"{len(skipped_paths)} skipped")
     table.add_row("Upscale",   f"NCNN {ncnn_model} ×{ncnn_scale}" if do_upscale else "skip")
     if do_upscale and args.upscale_max_px > 0:
         table.add_row("Upscale skip", f"images already ≥ {args.upscale_max_px}px")
