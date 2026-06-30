@@ -1070,6 +1070,18 @@ input[type=number] { color-scheme: dark; }
   font-size: 9px !important;
 }
 
+.input-toolbar .input-browse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--dim) 82%, var(--text)) !important;
+}
+
+.input-toolbar .input-browse-button svg {
+  width: 14px;
+  height: 14px;
+}
+
 .input-toolbar .input-load-button {
   min-width: 58px;
   border-radius: 0 9px 9px 0 !important;

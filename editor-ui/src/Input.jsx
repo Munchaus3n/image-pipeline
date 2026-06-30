@@ -341,11 +341,23 @@ export default function Input({
               {recentInputDirs.map(path => <option key={path} value={path}>{path}</option>)}
             </select>
           )}
-          <button className="inp-btn input-browse-button" onClick={browse} disabled={browseLoading} style={{
-            background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
-            borderRadius: 4, padding: "5px 10px", fontSize: 13,
-            cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
-          }}>{browseLoading ? "…" : "…"}</button>
+          <button
+            className="inp-btn input-browse-button"
+            onClick={browse}
+            disabled={browseLoading}
+            title="Browse input folder"
+            aria-label="Browse input folder"
+            style={{
+              background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
+              borderRadius: 4, padding: "5px 10px", fontSize: 13,
+              cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2.5 5.5h11v6.25a1.25 1.25 0 0 1-1.25 1.25h-8.5A1.25 1.25 0 0 1 2.5 11.75V5.5Z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+              <path d="M2.5 5.5V4.25A1.25 1.25 0 0 1 3.75 3h3.1l1.25 1.25h4.15A1.25 1.25 0 0 1 13.5 5.5" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+            </svg>
+          </button>
           <button
             className="inp-btn input-load-button input-reload-button"
             onClick={() => loadImages({ resetSession: loadedDirRef.current !== inputDir.trim() })}

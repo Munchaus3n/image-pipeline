@@ -135,10 +135,17 @@ function FolderInput({ value, onChange, placeholder, recent = [], onRemember }) 
   );
 }
 
-function ProcessPanelSection({ title, children }) {
+function ProcessPanelSection({ title, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
     <section className="pipeline-panel-section">
-      <div className="pipeline-panel-toggle">
+      <button
+        type="button"
+        className="pipeline-panel-toggle"
+        onClick={() => setOpen(value => !value)}
+        aria-expanded={open}
+      >
         <span className="pipeline-panel-title">{title}</span>
         <svg
           width="10"
@@ -146,14 +153,17 @@ function ProcessPanelSection({ title, children }) {
           viewBox="0 0 10 10"
           fill="none"
           className="pipeline-panel-chevron"
+          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
           aria-hidden="true"
         >
           <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
-      </div>
-      <div className="pipeline-panel-content">
-        {children}
-      </div>
+      </button>
+      {open && (
+        <div className="pipeline-panel-content">
+          {children}
+        </div>
+      )}
     </section>
   );
 }

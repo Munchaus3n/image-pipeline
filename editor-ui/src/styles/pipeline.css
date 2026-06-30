@@ -1239,9 +1239,18 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  border: 0;
+  border-radius: 0;
   padding: 0 10px 0 11px;
+  font-family: inherit;
   color: var(--dim);
   background: transparent;
+  cursor: pointer;
+  transition: background-color 0.18s ease;
+}
+
+.pipeline-screen .pipeline-panel-toggle:hover {
+  background: color-mix(in srgb, var(--surface-elevated) 28%, transparent);
 }
 
 .pipeline-screen .pipeline-panel-title {
@@ -1256,7 +1265,7 @@
 .pipeline-screen .pipeline-panel-chevron {
   flex-shrink: 0;
   color: var(--dim);
-  transform: rotate(180deg);
+  transition: transform 0.18s ease;
 }
 
 .pipeline-screen .pipeline-panel-content {
