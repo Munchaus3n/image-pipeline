@@ -1012,6 +1012,7 @@ async def run_pipeline(cfg: PipelineConfig):
     if _pipeline_running:
         raise HTTPException(status_code=409, detail="Pipeline already running")
 
+    selection_manifest_path: Path | None = None
     cmd = [
         sys.executable, str(BASE_DIR / "pipeline.py"),
         "--non-interactive",
@@ -1023,10 +1024,19 @@ async def run_pipeline(cfg: PipelineConfig):
     if cfg.input_dir.strip():   cmd += ["--input-dir",  cfg.input_dir.strip()]
     if cfg.output_dir.strip():
         cmd += ["--output-dir", cfg.output_dir.strip()]
-    if cfg.exclude_rembg:
-        cmd += ["--exclude-rembg", ",".join(f.strip() for f in cfg.exclude_rembg if f.strip())]
-    if cfg.skip_files:
-        cmd += ["--skip-files", ",".join(f.strip() for f in cfg.skip_files if f.strip())]
+    selection_payload = {
+        "exclude_rembg": [f.strip() for f in cfg.exclude_rembg if f.strip()],
+        "skip_files": [f.strip() for f in cfg.skip_files if f.strip()],
+    }
+    if selection_payload["exclude_rembg"] or selection_payload["skip_files"]:
+        manifest_dir = BASE_DIR / ".cache" / "selection-manifests"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        selection_manifest_path = manifest_dir / f"selection-{uuid.uuid4().hex}.json"
+        selection_manifest_path.write_text(
+            json.dumps(selection_payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        cmd += ["--selection-manifest", str(selection_manifest_path)]
     if cfg.upscale_max_px > 0:
         cmd += ["--upscale-max-px", str(cfg.upscale_max_px)]
     if not cfg.reuse_exact_duplicates:
@@ -1163,6 +1173,11 @@ async def run_pipeline(cfg: PipelineConfig):
                     pass
             _pipeline_running = False
             _pipeline_proc = None
+            if selection_manifest_path:
+                try:
+                    selection_manifest_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     return EventSourceResponse(event_stream())
 

@@ -13,6 +13,7 @@ if sys.stderr.encoding.lower() != "utf-8":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 import hashlib
+import json
 import shutil
 import subprocess
 from collections import defaultdict
@@ -136,10 +137,9 @@ def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
-def _duplicate_policy_key(src: Path, do_rembg: bool, no_rembg_set: set[Path], excluded_paths: set[Path]) -> tuple[bool, bool]:
-    if not do_rembg:
-        return (False, False)
+def _duplicate_policy_key(src: Path, do_rembg: bool, no_rembg_set: set[Path], excluded_paths: set[Path]) -> tuple[bool, bool, bool]:
     return (
+        do_rembg,
         src in no_rembg_set,
         src in excluded_paths,
     )
@@ -245,28 +245,64 @@ def _normalize_image_token(value: str) -> str:
     return token.lower()
 
 
-def _relative_token_from_root(src: Path, root: Path | None) -> str:
-    if root is None:
-        return ""
+def _split_selection_arg(value: str) -> list[str]:
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
+
+def _load_selection_manifest(path_value: str) -> dict[str, list[str]]:
+    result = {"exclude_rembg": [], "skip_files": []}
+    if not str(path_value or "").strip():
+        return result
+
+    manifest_path = Path(path_value)
     try:
-        return _normalize_image_token(src.relative_to(root).as_posix())
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        warn(f"Could not read selection manifest {manifest_path}: {e}")
+        return result
+
+    if not isinstance(data, dict):
+        warn(f"Selection manifest {manifest_path} is not an object; ignoring.")
+        return result
+
+    for key in result:
+        values = data.get(key, [])
+        if not isinstance(values, list):
+            warn(f"Selection manifest field {key} is not a list; ignoring.")
+            continue
+        result[key] = [str(item).strip() for item in values if str(item).strip()]
+
+    return result
+
+
+def _relative_path_from_root(src: Path, root: Path | None) -> Path | None:
+    if root is None:
+        return None
+
+    try:
+        return src.relative_to(root)
     except ValueError:
         pass
 
-    src_norm = _normalize_image_token(str(src))
-    root_norm = _normalize_image_token(str(root))
-    if root_norm and src_norm.startswith(f"{root_norm}/"):
-        return src_norm[len(root_norm) + 1:]
+    src_text = str(src).replace("\\", "/")
+    root_text = str(root).replace("\\", "/").rstrip("/")
+    if root_text and src_text.lower().startswith(f"{root_text.lower()}/"):
+        return Path(src_text[len(root_text) + 1:])
 
     try:
-        src_resolved = _normalize_image_token(str(src.resolve(strict=False)))
-        root_resolved = _normalize_image_token(str(root.resolve(strict=False)))
-        if root_resolved and src_resolved.startswith(f"{root_resolved}/"):
-            return src_resolved[len(root_resolved) + 1:]
+        src_resolved = str(src.resolve(strict=False)).replace("\\", "/")
+        root_resolved = str(root.resolve(strict=False)).replace("\\", "/").rstrip("/")
+        if root_resolved and src_resolved.lower().startswith(f"{root_resolved.lower()}/"):
+            return Path(src_resolved[len(root_resolved) + 1:])
     except Exception:
         pass
 
-    return ""
+    return None
+
+
+def _relative_token_from_root(src: Path, root: Path | None) -> str:
+    rel = _relative_path_from_root(src, root)
+    return _normalize_image_token(rel.as_posix()) if rel is not None else ""
 
 
 def _relative_image_id(src: Path, root: Path, fallback_root: Path | None = None) -> str:
@@ -808,10 +844,11 @@ def batch_remove_bg(
     outputs, to_run = [], []
 
     for src in upscaled:
-        try:
-            rel = src.relative_to(upscale_root)
-        except ValueError:
-            rel = Path(src.name)
+        rel = (
+            _relative_path_from_root(src, upscale_root)
+            or _relative_path_from_root(src, src_root)
+            or Path(src.name)
+        )
         dst = (dst_root / rel).with_suffix(".png")
         outputs.append(dst)
 
@@ -914,6 +951,7 @@ def main():
     parser.add_argument("--force-cpu",        action="store_true")
     parser.add_argument("--exclude-rembg",    default="")
     parser.add_argument("--skip-files",       default="")
+    parser.add_argument("--selection-manifest", default="")
     parser.add_argument("--rembg-fallback",   default="auto")
     parser.add_argument("--wipe-input-after-run", action="store_true")
     parser.add_argument("--upscale-max-px",   type=int, default=0)
@@ -1011,8 +1049,11 @@ def main():
             no_rembg_set = nested_no_rembg
             folder_mode  = "clean"
 
-    exclude_tokens = {_normalize_image_token(s) for s in args.exclude_rembg.split(",") if s.strip()}
-    skip_tokens = {_normalize_image_token(s) for s in args.skip_files.split(",") if s.strip()}
+    manifest_selection = _load_selection_manifest(args.selection_manifest)
+    exclude_values = _split_selection_arg(args.exclude_rembg) + manifest_selection["exclude_rembg"]
+    skip_values = _split_selection_arg(args.skip_files) + manifest_selection["skip_files"]
+    exclude_tokens = {_normalize_image_token(s) for s in exclude_values if str(s).strip()}
+    skip_tokens = {_normalize_image_token(s) for s in skip_values if str(s).strip()}
     skipped_paths, unmatched_skip_tokens = _match_paths_from_tokens(images, input_dir, skip_tokens)
     _log_token_match("Remove from session", "__skip_filter__", skip_tokens, skipped_paths, unmatched_skip_tokens)
     if skipped_paths:
@@ -1026,6 +1067,11 @@ def main():
 
     excluded_paths, unmatched_exclude_tokens = _match_paths_from_tokens(images, input_dir, exclude_tokens)
     _log_token_match("Exclude from BG", "__exclude_match__", exclude_tokens, excluded_paths, unmatched_exclude_tokens)
+    normal_count = len(images) - len(excluded_paths)
+    info(
+        f"Selection: {len(skipped_paths)} removed, "
+        f"{len(excluded_paths)} excluded from BG, {normal_count} normal."
+    )
 
     duplicate_plan = build_duplicate_reuse_plan(
         images,
@@ -1094,11 +1140,11 @@ def main():
     if not args.no_reuse_exact_duplicates:
         if duplicate_plan.duplicate_count:
             info(
-                f"Detected {duplicate_plan.duplicate_count} exact duplicate(s). "
+                f"Exact duplicates: {duplicate_plan.duplicate_count} reused across matching processing groups. "
                 f"Processing {duplicate_plan.unique_count} unique image(s) out of {len(images)}."
             )
         else:
-            info(f"No exact duplicates detected. Processing {len(images)} image(s).")
+            info(f"Exact duplicates: 0 reused across matching processing groups. Processing {len(images)} image(s).")
         if duplicate_plan.hash_failed:
             warn(f"Hashing failed for {len(duplicate_plan.hash_failed)} image(s); processing those normally.")
 
