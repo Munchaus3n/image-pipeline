@@ -622,7 +622,7 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale,
   );
 }
 
-function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, skipCount, canvasSize, thumbnail, inputDir }) {
+function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, skipCount, canvasSize, inputDir }) {
   const activeStages = [
     doUpscale ? "Upscale" : null,
     doRembg ? "Remove BG" : null,
@@ -649,7 +649,6 @@ function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, sk
           <span className="pipeline-ready-meta-item">{skipCount} skipped</span>
         )}
         {canvasSize && <span className="pipeline-ready-meta-item">{canvasSize}px canvas</span>}
-        <span className="pipeline-ready-meta-item">{thumbnail ? "thumbs on" : "thumbs off"}</span>
       </div>
 
       <div className={`pipeline-ready-source ${inputDir ? "is-ready" : "is-missing"}`}>
@@ -1170,10 +1169,6 @@ export default function Pipeline({
                 />
               </div>
             </Row>
-
-            <Row label="Thumbnail (400px)">
-              <PillToggle value={thumbnail} onChange={setThumbnail} />
-            </Row>
           </ProcessPanelSection>
 
           </div>
@@ -1218,7 +1213,6 @@ export default function Pipeline({
                   activeExcludeCount={activeExcludeCount}
                   skipCount={skipCount}
                   canvasSize={canvasSize}
-                  thumbnail={thumbnail}
                   inputDir={inputDir}
                   />
                 )}

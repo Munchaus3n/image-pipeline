@@ -26,6 +26,7 @@ const BASE = "/api";
 const SINGLE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
 const SUPPORTED_SINGLE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const SUPPORTED_SINGLE_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);
+const DEFAULT_THUMBNAIL_SIZE = 400;
 
 // Opens a folder in the native OS file explorer via the API server
 const openFolder = (path = "") =>
@@ -141,9 +142,50 @@ function isSupportedSingleImageFile(file) {
   return SUPPORTED_SINGLE_IMAGE_EXTENSIONS.has(extension);
 }
 
-function safeDownloadName(name = "edited-image") {
+function safeDownloadBaseName(name = "edited-image") {
   const baseName = name.replace(/\.[^.]+$/, "").trim() || "edited-image";
-  return `${baseName.replace(/[\\/:*?"<>|]+/g, "-")}-edited.png`;
+  return baseName.replace(/[\\/:*?"<>|]+/g, "-");
+}
+
+function finalDownloadName(name = "edited-image") {
+  return `${safeDownloadBaseName(name)}.png`;
+}
+
+function thumbnailDownloadName(name = "edited-image") {
+  return `${safeDownloadBaseName(name)}_thumb.png`;
+}
+
+function triggerPngDownload(blob, filename) {
+  const blobUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve) => {
+    canvas.toBlob(resolve, "image/png");
+  });
+}
+
+async function saveOutputSettingsPatch(patch) {
+  const response = await fetch(`${BASE}/settings`);
+  const data = response.ok ? await response.json() : { settings: {} };
+  const current = data?.settings ?? {};
+  await fetch(`${BASE}/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      settings: {
+        ...current,
+        output: { ...(current.output ?? {}), ...patch },
+      },
+    }),
+  });
 }
 
 // Renders a template reference image with a proper error fallback
@@ -260,6 +302,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const [guideOpacity, setGuideOpacity] = useState(1.0);  // loaded from settings
   const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
   const [canvasSizeState, setCanvasSizeState] = useState(1440);
+  const [generateThumbnail, setGenerateThumbnail] = useState(Boolean(thumbnailProp));
+  const [thumbnailSize, setThumbnailSize] = useState(DEFAULT_THUMBNAIL_SIZE);
   const [sourceStage, setSourceStage] = useState("");
   const [sessionOutputDir, setSessionOutputDir] = useState("");
   const [sourceMode, setSourceMode] = useState("batch");
@@ -523,6 +567,11 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         if (typeof opacity === "number") setGuideOpacity(Math.max(0, Math.min(1, opacity)));
         const bg = settings?.appearance?.canvas_bg_color;
         if (typeof bg === "string" && bg) setCanvasBgColor(bg);
+        if (typeof settings?.output?.thumbnail === "boolean") setGenerateThumbnail(settings.output.thumbnail);
+        const savedThumbnailSize = Number(settings?.output?.thumbnail_size);
+        if (Number.isFinite(savedThumbnailSize) && savedThumbnailSize > 0) {
+          setThumbnailSize(Math.round(savedThumbnailSize));
+        }
         setBootstrapReady(true);
       } catch (e) {
         setStatus(`API error: ${e.message}\nIs api.py running?`);
@@ -892,6 +941,13 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     });
   }, [effectiveOutputDir, srcFolder, template, sourceStage]);
 
+  const toggleGenerateThumbnail = useCallback((enabled) => {
+    setGenerateThumbnail(enabled);
+    saveOutputSettingsPatch({ thumbnail: enabled }).catch(() => {
+      setStatus("thumbnail preference changed locally, but settings save failed");
+    });
+  }, []);
+
   const renderExportCanvas = useCallback(() => {
     const exportSize = canvasSizeProp ?? canvasSizeState;
     const exportCanvas = document.createElement("canvas");
@@ -918,6 +974,18 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     return exportCanvas;
   }, [canvasBgColor, canvasSizeProp, canvasSizeState, items]);
 
+  const renderThumbnailCanvas = useCallback((exportCanvas) => {
+    const size = Math.max(1, Math.round(thumbnailSize || DEFAULT_THUMBNAIL_SIZE));
+    const thumbnailCanvas = document.createElement("canvas");
+    thumbnailCanvas.width = size;
+    thumbnailCanvas.height = size;
+    const ctx = thumbnailCanvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(exportCanvas, 0, 0, size, size);
+    return thumbnailCanvas;
+  }, [thumbnailSize]);
+
   const doDownload = useCallback(async (fromSave = false) => {
     if (!items.length) {
       setStatus("No image loaded. Drop or browse a single image first.");
@@ -925,10 +993,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     }
 
     const exportCanvas = renderExportCanvas();
-    const blob = await new Promise((resolve) => {
-      exportCanvas.toBlob(resolve, "image/png");
-    });
-    if (!blob) {
+    const finalBlob = await canvasToPngBlob(exportCanvas);
+    if (!finalBlob) {
       setStatus("download failed: browser could not create PNG");
       return false;
     }
@@ -936,21 +1002,29 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     const currentName = isSingleImageMode
       ? singleImageName
       : imageQueueLabel(queue[queueIdx] || items[0]?.label || "edited-image", srcFolder);
-    const blobUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = blobUrl;
-    link.download = safeDownloadName(currentName);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+
+    triggerPngDownload(finalBlob, finalDownloadName(currentName));
+
+    let thumbDownloaded = false;
+    if (generateThumbnail) {
+      const thumbnailCanvas = renderThumbnailCanvas(exportCanvas);
+      const thumbnailBlob = await canvasToPngBlob(thumbnailCanvas);
+      if (!thumbnailBlob) {
+        setStatus("downloaded PNG, but thumbnail export failed");
+        return false;
+      }
+      triggerPngDownload(thumbnailBlob, thumbnailDownloadName(currentName));
+      thumbDownloaded = true;
+    }
+
     if (fromSave) setSaved(true);
+    const downloadLabel = thumbDownloaded ? "downloaded PNG + thumbnail." : "downloaded PNG.";
     setStatus(fromSave && isSingleImageMode
-      ? "downloaded PNG. Single image mode does not write to batch output."
-      : "downloaded PNG.");
+      ? `${downloadLabel} Single image mode does not write to batch output.`
+      : downloadLabel);
     if (fromSave) window.setTimeout(() => setSaved(false), 1600);
     return true;
-  }, [isSingleImageMode, items, queue, queueIdx, renderExportCanvas, singleImageName, srcFolder]);
+  }, [generateThumbnail, isSingleImageMode, items, queue, queueIdx, renderExportCanvas, renderThumbnailCanvas, singleImageName, srcFolder]);
 
   const doSave = useCallback(async () => {
     if (!items.length) return;
@@ -969,12 +1043,12 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       }));
       const result = await saveComposition(
         payload, srcFolder, queueIdx, comboMode,
-        thumbnailProp,
+        generateThumbnail,
         canvasSizeProp ?? canvasSizeState,
         activeOutputDir,
       );
       setSaved(true);
-      setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}`);
+      setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}${generateThumbnail && result.thumb ? " + thumbnail" : ""}`);
       setTimeout(() => setSaved(false), 1600);
       await saveSessionCheckpoint(queueIdx + 1);
       advance();
@@ -982,7 +1056,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       prefetchRef.current = null;
       setStatus(`save failed: ${e.message}`);
     }
-  }, [items, isSingleImageMode, doDownload, queue, queueIdx, srcFolder, comboMode, thumbnailProp, canvasSizeProp, canvasSizeState, advance, prefetchNextImage, activeOutputDir, saveSessionCheckpoint]);
+  }, [items, isSingleImageMode, doDownload, queue, queueIdx, srcFolder, comboMode, generateThumbnail, canvasSizeProp, canvasSizeState, advance, prefetchNextImage, activeOutputDir, saveSessionCheckpoint]);
 
   const doSkip = useCallback(async () => {
     if (isSingleImageMode) return;
@@ -1097,7 +1171,9 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const currentFileLabel = isSingleImageMode
     ? singleImageName || "Single image"
     : queue[queueIdx] ? imageQueueLabel(queue[queueIdx], srcFolder) : (srcLabel || "No image loaded");
-  const saveButtonLabel = saved ? "Saved!" : isSingleImageMode ? "Save PNG" : "Save & Next";
+  const saveButtonLabel = saved
+    ? isSingleImageMode ? "Downloaded!" : "Saved!"
+    : isSingleImageMode ? (generateThumbnail ? "Download Package" : "Download PNG") : "Save & Next";
 
   return (
     <>
@@ -1134,9 +1210,11 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
             </button>
           )}
           <span className="editor-queue-chip">{queueChip}</span>
-          <button type="button" className="ed-btn editor-action-secondary editor-action-download" onClick={() => doDownload()} disabled={!items.length}>
-            <span>Download</span>
-          </button>
+          {!isSingleImageMode && (
+            <button type="button" className="ed-btn editor-action-secondary editor-action-download" onClick={() => doDownload()} disabled={!items.length}>
+              <span>{generateThumbnail ? "Download Package" : "Download"}</span>
+            </button>
+          )}
           <button type="button" className={saved ? "ed-btn editor-action-primary editor-action-saved" : "ed-btn editor-action-primary"} onClick={doSave}>
             <span>{saveButtonLabel}</span>
             <kbd>↵</kbd>
@@ -1416,9 +1494,20 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
           {/* ── Output ── */}
           <CollSection label="Output" accent="var(--green)" defaultOpen={false}>
+          <label className="editor-output-toggle">
+            <span className="editor-output-toggle-copy">
+              <strong>Generate thumbnail</strong>
+              <span>Save a {thumbnailSize}px preview copy with the final image.</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={generateThumbnail}
+              onChange={event => toggleGenerateThumbnail(event.target.checked)}
+            />
+          </label>
           {isSingleImageMode ? (
             <div className="editor-single-output-note">
-              Single image export uses Download and does not write to a batch output folder.
+              Single image export downloads {generateThumbnail ? "the final PNG and thumbnail PNG" : "the final PNG only"} without writing to a batch output folder.
             </div>
           ) : (
             <>

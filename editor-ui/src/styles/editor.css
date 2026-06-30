@@ -426,6 +426,46 @@
   padding: 0 10px;
 }
 
+.editor-output-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-elevated) 32%, transparent);
+  cursor: pointer;
+  padding: 8px;
+}
+
+.editor-output-toggle-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.editor-output-toggle-copy strong {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.editor-output-toggle-copy span {
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.editor-output-toggle input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
 .editor-single-output-note {
   border: 1px solid var(--border);
   border-radius: 8px;

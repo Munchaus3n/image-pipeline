@@ -507,3 +507,22 @@
 - The same probe loaded `probe-single.png` through the single-image file input, confirmed queue `single`, filename display, hidden Skip, visible Download, successful PNG download, and `Save PNG` made zero `/api/save` calls in single image mode.
 - The probe restored the previous session state after completion and stopped only the temporary Vite/Chrome processes it started.
 - Backend/API tests were intentionally skipped because no backend/API behavior changed; the local API was used only for the browser workflow probe.
+
+## 2026-06-30 Editor Thumbnail Export Control
+
+### Code Changes
+- Moved thumbnail export ownership into the Editor Output accordion with a persisted `Generate thumbnail` control backed by the existing `settings.output.thumbnail` flag.
+- Removed the Process-side thumbnail toggle and `thumbs on/off` ready-card summary so Process no longer feels like the thumbnail export owner.
+- Updated batch Save & Next to pass the Editor Output thumbnail setting to the existing `/save` endpoint; queue advance and Skip behavior are unchanged.
+- Updated direct single-image mode so the primary action is `Download PNG` when thumbnails are off and `Download Package` when thumbnails are on.
+- Direct single-image download now writes `source-name.png` only when thumbnails are off, and writes `source-name.png` plus a real `{thumbnail_size}px` `source-name_thumb.png` when thumbnails are on.
+- Kept `api.py`, backend processing logic, dependencies, Electron scope, and output folder conventions unchanged.
+
+### Validation
+- `cd editor-ui && npm.cmd run build` passed.
+- `cd editor-ui && npm.cmd run lint` passed.
+- Existing API at `http://127.0.0.1:7421/settings` returned 200; Vite at `http://127.0.0.1:5173/` was not reachable, so the browser probe started a temporary Vite process and stopped it afterward.
+- Headless Chrome probe confirmed Editor Output shows `Generate thumbnail`, batch thumbnail OFF writes final only, batch thumbnail ON writes final plus a 400x400 thumbnail, and Process no longer shows `Thumbnail (400px)` or `thumbs on/off`.
+- The same probe confirmed direct single-image OFF downloads only `probe-single.png` at 1440x1440, direct single-image ON downloads `probe-single.png` at 1440x1440 plus `probe-single_thumb.png` at 400x400, and the queue remains `single`.
+- The probe restored the previous settings/session state after completion.
+- Backend/API tests were intentionally skipped because `api.py` was unchanged; the existing API was used only for the browser workflow probe.
