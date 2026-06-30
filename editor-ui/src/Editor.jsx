@@ -298,6 +298,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const [scaleLocked,setScaleLocked]= useState(false);
   const [comboMode,  setComboMode]  = useState(false);
   const [status,     setStatus]     = useState("loading…");
+  const [statusHistory, setStatusHistory] = useState([]);
+  const [sidebarResetKey, setSidebarResetKey] = useState(0);
   const [saved,      setSaved]      = useState(false);
   const [guideOpacity, setGuideOpacity] = useState(1.0);  // loaded from settings
   const [canvasBgColor, setCanvasBgColor] = useState("#ffffff");
@@ -407,13 +409,31 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   // ── BUG-06 FIX: convert plain functions to useCallback for stable references ──
 
+  const resetEditorToDefaultState = useCallback(() => {
+    revokeSingleImageUrl();
+    prefetchRef.current = null;
+    undoRef.current = null;
+    dragRef.current = null;
+    setSourceMode("batch");
+    setSingleImageName("");
+    setSrcLabel(srcFolder || "No image loaded");
+    setQueue([]);
+    setQueueIdx(0);
+    setComboMode(false);
+    setItems([]);
+    setSelId(null);
+    setActiveSnapZone(null);
+    setSaved(false);
+    setSourceStage(srcFolder ? sourceStage : "none");
+    setSidebarResetKey(key => key + 1);
+  }, [revokeSingleImageUrl, sourceStage, srcFolder]);
+
   // allDone has no state/callback deps — clearSession is a stable import
   const allDone = useCallback(async () => {
-    setItems([]); setSelId(null);
-    setActiveSnapZone(null);
+    resetEditorToDefaultState();
     setStatus(`all images processed.\noutput → ${activeOutputDir}/Editor/`);
     await clearSession().catch(() => {});
-  }, [activeOutputDir]);
+  }, [activeOutputDir, resetEditorToDefaultState]);
 
   // prefetchNextImage: reads template/guides to pre-size the placement
   const prefetchNextImage = useCallback((q, nextIdx) => {
@@ -659,6 +679,19 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   useEffect(() => {
     loadEditorSource().catch(() => {});
   }, [loadEditorSource]);
+
+  useEffect(() => {
+    const message = String(status || "").trim();
+    if (!message || message === "loading…") return;
+    setStatusHistory(prev => {
+      if (prev[0]?.message === message) return prev;
+      return [{
+        id: `${Date.now()}-${message}`,
+        message,
+        time: new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
+      }, ...prev].slice(0, 6);
+    });
+  }, [status]);
 
   const loadSingleImageFile = useCallback(async (file) => {
     if (!file) return;
@@ -1022,9 +1055,10 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     setStatus(fromSave && isSingleImageMode
       ? `${downloadLabel} Single image mode does not write to batch output.`
       : downloadLabel);
+    if (fromSave && isSingleImageMode) resetEditorToDefaultState();
     if (fromSave) window.setTimeout(() => setSaved(false), 1600);
     return true;
-  }, [generateThumbnail, isSingleImageMode, items, queue, queueIdx, renderExportCanvas, renderThumbnailCanvas, singleImageName, srcFolder]);
+  }, [generateThumbnail, isSingleImageMode, items, queue, queueIdx, renderExportCanvas, renderThumbnailCanvas, resetEditorToDefaultState, singleImageName, srcFolder]);
 
   const doSave = useCallback(async () => {
     if (!items.length) return;
@@ -1278,7 +1312,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       {/* ── Sidebar ───────────────────────────────────────────────── */}
       <aside className="editor-sidebar">
         {/* Scrollable content */}
-        <div className="editor-sidebar-scroll">
+        <div key={sidebarResetKey} className="editor-sidebar-scroll">
 
           <CollSection label="Single Image" accent="var(--green)" defaultOpen={false}>
             <div
@@ -1307,9 +1341,6 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
                 <span className="editor-single-file-name" title={isSingleImageMode ? singleImageName : ""}>
                   {isSingleImageMode ? singleImageName || "Single image selected" : "No direct image selected"}
                 </span>
-                <button type="button" className="ed-btn editor-single-source-browse" onClick={browseSingleImage}>
-                  {isSingleImageMode ? "Replace" : "Browse"}
-                </button>
               </div>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:4, marginBottom:4 }}>
@@ -1533,14 +1564,18 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           )}
           </CollSection>
 
-          {/* Status */}
-          {status && status !== "loading…" && (
-            <div style={{ marginTop:8, padding:"6px 8px", borderRadius:5, background:C.panel2, border:`1px solid ${C.border}` }}>
-              <div style={{ fontSize:9, color:C.dim, lineHeight:1.8, fontFamily:"JetBrains Mono", whiteSpace:"pre-wrap" }}>
-                {status}
-              </div>
+          <CollSection label="History" accent="var(--accent)" defaultOpen={false}>
+            <div className="editor-history-list">
+              {statusHistory.length ? statusHistory.map((entry, index) => (
+                <div key={entry.id} className={index === 0 ? "editor-history-entry is-current" : "editor-history-entry"}>
+                  <div className="editor-history-meta">{index === 0 ? "Current" : entry.time}</div>
+                  <div className="editor-history-message">{entry.message}</div>
+                </div>
+              )) : (
+                <div className="editor-history-empty">No editor activity yet.</div>
+              )}
             </div>
-          )}
+          </CollSection>
         </div>
       </aside>
       </div>
