@@ -237,11 +237,7 @@ def mirror_save_path(src: Path, src_root: Path, output_base: Path | None = None,
     return base / "Editor" / stage / rel
 
 def mirror_thumbnail_path(save_path: Path, output_base: Path, thumb_size: int) -> Path:
-    try:
-        rel = save_path.relative_to(output_base / "Editor")
-    except ValueError:
-        rel = save_path.name
-    return output_base / "Editor" / "thumbnails" / rel
+    return save_path.parent / "thumbnail" / save_path.name
 
 def mirror_skip_path(src: Path, src_root: Path, output_base: Path | None = None) -> Path:
     return mirror_save_path(src, src_root, output_base=output_base, stage="skipped")

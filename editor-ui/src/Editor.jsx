@@ -155,6 +155,10 @@ function thumbnailDownloadName(name = "edited-image") {
   return `${safeDownloadBaseName(name)}_thumb.png`;
 }
 
+function thumbnailPackagePath(name = "edited-image") {
+  return `thumbnail/${finalDownloadName(name)}`;
+}
+
 function zipDownloadName(name = "edited-image") {
   return `${safeDownloadBaseName(name)}_editor.zip`;
 }
@@ -1157,7 +1161,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     if (isSingleImageMode && thumbnailBlob) {
       const packageBlob = await createStoredZipBlob([
         { filename: finalDownloadName(currentName), blob: finalBlob },
-        { filename: thumbnailDownloadName(currentName), blob: thumbnailBlob },
+        { filename: thumbnailPackagePath(currentName), blob: thumbnailBlob },
       ]);
       triggerBlobDownload(packageBlob, zipDownloadName(currentName));
       packageDownloaded = true;
@@ -1659,7 +1663,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           <label className="editor-output-toggle">
             <span className="editor-output-toggle-copy">
               <strong>Generate thumbnail</strong>
-              <span>Save a {thumbnailSize}px preview copy with the final image.</span>
+              <span>Save a {thumbnailSize}px preview copy in a thumbnail folder next to the final image.</span>
             </span>
             <input
               type="checkbox"
