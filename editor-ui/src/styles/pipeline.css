@@ -1562,7 +1562,8 @@
 
 .pipeline-screen .pipeline-preview-strip {
   border-radius: 14px !important;
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
+  box-shadow: none !important;
 }
 
 .pipeline-screen .pipeline-live-title-row {
@@ -1587,6 +1588,7 @@
   width: 100%;
   height: var(--pipeline-live-tile-size);
   border-radius: 10px;
+  box-shadow: none !important;
   padding: 8px;
 }
 
@@ -1635,9 +1637,7 @@
     linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 88%, var(--panel)), color-mix(in srgb, var(--panel) 92%, var(--bg))) !important;
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   border-radius: 16px !important;
-  box-shadow:
-    0 12px 24px color-mix(in srgb, #000 12%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent) !important;
   padding: 8px 10px 10px;
 }
 
@@ -1657,7 +1657,7 @@
 }
 
 .pipeline-screen .pipeline-bottom-panel-title.has-errors {
-  color: color-mix(in srgb, var(--red) 84%, var(--text)) !important;
+  color: color-mix(in srgb, var(--accent) 82%, var(--text)) !important;
 }
 
 .pipeline-screen .pipeline-bottom-panel-toggle {
@@ -1687,9 +1687,9 @@
 .pipeline-screen .pipeline-activity-console {
   min-height: 118px;
   border-radius: 12px !important;
-  border: 1px solid rgba(148, 163, 184, 0.14) !important;
-  background: linear-gradient(180deg, #05070d, #080b12) !important;
-  box-shadow: inset 0 1px 12px rgba(0, 0, 0, 0.38) !important;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 82%, var(--panel)), color-mix(in srgb, var(--surface-muted) 76%, var(--panel))) !important;
+  box-shadow: none !important;
   padding: 9px 10px !important;
   gap: 2px !important;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -1698,7 +1698,7 @@
 }
 
 .pipeline-screen .pipeline-activity-console.has-errors {
-  border-color: rgba(248, 113, 113, 0.24) !important;
+  border-color: color-mix(in srgb, var(--border) 84%, transparent) !important;
 }
 
 .pipeline-screen .pipeline-activity-entry {
@@ -1710,25 +1710,25 @@
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
-  color: rgba(203, 213, 225, 0.82);
+  color: color-mix(in srgb, var(--text) 78%, var(--dim));
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .pipeline-screen .pipeline-activity-entry.is-success {
-  color: rgba(203, 213, 225, 0.82);
+  color: color-mix(in srgb, var(--text) 78%, var(--dim));
 }
 
 .pipeline-screen .pipeline-activity-entry.is-warn,
 .pipeline-screen .pipeline-activity-entry.is-skip {
-  color: rgba(203, 213, 225, 0.82);
+  color: color-mix(in srgb, var(--text) 78%, var(--dim));
 }
 
 .pipeline-screen .pipeline-activity-entry.is-error {
   padding: 1px 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
-  color: rgba(248, 113, 113, 0.95) !important;
+  color: color-mix(in srgb, var(--text) 78%, var(--dim)) !important;
 }
 
 .pipeline-screen .pipeline-activity-time {
@@ -1757,9 +1757,22 @@
 }
 
 .pipeline-screen .pipeline-log-empty {
-  color: rgba(148, 163, 184, 0.64) !important;
+  color: color-mix(in srgb, var(--dim) 78%, var(--text) 22%) !important;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 10px !important;
+}
+
+[data-theme="dark"] .pipeline-screen .pipeline-activity-console {
+  border-color: rgba(148, 163, 184, 0.14) !important;
+  background: linear-gradient(180deg, #080b12, #0b0f17) !important;
+}
+
+[data-theme="dark"] .pipeline-screen .pipeline-activity-entry,
+[data-theme="dark"] .pipeline-screen .pipeline-activity-entry.is-success,
+[data-theme="dark"] .pipeline-screen .pipeline-activity-entry.is-warn,
+[data-theme="dark"] .pipeline-screen .pipeline-activity-entry.is-skip,
+[data-theme="dark"] .pipeline-screen .pipeline-activity-entry.is-error {
+  color: rgba(203, 213, 225, 0.82) !important;
 }
 
 .pipeline-screen .pipeline-settings-panel button:hover:not(:disabled),

@@ -344,7 +344,7 @@ function telemetryFromRawLine(raw) {
   if (/loading\b.*\bweights/i.test(line)) return telemetryEntry(line, "info");
   if (/model loaded/i.test(line)) return telemetryEntry(line, "success");
   if (/(error|failed|failure|corrupt|exception|traceback|not found|invalid|size exceeded)/i.test(line)) {
-    return telemetryEntry(line, "error");
+    return telemetryEntry(`${line} [ERROR]`, "error");
   }
 
   return null;
@@ -658,9 +658,6 @@ function usePipeline() {
 // Zone 1: Live preview strip
 
 function Zone1({ imageDone, totalImages, previewPath, livePreviewStrip }) {
-  const hasPreviewItems = Boolean(previewPath) || (Array.isArray(livePreviewStrip) && livePreviewStrip.some(item => item?.path));
-  if (!hasPreviewItems) return null;
-
   return (
     <PipelinePreviewStrip
       previewPath={previewPath}
@@ -689,7 +686,13 @@ function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalI
       sourceItems = [previewItem, ...sourceItems.filter(item => item.path !== previewPath)];
     }
   }
-  const slotItems = sourceItems.slice(0, 4);
+  const slotItems = [
+    ...sourceItems.slice(0, 4),
+    ...Array.from({ length: Math.max(0, 4 - sourceItems.length) }, (_, index) => ({
+      placeholder: true,
+      label: index === 0 && sourceItems.length === 0 ? "Images will appear here during processing." : "",
+    })),
+  ].slice(0, 4);
 
   return (
     <div className="pipeline-zone pipeline-progress-card pipeline-preview-strip">
@@ -710,6 +713,7 @@ function PipelinePreviewSlot({ item }) {
   const src = item?.path ? `${BASE}/image?path=${encodeURIComponent(item.path)}` : "";
   const hasImage = Boolean(src);
   const fileLabel = item?.name || "";
+  const placeholderLabel = item?.label || "";
 
   return (
     <div className="pipeline-preview-slot">
@@ -719,7 +723,7 @@ function PipelinePreviewSlot({ item }) {
           {fileLabel && <div className="pipeline-live-preview-name">{fileLabel}</div>}
         </>
       ) : (
-        <div className="pipeline-preview-placeholder">No previews yet</div>
+        <div className="pipeline-preview-placeholder">{placeholderLabel}</div>
       )}
     </div>
   );
@@ -923,9 +927,8 @@ function TagInput({ tags, onChange }) {
 
 // ── ActivityPanel ─────────────────────────────────────────────────────────────
 
-function ActivityPanel({ logRef, log, errors, imageError, running, open, setOpen }) {
+function ActivityPanel({ logRef, log, running, open, setOpen }) {
   const entries = log.filter(Boolean);
-  const hasErrors = imageError > 0 || errors.length > 0 || entries.some(entry => entry.kind === "error");
 
   return (
     <div className="pipeline-activity-panel" style={{
@@ -934,7 +937,7 @@ function ActivityPanel({ logRef, log, errors, imageError, running, open, setOpen
       transition: "flex 0.2s ease"
     }}>
       <div className="pipeline-bottom-panel-header">
-        <div className={`pipeline-bottom-panel-title ${hasErrors ? "has-errors" : ""}`}>
+        <div className="pipeline-bottom-panel-title">
           PIPELINE TELEMETRY {"\u00b7"} {entries.length} ENTRIES
         </div>
         <button
@@ -947,7 +950,7 @@ function ActivityPanel({ logRef, log, errors, imageError, running, open, setOpen
         </button>
       </div>
       {open && (
-        <div className={`pipeline-log-list pipeline-activity-console ${hasErrors ? "has-errors" : ""}`} ref={logRef}>
+        <div className="pipeline-log-list pipeline-activity-console" ref={logRef}>
           {entries.length === 0 ? (
             <div className="pipeline-log-empty">{running ? "Waiting for pipeline activity..." : "Configure and press Run Pipeline."}</div>
           ) : entries.map((entry, index) => {
@@ -1158,7 +1161,6 @@ export default function Pipeline({
   const nothingSelected = !doUpscale && !doRembg;
   const skipCount = removedImages?.size ?? 0;
   const activeExcludeCount = excludeTags.filter(n => !removedImages?.has(n)).length;
-  const hasLivePreviewItems = Boolean(previewPath) || (Array.isArray(livePreviewStrip) && livePreviewStrip.some(item => item?.path));
 
   return (
     <div className="pipeline-screen" style={{
@@ -1403,15 +1405,13 @@ export default function Pipeline({
                 )}
               </div>
 
-              {hasLivePreviewItems && (
-                <div className="pipeline-live-area">
-                  <Zone1
-                    imageDone={imageDone} totalImages={totalImages}
-                    previewPath={previewPath}
-                    livePreviewStrip={livePreviewStrip}
-                  />
-                </div>
-              )}
+              <div className="pipeline-live-area">
+                <Zone1
+                  imageDone={imageDone} totalImages={totalImages}
+                  previewPath={previewPath}
+                  livePreviewStrip={livePreviewStrip}
+                />
+              </div>
             </div>
 
             <div className="pipeline-bottom-panels" style={{ flex: "1 1 auto", minHeight: 210, display: "flex", flexDirection: "column", gap: 8 }}>
