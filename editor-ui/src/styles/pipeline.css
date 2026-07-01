@@ -827,18 +827,6 @@
   opacity: 1 !important;
 }
 
-.pipeline-error-context {
-  margin-top: 4px;
-  padding: 4px 6px;
-  background: color-mix(in srgb, var(--red) 6%, var(--panel));
-  border: 1px solid var(--red-bdr);
-  border-radius: 3px;
-  color: var(--dim);
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 9px;
-}
-
 .pipeline-error-list {
   background: linear-gradient(180deg, var(--log-bg), color-mix(in srgb, var(--log-bg-alt) 88%, var(--panel2)));
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
@@ -855,23 +843,6 @@
 .pipeline-error-empty {
   color: color-mix(in srgb, var(--dim) 76%, var(--text) 24%);
   font-size: 11px;
-}
-
-.pipeline-error-context-toggle {
-  color: color-mix(in srgb, var(--dim2) 72%, var(--dim)) !important;
-  text-transform: uppercase;
-  margin-top: 3px;
-  background: transparent;
-  border: none;
-  font-size: 9px;
-  cursor: pointer;
-  font-family: "JetBrains Mono", monospace;
-  padding: 0;
-  letter-spacing: 0.05em;
-}
-
-.pipeline-error-context-toggle:hover {
-  color: color-mix(in srgb, var(--text) 56%, var(--dim)) !important;
 }
 
 .pipeline-settings-actions {
@@ -1659,9 +1630,110 @@
   border-radius: 6px;
 }
 
-.pipeline-screen .pipeline-error-context {
-  font-size: 8px;
-  padding: 4px 6px;
+.pipeline-screen .pipeline-activity-panel {
+  background: linear-gradient(180deg, #131722, #0d111a) !important;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px !important;
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  padding: 9px 10px 10px;
+}
+
+.pipeline-screen .pipeline-bottom-panel-header {
+  min-height: 24px;
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+
+.pipeline-screen .pipeline-bottom-panel-title {
+  color: rgba(226, 232, 240, 0.72) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.16em !important;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.pipeline-screen .pipeline-bottom-panel-title.has-errors {
+  color: rgba(248, 113, 113, 0.86) !important;
+}
+
+.pipeline-screen .pipeline-bottom-panel-toggle {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: rgba(226, 232, 240, 0.62) !important;
+  font-size: 16px !important;
+  line-height: 1;
+  transition: transform 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+
+.pipeline-screen .pipeline-bottom-panel-toggle.is-open {
+  transform: rotate(180deg);
+}
+
+.pipeline-screen .pipeline-bottom-panel-toggle:hover {
+  background: rgba(148, 163, 184, 0.1);
+  color: rgba(248, 250, 252, 0.9) !important;
+}
+
+.pipeline-screen .pipeline-activity-console {
+  min-height: 118px;
+  border-radius: 12px !important;
+  border: 1px solid rgba(148, 163, 184, 0.14) !important;
+  background: linear-gradient(180deg, #05070d, #080b12) !important;
+  box-shadow: inset 0 1px 12px rgba(0, 0, 0, 0.38) !important;
+  padding: 9px 10px !important;
+  gap: 2px !important;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px !important;
+  line-height: 1.45 !important;
+}
+
+.pipeline-screen .pipeline-activity-console.has-errors {
+  border-color: rgba(248, 113, 113, 0.24) !important;
+}
+
+.pipeline-screen .pipeline-activity-entry {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 9px;
+  padding: 2px 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: rgba(203, 213, 225, 0.82);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pipeline-screen .pipeline-activity-entry.is-success {
+  color: rgba(187, 247, 208, 0.84);
+}
+
+.pipeline-screen .pipeline-activity-entry.is-warn,
+.pipeline-screen .pipeline-activity-entry.is-skip {
+  color: rgba(253, 224, 171, 0.86);
+}
+
+.pipeline-screen .pipeline-activity-entry.is-error {
+  color: rgba(248, 113, 113, 0.95) !important;
+}
+
+.pipeline-screen .pipeline-activity-time {
+  color: rgba(148, 163, 184, 0.58);
+}
+
+.pipeline-screen .pipeline-activity-message {
+  min-width: 0;
+}
+
+.pipeline-screen .pipeline-log-empty {
+  color: rgba(148, 163, 184, 0.64) !important;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px !important;
 }
 
 .pipeline-screen .pipeline-settings-panel button:hover:not(:disabled),

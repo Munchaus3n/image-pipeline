@@ -258,10 +258,18 @@ function Spinner({ color = C.yellow, size = 12 }) {
 
 // ── Pipeline hook ─────────────────────────────────────────────────────────────
 
-const KIND_COLOR = {
-  ok: "#4ade80", error: "#f87171", warn: "#facc15",
-  skip: "#4a5a7a", section: "#7aa4d4", info: "#4a5a7a",
-};
+function telemetryTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function telemetryEntry(raw, kind = "info") {
+  return { raw, kind, time: telemetryTimestamp() };
+}
+
+function telemetryLabel(...parts) {
+  return parts.join(" \u00b7 ");
+}
 
 function usePipeline() {
   const [running, setRunning] = useState(false);
@@ -345,6 +353,7 @@ function usePipeline() {
         setRecentDone(prev => [fname, ...prev].slice(0, 8));
       }
       setUpStats(s => ({ ...s, done: s.done + 1 }));
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "upscale [SUCCESS]"), "success")]);
       return;
     }
     if (raw.startsWith("__ok_rembg__:")) {
@@ -357,6 +366,7 @@ function usePipeline() {
         setRecentDone(prev => [fname, ...prev].slice(0, 8));
       }
       setBgStats(s => ({ ...s, done: s.done + 1 }));
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "BG removal [SUCCESS]"), "success")]);
       return;
     }
     if (raw.startsWith("__skip_upscale__:")) {
@@ -364,6 +374,7 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "skip" } }));
       if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
       setUpStats(s => ({ ...s, skip: s.skip + 1 }));
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "upscale [SKIPPED]"), "warn")]);
       return;
     }
     if (raw.startsWith("__skip_rembg__:")) {
@@ -371,6 +382,7 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "skip" } }));
       if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
       setBgStats(s => ({ ...s, skip: s.skip + 1 }));
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "BG removal [SKIPPED]"), "warn")]);
       return;
     }
     if (raw.startsWith("__err_upscale__:")) {
@@ -378,6 +390,7 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "error" } }));
       if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
       setUpStats(s => ({ ...s, err: s.err + 1 }));
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "upscale [ERROR]"), "error")]);
       return;
     }
     if (raw.startsWith("__err_rembg__:")) {
@@ -385,22 +398,23 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "error" } }));
       if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
       setBgStats(s => ({ ...s, err: s.err + 1 }));
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "BG removal [ERROR]"), "error")]);
       return;
     }
     if (raw.startsWith("__err_oom_gpu__:")) {
       const fname = raw.slice(16);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "oom" } }));
       setOomGpuCount(c => c + 1);
-      setLog(prev => [...prev.slice(-800), { raw: `GPU OOM fallback → CPU retry: ${fname}`, kind: "warn" }]);
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "GPU OOM fallback [WARN]"), "warn")]);
       return;
     }
 
     if (raw.startsWith("__exclude_match__:")) {
-      setLog(prev => [...prev.slice(-800), { raw: `Exclude matches: ${raw.slice(18)}`, kind: "info" }]);
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel("Exclude match", raw.slice(18)), "info")]);
       return;
     }
     if (raw.startsWith("__skip_filter__:")) {
-      setLog(prev => [...prev.slice(-800), { raw: `Remove matches: ${raw.slice(16)}`, kind: "info" }]);
+      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel("Removed match", raw.slice(16)), "info")]);
       return;
     }
 
@@ -411,7 +425,7 @@ function usePipeline() {
       previewPathByFile.current.set(fileName, fullPath);
       if (!sentinelSet.current.has(fileName)) {
         sentinelSet.current.add(fileName);
-        setLog(prev => [...prev.slice(-800), { raw: "", kind: "progress", filename: fileName }]);
+        setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fileName, "processing"), "info")]);
         setImageProgress(prev => ({ ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } }));
       } else {
         setImageProgress(prev => ({ ...prev, [fileName]: { ...prev[fileName], status: "running" } }));
@@ -420,9 +434,26 @@ function usePipeline() {
     }
 
     // ── Human-readable log lines ─────────────────────────────────────────────
+    if (raw.startsWith("__done__")) {
+      const ok = raw.includes("exit=0");
+      setLog(prev => [
+        ...prev.slice(-800),
+        telemetryEntry(ok ? "Pipeline complete [SUCCESS]" : "Pipeline exited with errors", ok ? "success" : "error"),
+      ]);
+      return;
+    }
+    if (/Pipeline complete/i.test(raw)) {
+      setLog(prev => [...prev.slice(-800), telemetryEntry("Pipeline complete [SUCCESS]", "success")]);
+      return;
+    }
+    if (/Pipeline exited with errors/i.test(raw)) {
+      setLog(prev => [...prev.slice(-800), telemetryEntry("Pipeline exited with errors", "error")]);
+      return;
+    }
+
     const kind = classify(raw);
-    const entry = { raw, kind };
-    setLog(prev => [...prev.slice(-800), entry]);
+    if (!raw.trim() || (kind === "section" && /^[\sâ”€â•]+$/.test(raw.trim()))) return;
+    setLog(prev => [...prev.slice(-800), telemetryEntry(raw, kind === "ok" ? "success" : kind)]);
 
     recentLog.current = [...recentLog.current.slice(-4), raw];
 
@@ -790,20 +821,9 @@ function TagInput({ tags, onChange }) {
 
 // ── ActivityPanel ─────────────────────────────────────────────────────────────
 
-function ActivityPanel({ logRef, log, errors, imageError, running, open, setOpen, imageProgress }) {
-  const progressColor = (status) => {
-    if (status === "error") return C.red;
-    if (status === "skip") return C.dim2;
-    if (status === "ok") return C.green;
-    if (status === "oom") return C.yellow;
-    return C.yellow;
-  };
-  const isRuleLike = (raw) => /[─═]{4,}/.test(raw);
-  const isPureRule = (raw) => /^[\s─═]+$/.test(raw.trim());
-  const extractRuleLabel = (raw) => raw.replace(/^[\s─═]+|[\s─═]+$/g, "").trim();
-  const [expanded, setExpanded] = useState({});
-  const errorByRaw = new Map(errors.map(error => [error.raw, error]));
-  const hasErrors = imageError > 0 || errors.length > 0;
+function ActivityPanel({ logRef, log, errors, imageError, running, open, setOpen }) {
+  const entries = log.filter(Boolean);
+  const hasErrors = imageError > 0 || errors.length > 0 || entries.some(entry => entry.kind === "error");
 
   return (
     <div className="pipeline-activity-panel" style={{
@@ -813,78 +833,27 @@ function ActivityPanel({ logRef, log, errors, imageError, running, open, setOpen
     }}>
       <div className="pipeline-bottom-panel-header">
         <div className={`pipeline-bottom-panel-title ${hasErrors ? "has-errors" : ""}`}>
-          Activity {hasErrors ? `(${errors.length} error${errors.length === 1 ? "" : "s"})` : ""}
+          PIPELINE TELEMETRY {"\u00b7"} {entries.length} ENTRIES
         </div>
-        <button className="pipeline-bottom-panel-toggle" onClick={() => setOpen(v => !v)}>
-          {open ? "Hide" : "Show"}
+        <button
+          className={`pipeline-bottom-panel-toggle ${open ? "is-open" : ""}`}
+          onClick={() => setOpen(v => !v)}
+          aria-label={open ? "Collapse telemetry" : "Expand telemetry"}
+          aria-expanded={open}
+        >
+          <span aria-hidden="true">{"\u2304"}</span>
         </button>
       </div>
       {open && (
         <div className={`pipeline-log-list pipeline-activity-console ${hasErrors ? "has-errors" : ""}`} ref={logRef}>
-          {log.length === 0 ? (
+          {entries.length === 0 ? (
             <div className="pipeline-log-empty">{running ? "Waiting for pipeline activity..." : "Configure and press Run Pipeline."}</div>
-          ) : log.map((e, i) => {
-            // BUG-05 FIX: inline ASCII progress bar instead of CSS width-transition div
-            if (e.kind === "progress") {
-              const meta = imageProgress[e.filename];
-              if (!meta) return null;
-              const color = progressColor(meta.status);
-              const pct   = meta.percent;
-              const filled = Math.round(pct / 10);
-              const bar = `${"#".repeat(filled)}${"-".repeat(10 - filled)}`;
-              return (
-                <div key={i} style={{ fontFamily: "JetBrains Mono", color, fontSize: 11 }}>
-                  [{bar}]  {String(pct).padStart(3)}%  {e.filename}
-                </div>
-              );
-            }
-            if (e.kind === "section" && isRuleLike(e.raw)) {
-              const label = isPureRule(e.raw) ? "" : extractRuleLabel(e.raw);
-              return (
-                <div key={i} style={{ marginBottom: 3 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ flex: 1, borderTop: `1px solid ${C.dim2}`, opacity: 0.7 }} />
-                    {label && <span style={{ color: KIND_COLOR.section, whiteSpace: "nowrap" }}>{label}</span>}
-                    <div style={{ flex: 1, borderTop: `1px solid ${C.dim2}`, opacity: 0.7 }} />
-                  </div>
-                </div>
-              );
-            }
-            const errorContext = e.kind === "error" ? errorByRaw.get(e.raw)?.context : null;
-            return (
-              <div
-                key={i}
-                className={e.kind === "error" ? "pipeline-activity-entry is-error" : "pipeline-activity-entry"}
-                style={{
-                  whiteSpace: "pre-wrap", wordBreak: "break-all",
-                  color: KIND_COLOR[e.kind] ?? C.dim,
-                  opacity: e.kind === "info" ? 0.55 : 1,
-                  paddingLeft: e.kind === "section" ? 0 : 4,
-                  borderLeft: e.kind === "section" ? `2px solid ${C.dim2}` : "2px solid transparent",
-                  marginBottom: e.kind === "section" ? 3 : 0,
-                }}
-              >
-                <div>{e.raw}</div>
-                {errorContext?.length > 0 && (
-                  <>
-                    <button
-                      className="pipeline-error-context-toggle"
-                      onClick={() => setExpanded(p => ({ ...p, [i]: !p[i] }))}
-                    >
-                      {expanded[i] ? "▾ hide context" : "▸ show context"}
-                    </button>
-                    {expanded[i] && (
-                      <div className="pipeline-error-context">
-                        {errorContext.map((line, j) => (
-                          <div key={j}>{line}</div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
+          ) : entries.map((entry, index) => (
+            <div key={`${entry.time || "00:00:00"}-${index}`} className={`pipeline-activity-entry is-${entry.kind || "info"}`}>
+              <span className="pipeline-activity-time">[{entry.time || telemetryTimestamp()}]</span>
+              <span className="pipeline-activity-message">{entry.raw}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>
