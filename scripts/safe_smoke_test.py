@@ -300,13 +300,13 @@ def run_static_checks(repo_root: Path) -> list[CheckResult]:
         if not stale_output_refs else f"Stale references: {', '.join(stale_output_refs)}",
     ))
 
-    thumbnail_flat_missing = require_text(api_txt, ['"thumbnails" / rel'])
+    thumbnail_local_missing = require_text(api_txt, ['save_path.parent / "thumbnail" / save_path.name'])
     checks.append(result(
-        "FAIL" if thumbnail_flat_missing else "PASS",
+        "FAIL" if thumbnail_local_missing else "PASS",
         "Static",
-        "Flattened thumbnail helper",
-        "mirror_thumbnail_path targets <output>/Editor/thumbnails/<relative image>."
-        if not thumbnail_flat_missing else "mirror_thumbnail_path flattening marker is missing.",
+        "Local thumbnail helper",
+        "mirror_thumbnail_path targets a thumbnail folder next to the final image."
+        if not thumbnail_local_missing else "mirror_thumbnail_path local thumbnail marker is missing.",
     ))
 
     session_missing = require_text(api_txt + editor_txt, ["completed:   bool = False", "_write_pipeline_session(0, completed=True)", "session.completed"])
@@ -502,16 +502,17 @@ def run_api_checks(repo_root: Path, api_url: str, sandbox: Path, verbose: bool) 
         try:
             payload = json_object(save_resp)
             final_path = paths["output"] / "Editor" / "a" / "001.png"
-            thumb_path = paths["output"] / "Editor" / "thumbnails" / "a" / "001.png"
+            thumb_path = paths["output"] / "Editor" / "a" / "thumbnail" / "001.png"
+            central_thumb_path = paths["output"] / "Editor" / "thumbnails" / "a" / "001.png"
             old_thumb_path = paths["output"] / "Editor" / "thumbnails" / "400" / "a" / "001.png"
             final_exists = final_path.exists()
             thumb_exists = wait_for_path(thumb_path)
-            save_ok = final_exists and thumb_exists and not old_thumb_path.exists()
+            save_ok = final_exists and thumb_exists and not central_thumb_path.exists() and not old_thumb_path.exists()
             checks.append(result(
                 "PASS" if save_ok else "FAIL",
                 "API",
                 "Editor save paths",
-                f"saved={payload.get('saved')} final_exists={final_exists} thumb={payload.get('thumb')} thumb_exists={thumb_exists} old_thumb_exists={old_thumb_path.exists()}",
+                f"saved={payload.get('saved')} final_exists={final_exists} thumb={payload.get('thumb')} thumb_exists={thumb_exists} central_thumb_exists={central_thumb_path.exists()} old_thumb_exists={old_thumb_path.exists()}",
             ))
         except Exception as exc:
             checks.append(result("FAIL", "API", "Editor save paths", f"Invalid JSON payload: {exc}"))
