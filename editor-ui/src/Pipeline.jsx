@@ -271,6 +271,95 @@ function telemetryLabel(...parts) {
   return parts.join(" \u00b7 ");
 }
 
+function appendTelemetryEntry(setLog, entry, { clearPending = false } = {}) {
+  setLog(prev => {
+    const entries = clearPending ? prev.filter(item => item.kind !== "pending") : prev;
+    return [...entries.slice(-800), entry];
+  });
+}
+
+function normalizeTelemetryLine(raw) {
+  return String(raw ?? "")
+    .replace(/[│┃║]/gu, " ")
+    .replace(/[┌┐└┘─═╔╗╚╝╟╢╤╧╪╞╡╒╕╘╛╭╮╰╯╠╣╦╩╬━┬┴├┤┼┏┓┗┛]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isTelemetryNoise(raw) {
+  const original = String(raw ?? "").trim();
+  const line = normalizeTelemetryLine(raw);
+  if (!line) return true;
+  if (/^\[?\d{1,2}:\d{2}(?::\d{2})?\]?$/.test(line)) return true;
+  if (/^[\s┌┐└┘│─═╔╗╚╝║╟╢╤╧╪╞╡╒╕╘╛╭╮╰╯╠╣╦╩╬━┃┬┴├┤┼┏┓┗┛]+$/u.test(original)) return true;
+
+  return [
+    /image pipeline/i,
+    /upscale\s*(?:→|->|â†’)\s*remove bg/i,
+    /\bconfiguration\b/i,
+    /\bsummary\b/i,
+    /^mode\b/i,
+    /^images\b/i,
+    /^upscale\b/i,
+    /^remove bg\b/i,
+    /\binput\s*(?:→|->|â†’)/i,
+    /\boutput\s*(?:→|->|â†’)/i,
+    /\bwipe policy\b/i,
+    /previous output cleared/i,
+    /custom paths\s*\+\s*wipe off/i,
+    /selection:\s*0 removed,\s*0 excluded/i,
+    /remove from session:\s*0 token\(s\)/i,
+    /exclude from bg:\s*0 token\(s\)/i,
+    /removed match\s*(?:·|\u00b7|Â·)\s*0\s*\/\s*0/i,
+    /exclude match\s*(?:·|\u00b7|Â·)\s*0\s*\/\s*0/i,
+  ].some(pattern => pattern.test(line));
+}
+
+function parseMatchCount(payload) {
+  const match = String(payload ?? "").match(/(\d+)\s*\/\s*\d+/);
+  return match ? Number.parseInt(match[1], 10) : 0;
+}
+
+function duplicateReuseCount(raw) {
+  const line = normalizeTelemetryLine(raw);
+  const match =
+    line.match(/\bExact duplicates:?\s*(\d+)\s+reused/i) ||
+    line.match(/\bReused\s+(\d+)\s+(?:additional\s+|exact\s+)?duplicate/i);
+  return match ? Number.parseInt(match[1], 10) : 0;
+}
+
+function telemetryFromRawLine(raw) {
+  const duplicateCount = duplicateReuseCount(raw);
+  if (duplicateCount > 0) {
+    return telemetryEntry(telemetryLabel("Exact duplicates", `${duplicateCount} reused`), "info");
+  }
+
+  if (isTelemetryNoise(raw)) return null;
+
+  const line = normalizeTelemetryLine(raw);
+  if (/pipeline complete/i.test(line)) return telemetryEntry("Pipeline complete [DONE]", "success");
+  if (/pipeline exited with errors/i.test(line)) return telemetryEntry("Pipeline exited with errors [ERROR]", "error");
+  if (/gpu oom fallback/i.test(line)) return telemetryEntry(line, "warn");
+  if (/initializing ncnn backend/i.test(line)) return telemetryEntry(line, "info");
+  if (/loading\b.*\bweights/i.test(line)) return telemetryEntry(line, "info");
+  if (/model loaded/i.test(line)) return telemetryEntry(line, "success");
+  if (/(error|failed|failure|corrupt|exception|traceback|not found|invalid|size exceeded)/i.test(line)) {
+    return telemetryEntry(line, "error");
+  }
+
+  return null;
+}
+
+function telemetryStatus(raw) {
+  const match = String(raw ?? "").match(/\s(\[(?:DONE|SKIP|ERROR|WARN)\])$/);
+  if (!match) return { message: raw, label: "", kind: "" };
+  return {
+    message: raw.slice(0, match.index),
+    label: match[1],
+    kind: match[1].slice(1, -1).toLowerCase(),
+  };
+}
+
 function usePipeline() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
@@ -353,7 +442,7 @@ function usePipeline() {
         setRecentDone(prev => [fname, ...prev].slice(0, 8));
       }
       setUpStats(s => ({ ...s, done: s.done + 1 }));
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "upscale [SUCCESS]"), "success")]);
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [DONE]"), "success"), { clearPending: true });
       return;
     }
     if (raw.startsWith("__ok_rembg__:")) {
@@ -366,7 +455,7 @@ function usePipeline() {
         setRecentDone(prev => [fname, ...prev].slice(0, 8));
       }
       setBgStats(s => ({ ...s, done: s.done + 1 }));
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "BG removal [SUCCESS]"), "success")]);
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [DONE]"), "success"), { clearPending: true });
       return;
     }
     if (raw.startsWith("__skip_upscale__:")) {
@@ -374,7 +463,7 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "skip" } }));
       if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
       setUpStats(s => ({ ...s, skip: s.skip + 1 }));
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "upscale [SKIPPED]"), "warn")]);
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [SKIP]"), "skip"), { clearPending: true });
       return;
     }
     if (raw.startsWith("__skip_rembg__:")) {
@@ -382,7 +471,7 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "skip" } }));
       if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
       setBgStats(s => ({ ...s, skip: s.skip + 1 }));
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "BG removal [SKIPPED]"), "warn")]);
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [SKIP]"), "skip"), { clearPending: true });
       return;
     }
     if (raw.startsWith("__err_upscale__:")) {
@@ -390,7 +479,7 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "error" } }));
       if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
       setUpStats(s => ({ ...s, err: s.err + 1 }));
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "upscale [ERROR]"), "error")]);
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [ERROR]"), "error"), { clearPending: true });
       return;
     }
     if (raw.startsWith("__err_rembg__:")) {
@@ -398,23 +487,29 @@ function usePipeline() {
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "error" } }));
       if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
       setBgStats(s => ({ ...s, err: s.err + 1 }));
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "BG removal [ERROR]"), "error")]);
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [ERROR]"), "error"), { clearPending: true });
       return;
     }
     if (raw.startsWith("__err_oom_gpu__:")) {
       const fname = raw.slice(16);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "oom" } }));
       setOomGpuCount(c => c + 1);
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fname, "GPU OOM fallback [WARN]"), "warn")]);
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "GPU OOM fallback [WARN]"), "warn"), { clearPending: true });
       return;
     }
 
     if (raw.startsWith("__exclude_match__:")) {
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel("Exclude match", raw.slice(18)), "info")]);
+      const matchedCount = parseMatchCount(raw.slice(18));
+      if (matchedCount > 0) {
+        appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel("Excluded from BG", `${matchedCount} matched`), "info"));
+      }
       return;
     }
     if (raw.startsWith("__skip_filter__:")) {
-      setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel("Removed match", raw.slice(16)), "info")]);
+      const matchedCount = parseMatchCount(raw.slice(16));
+      if (matchedCount > 0) {
+        appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel("Removed from session", `${matchedCount} matched`), "info"));
+      }
       return;
     }
 
@@ -425,7 +520,11 @@ function usePipeline() {
       previewPathByFile.current.set(fileName, fullPath);
       if (!sentinelSet.current.has(fileName)) {
         sentinelSet.current.add(fileName);
-        setLog(prev => [...prev.slice(-800), telemetryEntry(telemetryLabel(fileName, "processing"), "info")]);
+        setLog(prev => (
+          prev.length === 0
+            ? [telemetryEntry(telemetryLabel(fileName, "processing"), "pending")]
+            : prev
+        ));
         setImageProgress(prev => ({ ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } }));
       } else {
         setImageProgress(prev => ({ ...prev, [fileName]: { ...prev[fileName], status: "running" } }));
@@ -436,24 +535,27 @@ function usePipeline() {
     // ── Human-readable log lines ─────────────────────────────────────────────
     if (raw.startsWith("__done__")) {
       const ok = raw.includes("exit=0");
-      setLog(prev => [
-        ...prev.slice(-800),
-        telemetryEntry(ok ? "Pipeline complete [SUCCESS]" : "Pipeline exited with errors", ok ? "success" : "error"),
-      ]);
+      appendTelemetryEntry(
+        setLog,
+        telemetryEntry(ok ? "Pipeline complete [DONE]" : "Pipeline exited with errors [ERROR]", ok ? "success" : "error"),
+        { clearPending: true }
+      );
       return;
     }
     if (/Pipeline complete/i.test(raw)) {
-      setLog(prev => [...prev.slice(-800), telemetryEntry("Pipeline complete [SUCCESS]", "success")]);
+      appendTelemetryEntry(setLog, telemetryEntry("Pipeline complete [DONE]", "success"), { clearPending: true });
       return;
     }
     if (/Pipeline exited with errors/i.test(raw)) {
-      setLog(prev => [...prev.slice(-800), telemetryEntry("Pipeline exited with errors", "error")]);
+      appendTelemetryEntry(setLog, telemetryEntry("Pipeline exited with errors [ERROR]", "error"), { clearPending: true });
       return;
     }
 
     const kind = classify(raw);
-    if (!raw.trim() || (kind === "section" && /^[\sâ”€â•]+$/.test(raw.trim()))) return;
-    setLog(prev => [...prev.slice(-800), telemetryEntry(raw, kind === "ok" ? "success" : kind)]);
+    const telemetryLine = telemetryFromRawLine(raw);
+    if (telemetryLine) {
+      appendTelemetryEntry(setLog, telemetryLine, { clearPending: telemetryLine.kind !== "info" });
+    }
 
     recentLog.current = [...recentLog.current.slice(-4), raw];
 
@@ -521,7 +623,7 @@ function usePipeline() {
           if (!line.startsWith("data: ")) continue;
           const msg = line.slice(6);
           if (msg.startsWith("__done__")) {
-            appendLine(msg.includes("exit=0") ? "✓ Pipeline complete." : "✗ Pipeline exited with errors.");
+            appendLine(msg);
             setStage("done"); setDone(true); setRunning(false);
           } else if (msg.startsWith("__error__")) {
             appendLine(`Error: ${msg.replace("__error__ ", "")}`);
@@ -848,12 +950,20 @@ function ActivityPanel({ logRef, log, errors, imageError, running, open, setOpen
         <div className={`pipeline-log-list pipeline-activity-console ${hasErrors ? "has-errors" : ""}`} ref={logRef}>
           {entries.length === 0 ? (
             <div className="pipeline-log-empty">{running ? "Waiting for pipeline activity..." : "Configure and press Run Pipeline."}</div>
-          ) : entries.map((entry, index) => (
-            <div key={`${entry.time || "00:00:00"}-${index}`} className={`pipeline-activity-entry is-${entry.kind || "info"}`}>
-              <span className="pipeline-activity-time">[{entry.time || telemetryTimestamp()}]</span>
-              <span className="pipeline-activity-message">{entry.raw}</span>
-            </div>
-          ))}
+          ) : entries.map((entry, index) => {
+            const status = telemetryStatus(entry.raw);
+            return (
+              <div key={`${entry.time || "00:00:00"}-${index}`} className={`pipeline-activity-entry is-${entry.kind || "info"}`}>
+                <span className="pipeline-activity-time">[{entry.time || telemetryTimestamp()}]</span>
+                <span className="pipeline-activity-message">
+                  {status.message}
+                  {status.label && (
+                    <span className={`pipeline-activity-status is-${status.kind}`}> {status.label}</span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

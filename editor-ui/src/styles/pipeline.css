@@ -1631,40 +1631,45 @@
 }
 
 .pipeline-screen .pipeline-activity-panel {
-  background: linear-gradient(180deg, #131722, #0d111a) !important;
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 88%, var(--panel)), color-mix(in srgb, var(--panel) 92%, var(--bg))) !important;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   border-radius: 16px !important;
   box-shadow:
-    0 14px 30px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
-  padding: 9px 10px 10px;
+    0 12px 24px color-mix(in srgb, #000 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent) !important;
+  padding: 8px 10px 10px;
 }
 
 .pipeline-screen .pipeline-bottom-panel-header {
-  min-height: 24px;
-  margin-bottom: 8px;
-  padding: 0 2px;
+  min-height: 28px;
+  margin-bottom: 7px;
+  padding: 0 2px 0 4px;
+  align-items: center;
 }
 
 .pipeline-screen .pipeline-bottom-panel-title {
-  color: rgba(226, 232, 240, 0.72) !important;
+  color: color-mix(in srgb, var(--accent) 82%, var(--text)) !important;
   font-size: 10px !important;
-  letter-spacing: 0.16em !important;
+  line-height: 1;
+  letter-spacing: 0.15em !important;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 .pipeline-screen .pipeline-bottom-panel-title.has-errors {
-  color: rgba(248, 113, 113, 0.86) !important;
+  color: color-mix(in srgb, var(--red) 84%, var(--text)) !important;
 }
 
 .pipeline-screen .pipeline-bottom-panel-toggle {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  color: rgba(226, 232, 240, 0.62) !important;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  background: color-mix(in srgb, var(--panel2) 72%, transparent);
+  color: color-mix(in srgb, var(--accent) 74%, var(--dim)) !important;
   font-size: 16px !important;
   line-height: 1;
   transition: transform 0.16s ease, background-color 0.16s ease, color 0.16s ease;
@@ -1675,8 +1680,8 @@
 }
 
 .pipeline-screen .pipeline-bottom-panel-toggle:hover {
-  background: rgba(148, 163, 184, 0.1);
-  color: rgba(248, 250, 252, 0.9) !important;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel2));
+  color: color-mix(in srgb, var(--accent) 92%, var(--text)) !important;
 }
 
 .pipeline-screen .pipeline-activity-console {
@@ -1689,7 +1694,7 @@
   gap: 2px !important;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 10px !important;
-  line-height: 1.45 !important;
+  line-height: 1.35 !important;
 }
 
 .pipeline-screen .pipeline-activity-console.has-errors {
@@ -1700,7 +1705,8 @@
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 9px;
-  padding: 2px 0 !important;
+  align-items: baseline;
+  padding: 1px 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -1710,24 +1716,44 @@
 }
 
 .pipeline-screen .pipeline-activity-entry.is-success {
-  color: rgba(187, 247, 208, 0.84);
+  color: rgba(203, 213, 225, 0.82);
 }
 
 .pipeline-screen .pipeline-activity-entry.is-warn,
 .pipeline-screen .pipeline-activity-entry.is-skip {
-  color: rgba(253, 224, 171, 0.86);
+  color: rgba(203, 213, 225, 0.82);
 }
 
 .pipeline-screen .pipeline-activity-entry.is-error {
+  padding: 1px 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
   color: rgba(248, 113, 113, 0.95) !important;
 }
 
 .pipeline-screen .pipeline-activity-time {
-  color: rgba(148, 163, 184, 0.58);
+  color: color-mix(in srgb, var(--accent) 76%, #9bb7ff);
 }
 
 .pipeline-screen .pipeline-activity-message {
   min-width: 0;
+}
+
+.pipeline-screen .pipeline-activity-status {
+  font-weight: 700;
+}
+
+.pipeline-screen .pipeline-activity-status.is-done {
+  color: rgba(134, 239, 172, 0.96);
+}
+
+.pipeline-screen .pipeline-activity-status.is-skip,
+.pipeline-screen .pipeline-activity-status.is-warn {
+  color: rgba(253, 224, 171, 0.96);
+}
+
+.pipeline-screen .pipeline-activity-status.is-error {
+  color: rgba(248, 113, 113, 0.98);
 }
 
 .pipeline-screen .pipeline-log-empty {
