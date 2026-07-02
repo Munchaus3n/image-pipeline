@@ -56,17 +56,24 @@
 }
 
 .pipeline-duplicate-toggle {
-  max-width: 178px;
+  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
 }
 
 .pipeline-duplicate-toggle span {
+  min-width: 0;
+  flex: 1 1 auto;
   color: var(--dim);
   font-size: 10px;
   line-height: 1.25;
+}
+
+.pipeline-duplicate-toggle .pipeline-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .pipeline-settings-scroll {

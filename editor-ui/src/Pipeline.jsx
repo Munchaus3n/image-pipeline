@@ -1305,28 +1305,23 @@ export default function Pipeline({
             </Row>
             <Row label="Reuse exact duplicates" className="pipeline-row-duplicate-reuse" controlsClassName="pipeline-row-controls-wrap">
               <div className="pipeline-duplicate-toggle">
-                <PillToggle value={reuseExactDuplicates} onChange={handleReuseExactDuplicatesChange} />
                 <span>Process identical files once and copy results to duplicates.</span>
+                <PillToggle value={reuseExactDuplicates} onChange={handleReuseExactDuplicatesChange} />
               </div>
             </Row>
             {doRembg && (
-              <>
-                <Row label="BG model">
-                  <select
-                    value={rembgModel} onChange={e => setRembgModel(e.target.value)}
-                    style={{
-                      background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
-                      borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
-                      outline: "none", fontFamily: "inherit", colorScheme: "dark",
-                    }}
-                  >
-                    {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </Row>
-                <Row label="Fallback">
-                  <span style={{ fontSize: 11, color: C.dim }}>auto</span>
-                </Row>
-              </>
+              <Row label="BG model">
+                <select
+                  value={rembgModel} onChange={e => setRembgModel(e.target.value)}
+                  style={{
+                    background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
+                    borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
+                    outline: "none", fontFamily: "inherit", colorScheme: "dark",
+                  }}
+                >
+                  {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </Row>
             )}
           </ProcessPanelSection>
 
