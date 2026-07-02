@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { apiBase } from "./runtime.js";
+import { browseFolder } from "./api.js";
 /*
 KNOWN LIMITATIONS (web build):
 - Focus-based settings reload is a temporary sync workaround; desktop Electron should use explicit app events.
@@ -6,7 +8,7 @@ KNOWN LIMITATIONS (web build):
 - Editor refresh still depends on UI state transitions rather than native IPC events.
 */
 
-const BASE = "/api";
+const BASE = apiBase();
 
 // Opens a folder in the native OS file explorer via the API server.
 // path="" → server defaults to OUTPUT_ROOT.
@@ -146,8 +148,7 @@ function PillToggle({ value, onChange }) {
 function FolderInput({ value, onChange, placeholder, recent = [], onRemember }) {
   const browse = useCallback(async () => {
     try {
-      const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(value)}`);
-      const { path } = await r.json();
+      const { path } = await browseFolder(value);
       if (path) {
         onChange(path);
         onRemember?.(path);

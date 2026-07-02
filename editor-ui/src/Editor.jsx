@@ -12,6 +12,7 @@ import {
   getSession, saveSession, clearSession,
   browseFolder,
 } from "./api.js";
+import { apiBase } from "./runtime.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // CANVAS_SIZE: logical composition size (matches pipeline output, e.g. 1440)
@@ -22,7 +23,7 @@ const DS = 720;
 const DISPLAY_ZOOM_MULTIPLIER = 0.74;
 const scaleFactor = () => DS / CANVAS_SIZE;
 
-const BASE = "/api";
+const BASE = apiBase();
 const SINGLE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
 const SUPPORTED_SINGLE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const SUPPORTED_SINGLE_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);
@@ -434,8 +435,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     const ri = templates[template]?.ref_image;
     if (!ri) return null;
     if (ri.startsWith("data:")) return ri;
-    if (ri.includes("/") || ri.includes("\\")) return `/api/image?path=${encodeURIComponent(ri)}`;
-    return `/api/templates/image?name=${encodeURIComponent(ri)}`;
+    if (ri.includes("/") || ri.includes("\\")) return `${BASE}/image?path=${encodeURIComponent(ri)}`;
+    return `${BASE}/templates/image?name=${encodeURIComponent(ri)}`;
   }, [template, templates]);
 
   useEffect(() => {

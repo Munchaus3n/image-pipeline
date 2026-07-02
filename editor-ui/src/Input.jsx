@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useMemo } from "react";
+import { apiBase } from "./runtime.js";
+import { browseFolder } from "./api.js";
 
-const BASE = "/api";
+const BASE = apiBase();
 
 const C = {
   bg:     "var(--bg)",     panel:   "var(--panel)",  panel2:  "var(--panel2)",
@@ -161,9 +163,7 @@ export default function Input({
   const browse = useCallback(async () => {
     setBrowseLoading(true);
     try {
-      const r = await fetch(`${BASE}/browse?initial=${encodeURIComponent(inputDir)}`);
-      if (!r.ok) throw new Error("Browse failed");
-      const { path } = await r.json();
+      const { path } = await browseFolder(inputDir);
       if (path) {
         setInputDir(path);
         rememberInputDir?.(path);

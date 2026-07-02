@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ConfirmModal from "./ConfirmModal.jsx";
+import { browseFile } from "./api.js";
+import { apiBase } from "./runtime.js";
 
-const BASE = "/api";
+const BASE = apiBase();
 
 const C = {
   bg:      "var(--bg)",      panel:   "var(--panel)",   panel2:  "var(--panel2)",
@@ -34,9 +36,7 @@ async function apiPost(path, body) {
 // Pick a file via native dialog, fetch it from the API, return as base64 data URL.
 // This means the image is self-contained in the JSON — no path dependency.
 async function browseFileAsBase64() {
-  const r = await fetch(`${BASE}/browse-file?initial=&filter=image`);
-  if (!r.ok) return "";
-  const { path } = await r.json();
+  const { path } = await browseFile("", "image");
   if (!path) return "";
   return await fetchPathAsBase64(path);
 }

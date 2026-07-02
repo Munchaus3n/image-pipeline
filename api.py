@@ -479,6 +479,7 @@ _LOCAL_ORIGINS = [
     "http://localhost",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
+    "null",
 ]
 
 app.add_middleware(

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { browseFolder } from "./api";
+import { apiBase } from "./runtime.js";
 
-const BASE = "/api";
+const BASE = apiBase();
 
 function Section({ title, description, children, defaultOpen = false, tone = "default" }) {
   const [open, setOpen] = useState(defaultOpen);

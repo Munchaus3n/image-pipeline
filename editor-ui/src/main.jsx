@@ -5,7 +5,10 @@ import Input from "./Input.jsx";
 import Pipeline from "./Pipeline.jsx";
 import Templates from "./Templates.jsx";
 import Settings from "./Settings.jsx";
+import { apiBase } from "./runtime.js";
 import "./index.css";
+
+const BASE = apiBase();
 
 const TABS = [
   { id: "input", label: "Input", hint: "Select source folder" },
@@ -45,10 +48,10 @@ function recentFolders(path, current = []) {
 }
 
 async function saveOutputSettingsPatch(patch) {
-  const r = await fetch("/api/settings");
+  const r = await fetch(`${BASE}/settings`);
   const data = r.ok ? await r.json() : { settings: {} };
   const current = data?.settings ?? {};
-  await fetch("/api/settings", {
+  await fetch(`${BASE}/settings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -70,7 +73,7 @@ export function Root() {
   const [recentOutputDirs, setRecentOutputDirs] = useState([]);
 
   useEffect(() => {
-    fetch("/api/settings")
+    fetch(`${BASE}/settings`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const settings = data?.settings;
@@ -127,10 +130,10 @@ export function Root() {
     setTheme(normalized);
     saveStoredTheme(normalized);
     try {
-      const r = await fetch("/api/settings");
+      const r = await fetch(`${BASE}/settings`);
       const data = r.ok ? await r.json() : { settings: {} };
       const current = data?.settings ?? {};
-      await fetch("/api/settings", {
+      await fetch(`${BASE}/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

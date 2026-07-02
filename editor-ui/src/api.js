@@ -1,7 +1,8 @@
-// All calls go through /api/* which Vite proxies to http://127.0.0.1:7421
-// In Electron production build, change BASE to "http://127.0.0.1:7421" directly.
+// Browser/Vite calls use /api through the dev proxy.
+// Electron calls use the localhost API exposed by preload.
+import { apiBase, selectFile, selectFolder } from "./runtime.js";
 
-const BASE = "/api";
+const BASE = apiBase();
 const DEFAULT_TIMEOUT_MS = 15000;
 
 function withTimeout(timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -62,8 +63,18 @@ export const getSource  = (outputDir = "") =>
   get(`/source${outputDir ? `?output_dir=${encodeURIComponent(outputDir)}` : ""}`);
 
 // Open native OS folder-picker dialog; returns { path }
-export const browseFolder = (initial = "") =>
-  get(`/browse?initial=${encodeURIComponent(initial)}`);
+export const browseFolder = async (initial = "") => {
+  const nativeResult = await selectFolder(initial);
+  if (nativeResult?.path || nativeResult?.path === "") return nativeResult;
+  return get(`/browse?initial=${encodeURIComponent(initial)}`);
+};
+
+// Open native OS file-picker dialog; returns { path }
+export const browseFile = async (initial = "", filter = "image") => {
+  const nativeResult = await selectFile(initial, filter);
+  if (nativeResult?.path || nativeResult?.path === "") return nativeResult;
+  return get(`/browse-file?initial=${encodeURIComponent(initial)}&filter=${encodeURIComponent(filter)}`);
+};
 
 // Returns { images: [...abs paths], count, truncated }
 export const getImages  = (folder, { recursive = true, limit = 0 } = {}) =>

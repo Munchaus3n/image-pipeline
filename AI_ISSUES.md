@@ -3,6 +3,7 @@
 ## Open Issues
 1. UI design cleanup should wait until workflow bugs are stable.
 2. Resume live previews may remain absent when a resumed run produces no new `__processing__` preview paths; the UI now collapses the empty live preview area instead of showing large empty placeholders.
+3. Electron v1 shell does not yet bundle a Python runtime for external users. The Electron process starts `api.py` with `venv311/Scripts/python.exe` when present, otherwise `python` from PATH, so packaged builds are still internal/local-Python builds until portable Python bundling is added.
 
 ## User Feedback 2026-06-26
 
@@ -60,5 +61,5 @@
 - Editor final exports now write directly under `<output>/Editor/`.
 
 ## Non-Issues For This Pass
-- Electron packaging is intentionally not started.
+- Electron packaging v1 has started as a minimal local shell; full portable Python bundling remains out of scope for this pass.
 - Lovable reference app migration is not the first priority.
