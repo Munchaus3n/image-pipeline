@@ -1970,3 +1970,100 @@
     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   }
 }
+
+/* Final Process layout polish: stable idle order, plain surfaces, softer telemetry. */
+.pipeline-screen .pipeline-status-card-slot .pipeline-ready-card,
+.pipeline-screen .pipeline-status-card-slot .pipeline-progress-card,
+.pipeline-screen .pipeline-ready-card {
+  min-height: clamp(136px, 17vh, 176px);
+}
+
+.pipeline-screen .pipeline-status-card-slot .pipeline-progress-card {
+  min-height: clamp(132px, 16vh, 172px);
+}
+
+.pipeline-screen .pipeline-progress-inner,
+.pipeline-screen .pipeline-preview-strip,
+.pipeline-screen .pipeline-activity-panel,
+.pipeline-screen .pipeline-activity-console {
+  background: var(--surface-elevated) !important;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.pipeline-screen .pipeline-progress-inner,
+.pipeline-screen .pipeline-preview-strip,
+.pipeline-screen .pipeline-activity-panel {
+  border-radius: 14px !important;
+}
+
+.pipeline-screen .pipeline-preview-slot {
+  background: color-mix(in srgb, var(--panel) 72%, var(--surface-muted)) !important;
+  border-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.pipeline-screen .pipeline-preview-slot:has(.pipeline-preview-placeholder) {
+  display: flex !important;
+}
+
+.pipeline-screen .pipeline-preview-placeholder {
+  display: flex !important;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  color: color-mix(in srgb, var(--dim) 72%, var(--text) 28%) !important;
+  font-size: 10px !important;
+  line-height: 1.35;
+}
+
+.pipeline-screen .pipeline-live-preview-name {
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.pipeline-screen .pipeline-bottom-panel-title,
+.pipeline-screen .pipeline-bottom-panel-title.has-errors {
+  color: color-mix(in srgb, var(--dim) 70%, var(--text) 30%) !important;
+  font-weight: 700;
+  letter-spacing: 0.13em !important;
+}
+
+.pipeline-screen .pipeline-activity-entry,
+.pipeline-screen .pipeline-activity-entry.is-success,
+.pipeline-screen .pipeline-activity-entry.is-warn,
+.pipeline-screen .pipeline-activity-entry.is-skip,
+.pipeline-screen .pipeline-activity-entry.is-error {
+  color: color-mix(in srgb, var(--text) 72%, var(--dim)) !important;
+  font-weight: 400;
+}
+
+.pipeline-screen .pipeline-activity-time {
+  color: color-mix(in srgb, var(--accent) 48%, var(--dim)) !important;
+}
+
+.pipeline-screen .pipeline-activity-status {
+  font-weight: 600;
+}
+
+.pipeline-screen .pipeline-activity-status.is-done {
+  color: color-mix(in srgb, var(--green) 70%, var(--dim)) !important;
+}
+
+.pipeline-screen .pipeline-activity-status.is-skip,
+.pipeline-screen .pipeline-activity-status.is-warn {
+  color: color-mix(in srgb, var(--yellow) 68%, var(--dim)) !important;
+}
+
+.pipeline-screen .pipeline-activity-status.is-error {
+  color: color-mix(in srgb, var(--red) 78%, var(--text)) !important;
+}
+
+[data-theme="dark"] .pipeline-screen .pipeline-activity-console {
+  background: color-mix(in srgb, var(--panel) 82%, #05070d) !important;
+}
+
+[data-theme="dark"] .pipeline-screen .pipeline-preview-slot {
+  background: color-mix(in srgb, var(--panel2) 70%, var(--panel)) !important;
+}
