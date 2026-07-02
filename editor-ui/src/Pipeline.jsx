@@ -931,8 +931,8 @@ function ActivityPanel({ logRef, log, running, open, setOpen }) {
   const entries = log.filter(Boolean);
 
   return (
-    <div className="pipeline-activity-panel" style={{
-      flex: open ? "1 1 auto" : "0 0 34px", minWidth: 0, minHeight: 0,
+    <div className={`pipeline-activity-panel ${open ? "is-open" : "is-collapsed"}`} style={{
+      flex: open ? "1 1 auto" : "0 0 36px", minWidth: 0, minHeight: 0,
       display: "flex", flexDirection: "column",
       transition: "flex 0.2s ease"
     }}>
