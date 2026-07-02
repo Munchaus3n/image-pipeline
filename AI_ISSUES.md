@@ -62,4 +62,5 @@
 
 ## Non-Issues For This Pass
 - Electron packaging v1 has started as a minimal local shell; full portable Python bundling remains out of scope for this pass.
+- Electron dev uses fixed Vite port `5173`; if `electron:dev` reports the port is already in use, stop the old Vite process first instead of letting Vite auto-increment to another port.
 - Lovable reference app migration is not the first priority.

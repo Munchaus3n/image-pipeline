@@ -6,7 +6,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "electron:dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm:electron:dev:ui\" \"npm:electron:dev:app\"",
-    "electron:dev:ui": "npm --prefix editor-ui run dev -- --host 127.0.0.1",
+    "electron:dev:ui": "npm --prefix editor-ui run dev -- --host 127.0.0.1 --port 5173 --strictPort",
     "electron:dev:app": "set ELECTRON_RUN_AS_NODE=&& wait-on tcp:127.0.0.1:5173 && electron .",
     "electron:build-ui": "npm --prefix editor-ui run build",
     "electron:dist": "npm run electron:build-ui && set ELECTRON_RUN_AS_NODE=&& electron-builder",
@@ -29,6 +29,7 @@
       "pipeline.py",
       "config.ini",
       "templates/**",
+      "templates_custom.json",
       "realesrgan-ncnn-vulkan/**",
       "!output/**",
       "!.cache/**",
