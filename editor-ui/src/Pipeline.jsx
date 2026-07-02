@@ -946,7 +946,17 @@ function ActivityPanel({ logRef, log, running, open, setOpen }) {
           aria-label={open ? "Collapse telemetry" : "Expand telemetry"}
           aria-expanded={open}
         >
-          <span aria-hidden="true">{"\u2304"}</span>
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            className="pipeline-panel-chevron"
+            style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
+            aria-hidden="true"
+          >
+            <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
         </button>
       </div>
       {open && (

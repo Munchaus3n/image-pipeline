@@ -1661,27 +1661,29 @@
 }
 
 .pipeline-screen .pipeline-bottom-panel-toggle {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 9px;
-  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
-  background: color-mix(in srgb, var(--panel2) 72%, transparent);
-  color: color-mix(in srgb, var(--accent) 74%, var(--dim)) !important;
-  font-size: 16px !important;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim) !important;
+  font-size: 0 !important;
   line-height: 1;
-  transition: transform 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+  transition: background-color 0.16s ease, color 0.16s ease;
 }
 
 .pipeline-screen .pipeline-bottom-panel-toggle.is-open {
-  transform: rotate(180deg);
+  transform: none;
 }
 
 .pipeline-screen .pipeline-bottom-panel-toggle:hover {
-  background: color-mix(in srgb, var(--accent) 10%, var(--panel2));
-  color: color-mix(in srgb, var(--accent) 92%, var(--text)) !important;
+  background: color-mix(in srgb, var(--surface-elevated) 28%, transparent);
+  color: var(--dim) !important;
 }
 
 .pipeline-screen .pipeline-activity-console {
