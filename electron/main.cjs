@@ -6,7 +6,10 @@ const { startPythonApi, stopPythonApi } = require("./python-manager.cjs");
 
 const isDev = !app.isPackaged;
 const DEV_RENDERER_URL = "http://127.0.0.1:5173";
+const APP_NAME = "Cutout Studio";
 let mainWindow = null;
+
+app.setName(APP_NAME);
 
 function appRoot() {
   return path.resolve(__dirname, "..");
@@ -14,6 +17,7 @@ function appRoot() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
+    title: APP_NAME,
     width: 1400,
     height: 900,
     minWidth: 1200,
@@ -64,7 +68,7 @@ function errorHtml(message) {
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Image Pipeline Pro</title>
+    <title>Cutout Studio</title>
     <style>
       body { margin: 0; font-family: system-ui, sans-serif; background: #0b0f17; color: #e5edf7; }
       main { max-width: 720px; margin: 12vh auto; padding: 32px; }
@@ -75,7 +79,7 @@ function errorHtml(message) {
   </head>
   <body>
     <main>
-      <h1>Image Pipeline Pro could not start</h1>
+      <h1>Cutout Studio could not start</h1>
       <p>Electron v1 uses a local or system Python runtime and a fixed local Vite port in dev. Install Python dependencies, free port 5173 if needed, and retry from this workspace.</p>
       <pre>${escaped}</pre>
     </main>
@@ -123,7 +127,7 @@ async function loadStartupError(error) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
   }
-  dialog.showErrorBox("Image Pipeline Pro", error?.message || String(error));
+  dialog.showErrorBox(APP_NAME, error?.message || String(error));
   await mainWindow.loadURL(errorHtml(error?.stack || error?.message || error));
 }
 

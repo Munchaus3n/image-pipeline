@@ -176,8 +176,8 @@ export function Root() {
         <div className="app-header app-logo">
           <div className="app-logo-mark" aria-hidden="true"><span /></div>
           <div>
-            <div className="app-title">Pipeline Pro</div>
-            <div className="app-version">Image workflow</div>
+            <div className="app-title">Cutout Studio</div>
+            <div className="app-version">Product image workflow</div>
           </div>
         </div>
 
