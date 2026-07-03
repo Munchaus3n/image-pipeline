@@ -276,6 +276,7 @@ export default function Settings({ onThemeChange }) {
       });
 
       if (response.ok) {
+        window.dispatchEvent(new CustomEvent("cutout-settings-saved", { detail: { settings } }));
         setStatus("Saved");
         setDirty(false);
         setTimeout(() => setStatus(""), 2000);

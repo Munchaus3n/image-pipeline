@@ -1239,6 +1239,28 @@ export default function Pipeline({
   // 2. A mount-only effect restores saved paths from settings.json once.
   // Both are mount-only so focus changes or folder pickers can't overwrite
   // in-session edits.
+  const applySettingsData = useCallback((s) => {
+    // Only apply non-path settings here so returning from Settings does not overwrite folder edits.
+    if (s.output?.folder_mode) setFolderMode(s.output.folder_mode);
+    if (typeof s.output?.do_upscale === "boolean") setDoUpscale(s.output.do_upscale);
+    if (s.output?.upscale_scale === "2" || s.output?.upscale_scale === "4") setScale(s.output.upscale_scale);
+    if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
+    if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
+    if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
+    if (s.processing?.bg_device_mode) {
+      setBgDeviceMode(normalizeBgDeviceMode(s.processing.bg_device_mode));
+    } else if (typeof s.processing?.force_cpu === "boolean") {
+      setBgDeviceMode(s.processing.force_cpu ? "cpu" : "gpu_auto");
+    }
+    if (typeof s.processing?.reuse_exact_duplicates === "boolean") {
+      setReuseExactDuplicates(s.processing.reuse_exact_duplicates);
+    }
+    if (Object.prototype.hasOwnProperty.call(s.processing ?? {}, "upscale_max_px")) {
+      const savedMaxPx = Number(s.processing.upscale_max_px);
+      setUpscaleMaxPx(Number.isFinite(savedMaxPx) && savedMaxPx > 0 ? String(savedMaxPx) : "3600");
+    }
+  }, []);
+
   const loadSettings = useCallback(() => {
     fetch(`${BASE}/models/rembg`)
       .then(r => r.ok ? r.json() : null)
@@ -1251,29 +1273,10 @@ export default function Pipeline({
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.settings) return;
-        const s = data.settings;
-        // BUG-15 FIX: only non-path settings here — no setInputDir / setOutputDir
-        if (s.output?.folder_mode) setFolderMode(s.output.folder_mode);
-        if (typeof s.output?.do_upscale === "boolean") setDoUpscale(s.output.do_upscale);
-        if (s.output?.upscale_scale === "2" || s.output?.upscale_scale === "4") setScale(s.output.upscale_scale);
-        if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
-        if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
-        if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
-        if (s.processing?.bg_device_mode) {
-          setBgDeviceMode(normalizeBgDeviceMode(s.processing.bg_device_mode));
-        } else if (typeof s.processing?.force_cpu === "boolean") {
-          setBgDeviceMode(s.processing.force_cpu ? "cpu" : "gpu_auto");
-        }
-        if (typeof s.processing?.reuse_exact_duplicates === "boolean") {
-          setReuseExactDuplicates(s.processing.reuse_exact_duplicates);
-        }
-        if (Object.prototype.hasOwnProperty.call(s.processing ?? {}, "upscale_max_px")) {
-          const savedMaxPx = Number(s.processing.upscale_max_px);
-          setUpscaleMaxPx(Number.isFinite(savedMaxPx) && savedMaxPx > 0 ? String(savedMaxPx) : "3600");
-        }
+        applySettingsData(data.settings);
       })
       .catch(() => {});
-  }, []);
+  }, [applySettingsData]);
 
   // Load non-path settings on mount only.
   // This avoids overwriting in-session edits when the window regains focus
@@ -1281,6 +1284,18 @@ export default function Pipeline({
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
+
+  useEffect(() => {
+    const handleSettingsSaved = (event) => {
+      if (event.detail?.settings) {
+        applySettingsData(event.detail.settings);
+      } else {
+        loadSettings();
+      }
+    };
+    window.addEventListener("cutout-settings-saved", handleSettingsSaved);
+    return () => window.removeEventListener("cutout-settings-saved", handleSettingsSaved);
+  }, [applySettingsData, loadSettings]);
 
   useEffect(() => {
     fetch(`${BASE}/session`)
@@ -1395,15 +1410,6 @@ export default function Pipeline({
   const handleReuseExactDuplicatesChange = useCallback((enabled) => {
     setReuseExactDuplicates(enabled);
     saveProcessingSettingsPatch({ reuse_exact_duplicates: enabled }).catch(() => {});
-  }, []);
-
-  const handleBgDeviceModeChange = useCallback((value) => {
-    const nextMode = normalizeBgDeviceMode(value);
-    setBgDeviceMode(nextMode);
-    saveProcessingSettingsPatch({
-      bg_device_mode: nextMode,
-      force_cpu: nextMode === "cpu",
-    }).catch(() => {});
   }, []);
 
   const nothingSelected = !doUpscale && !doRembg;
@@ -1562,31 +1568,16 @@ export default function Pipeline({
                     {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </Row>
-                <Row label="BG device" className="pipeline-row-bg-device" controlsClassName="pipeline-row-controls-wrap">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch", width: 170 }}>
-                    <select
-                      value={bgDeviceMode}
-                      onChange={e => handleBgDeviceModeChange(e.target.value)}
-                      style={{
-                        background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
-                        borderRadius: 4, padding: "4px 8px", fontSize: 11, width: "100%",
-                        outline: "none", fontFamily: "inherit", colorScheme: "dark",
-                      }}
-                    >
-                      {BG_DEVICE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
-                    <span style={{ fontSize: 10, color: C.dim, lineHeight: 1.35 }}>
-                      {(BG_DEVICE_OPTIONS.find(option => option.value === bgDeviceMode) || BG_DEVICE_OPTIONS[0]).help}
-                    </span>
-                  </div>
-                </Row>
                 <div style={{
-                  padding: "7px 0 2px",
+                  padding: "7px 0 0",
                   color: C.dim,
                   fontSize: 10,
                   lineHeight: 1.35,
                 }}>
-                  Using <span style={{ color: C.text }}>{rembgModel}</span> on <span style={{ color: C.text }}>{bgDeviceLabel}</span>
+                  <div>
+                    Using <span style={{ color: C.text }}>{rembgModel}</span>{" \u00b7 "}<span style={{ color: C.text }}>{bgDeviceLabel}</span>
+                  </div>
+                  <div style={{ color: C.dim2, marginTop: 2 }}>Device mode is set in Settings.</div>
                 </div>
               </>
             )}
