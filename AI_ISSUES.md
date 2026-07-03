@@ -64,4 +64,5 @@
 - Electron packaging v1 has started as a minimal local shell; full portable Python bundling remains out of scope for this pass.
 - Electron dev uses fixed Vite port `5173`; if `electron:dev` reports the port is already in use, stop the old Vite process first instead of letting Vite auto-increment to another port.
 - API model warmup can download/cache rembg weights ahead of time, but it cannot keep the model loaded for actual processing because Electron runs `pipeline.py` as a subprocess with its own Python process. True instant model reuse requires a future persistent worker process.
+- Background removal defaults to CPU / Stable because GPU mode can OOM or make the desktop less usable; GPU remains an experimental opt-in, with GPU + CPU fallback available for recovery from GPU OOM.
 - Lovable reference app migration is not the first priority.

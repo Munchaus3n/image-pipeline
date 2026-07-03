@@ -125,6 +125,7 @@ def _is_avif_decode_supported() -> bool:
 _AVIF_DECODE_SUPPORTED = _is_avif_decode_supported()
 
 _ALLOWED_REMBG_FALLBACKS = {"auto"}
+_ALLOWED_BG_DEVICE_MODES = {"cpu", "gpu", "gpu_auto"}
 
 def _open_image_checked(path: Path) -> Image.Image:
     if path.suffix.lower() == ".avif" and not _AVIF_DECODE_SUPPORTED:
@@ -153,6 +154,14 @@ def _read_image_snapshot(path: Path, *, missing_detail: str) -> bytes:
 def _normalize_rembg_fallback(value: Any) -> str:
     raw = str(value or "").strip().lower()
     return raw if raw in _ALLOWED_REMBG_FALLBACKS else "auto"
+
+def _normalize_bg_device_mode(value: Any, processing: dict | None = None) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in _ALLOWED_BG_DEVICE_MODES:
+        return raw
+    if isinstance(processing, dict) and "force_cpu" in processing:
+        return "cpu" if bool(processing.get("force_cpu")) else "gpu_auto"
+    return "cpu"
 
 def _g(key, fallback):
     return _cfg.getint("guides", key, fallback=fallback)
@@ -482,6 +491,7 @@ class PipelineConfig(BaseModel):
     exclude_rembg:  list[str] = Field(default_factory=list)
     skip_files:     list[str] = Field(default_factory=list)
     rembg_model:    str = ""
+    bg_device_mode: Literal["cpu", "gpu", "gpu_auto"] = "cpu"
     resume:         bool = False
     upscale_max_px: int = 0
     reuse_exact_duplicates: bool = True
@@ -943,7 +953,7 @@ def clear_session():
 _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
                                           "rembg_model": "birefnet-general", "rembg_fallback": "auto",
-                     "history_keep": 30, "force_cpu": False, "wipe_input_after_run": False,
+                     "bg_device_mode": "cpu", "history_keep": 30, "force_cpu": True, "wipe_input_after_run": False,
                      "reuse_exact_duplicates": True, "upscale_max_px": 3600},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
@@ -980,8 +990,10 @@ def _load_saved_settings_file() -> dict:
         if not isinstance(data, dict):
             return {}
         processing = data.get("processing")
-        if isinstance(processing, dict) and "rembg_fallback" in processing:
-            processing["rembg_fallback"] = _normalize_rembg_fallback(processing.get("rembg_fallback"))
+        if isinstance(processing, dict):
+            if "rembg_fallback" in processing:
+                processing["rembg_fallback"] = _normalize_rembg_fallback(processing.get("rembg_fallback"))
+            processing["bg_device_mode"] = _normalize_bg_device_mode(processing.get("bg_device_mode"), processing)
         return data
     except Exception:
         return {}
@@ -991,6 +1003,10 @@ def _merged_settings(*layers: dict) -> dict:
     for layer in layers:
         if isinstance(layer, dict):
             merged = _deep_merge(merged, layer)
+    processing = merged.get("processing")
+    if isinstance(processing, dict):
+        processing["bg_device_mode"] = _normalize_bg_device_mode(processing.get("bg_device_mode"), processing)
+        processing["force_cpu"] = processing["bg_device_mode"] == "cpu"
     return merged
 
 @app.get("/settings")
@@ -1004,8 +1020,11 @@ def save_settings(payload: SettingsPayload):
         incoming = payload.settings if isinstance(payload.settings, dict) else {}
         merged = _merged_settings(existing, incoming)
         processing = merged.get("processing")
-        if isinstance(processing, dict) and "rembg_fallback" in processing:
-            processing["rembg_fallback"] = _normalize_rembg_fallback(processing.get("rembg_fallback"))
+        if isinstance(processing, dict):
+            if "rembg_fallback" in processing:
+                processing["rembg_fallback"] = _normalize_rembg_fallback(processing.get("rembg_fallback"))
+            processing["bg_device_mode"] = _normalize_bg_device_mode(processing.get("bg_device_mode"), processing)
+            processing["force_cpu"] = processing["bg_device_mode"] == "cpu"
         SETTINGS_FILE.write_text(
             json.dumps(merged, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -1083,6 +1102,9 @@ async def run_pipeline(cfg: PipelineConfig):
         rembg_fallback = _normalize_rembg_fallback(_s.get("processing", {}).get("rembg_fallback", "auto"))
         if rembg_fallback:
             cmd += ["--rembg-fallback", str(rembg_fallback)]
+        processing_settings = _s.get("processing", {}) if isinstance(_s.get("processing"), dict) else {}
+        bg_device_mode = _normalize_bg_device_mode(cfg.bg_device_mode, processing_settings)
+        cmd += ["--bg-device-mode", bg_device_mode]
         if requested_upscale_max_px <= 0:
             try:
                 requested_upscale_max_px = int(_s.get("processing", {}).get("upscale_max_px") or 0)
@@ -1090,9 +1112,12 @@ async def run_pipeline(cfg: PipelineConfig):
                 requested_upscale_max_px = 0
         if _s.get("processing", {}).get("wipe_input_after_run", False):
             cmd.append("--wipe-input-after-run")
-        if _s.get("processing", {}).get("force_cpu", False):
+        if bg_device_mode == "cpu":
             cmd.append("--force-cpu")
     except Exception:
+        cmd += ["--bg-device-mode", _normalize_bg_device_mode(cfg.bg_device_mode)]
+        if cfg.bg_device_mode == "cpu":
+            cmd.append("--force-cpu")
         pass
     if requested_upscale_max_px <= 0:
         requested_upscale_max_px = DEFAULT_UPSCALE_MAX_PX

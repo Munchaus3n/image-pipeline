@@ -571,6 +571,39 @@ def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
     return ["CPUExecutionProvider"], "CPU"
 
 
+def _normalize_bg_device_mode(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in {"cpu", "gpu", "gpu_auto"} else "cpu"
+
+
+def _available_gpu_provider() -> str | None:
+    try:
+        available = ort.get_available_providers()
+        if "DmlExecutionProvider" in available:
+            return "DmlExecutionProvider"
+        if "CUDAExecutionProvider" in available:
+            return "CUDAExecutionProvider"
+    except Exception:
+        pass
+    return None
+
+
+def _select_bg_device_providers(bg_device_mode: str = "cpu") -> tuple[list[str], str, bool, bool]:
+    mode = _normalize_bg_device_mode(bg_device_mode)
+    if mode == "cpu":
+        return ["CPUExecutionProvider"], "CPU / stable", False, False
+
+    gpu_provider = _available_gpu_provider()
+    if mode == "gpu":
+        if gpu_provider:
+            return [gpu_provider], "GPU / experimental", False, True
+        return ["CPUExecutionProvider"], "GPU / experimental", False, False
+
+    if gpu_provider:
+        return [gpu_provider, "CPUExecutionProvider"], "GPU + CPU fallback", True, True
+    return ["CPUExecutionProvider"], "GPU + CPU fallback", True, False
+
+
 def _is_oom_error(msg: str) -> bool:
     m = (msg or "").lower()
     return any(token in m for token in (
@@ -805,6 +838,7 @@ def batch_remove_bg(
     corrupted_dir: Path | None = None,
     force_cpu: bool = False,
     rembg_fallback: str = "auto",
+    bg_device_mode: str = "cpu",
     max_input_px: int = DEFAULT_REMBG_MAX_PX,
 ) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
@@ -828,11 +862,16 @@ def batch_remove_bg(
     )
     print(f"__total__:{len(upscaled)}", flush=True)
 
-    providers, device_label = _select_onnx_providers(force_cpu=force_cpu)
-    info(f"Using {device_label} for background removal ({REMBG_MODEL}).")
-    if device_label == "CPU" and not force_cpu:
-        info("  → GPU not available: install onnxruntime-directml to enable DirectML.")
-        info("  → pip uninstall onnxruntime && pip install onnxruntime-directml")
+    if force_cpu:
+        bg_device_mode = "cpu"
+    bg_device_mode = _normalize_bg_device_mode(bg_device_mode)
+    providers, device_label, fallback_enabled, gpu_available = _select_bg_device_providers(bg_device_mode)
+    info(f"BG device: {device_label}.")
+    print(f"__bg_device__:{device_label}", flush=True)
+    info(f"Using providers: {', '.join(providers)}")
+    if bg_device_mode in {"gpu", "gpu_auto"} and not gpu_available:
+        warn("No DirectML/CUDA provider available; using CPU for this run.")
+        info("  -> install onnxruntime-directml to enable DirectML.")
     info(f"Loading {REMBG_MODEL} model. First use may download weights if missing.")
     print(f"__model_loading__:{REMBG_MODEL}:{device_label}", flush=True)
     console.print()
@@ -855,18 +894,23 @@ def batch_remove_bg(
                               provider_options=provider_options)
     except Exception as e:
         if (
-            rembg_fallback == "auto"
-            and not force_cpu
+            fallback_enabled
             and _is_oom_error(str(e))
         ):
             warn("GPU OOM during model load — falling back to CPU for entire batch.")
+            print("__bg_device__:GPU OOM -> switched to CPU for remainder", flush=True)
             try:
                 session = new_session(REMBG_MODEL,
                                       providers=["CPUExecutionProvider"],
                                       sess_options=sess_opts)
-                device_label = "CPU"
+                device_label = "CPU / stable"
+                providers = ["CPUExecutionProvider"]
             except Exception as cpu_e:
                 raise RuntimeError(f"GPU OOM fallback to CPU failed during model load: {cpu_e}") from cpu_e
+        elif bg_device_mode == "gpu" and _is_oom_error(str(e)):
+            raise RuntimeError(
+                "GPU OOM in experimental mode. Try CPU / Stable or GPU + CPU fallback."
+            ) from e
         else:
             raise
     model_load_elapsed = time.perf_counter() - model_load_start
@@ -912,7 +956,7 @@ def batch_remove_bg(
         ok("All images already processed.")
         return outputs
 
-    cpu_session = session if force_cpu else None
+    cpu_session = session if providers == ["CPUExecutionProvider"] else None
 
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch") as prefetch_pool:
         prefetch_future: Future | None = None
@@ -938,8 +982,9 @@ def batch_remove_bg(
 
                 success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px)
 
-                if (not success) and (not force_cpu) and _is_oom_error(error_msg or ""):
+                if (not success) and fallback_enabled and _is_oom_error(error_msg or ""):
                     print(f"__err_oom_gpu__:{src.name}", flush=True)
+                    print("__bg_device__:GPU OOM -> switched to CPU for remainder", flush=True)
                     warn(f"GPU OOM on {src.name} — switching to CPU for remainder of batch.")
                     if cpu_session is None:
                         try:
@@ -957,6 +1002,8 @@ def batch_remove_bg(
                             continue
                     session = cpu_session  # permanent switch for all remaining images
                     success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px)
+                elif (not success) and bg_device_mode == "gpu" and _is_oom_error(error_msg or ""):
+                    err("GPU OOM in experimental mode. Try CPU / Stable or GPU + CPU fallback.")
 
                 if success:
                     ok(f"{src.name} → processed/{dst.relative_to(dst_root)}")
@@ -985,6 +1032,7 @@ def main():
     parser.add_argument("--no-rembg",         action="store_true")
     parser.add_argument("--rembg-model",      default="")
     parser.add_argument("--force-cpu",        action="store_true")
+    parser.add_argument("--bg-device-mode",   default="cpu", choices=["cpu", "gpu", "gpu_auto"])
     parser.add_argument("--exclude-rembg",    default="")
     parser.add_argument("--skip-files",       default="")
     parser.add_argument("--selection-manifest", default="")
@@ -995,6 +1043,7 @@ def main():
     parser.add_argument("--no-reuse-exact-duplicates", action="store_true")
     parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
+    args.bg_device_mode = "cpu" if args.force_cpu else _normalize_bg_device_mode(args.bg_device_mode)
     rembg_fallback_raw = args.rembg_fallback
     args.rembg_fallback = _normalize_rembg_fallback(args.rembg_fallback)
     if str(rembg_fallback_raw or "").strip().lower() != args.rembg_fallback:
@@ -1223,6 +1272,7 @@ def main():
             corrupted_dir=corrupted_dir,
             force_cpu=args.force_cpu,
             rembg_fallback=args.rembg_fallback,
+            bg_device_mode=args.bg_device_mode,
             max_input_px=args.rembg_max_px,
         )
     else:

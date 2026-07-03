@@ -99,6 +99,16 @@ const C = {
   yellow:  "var(--yellow)",  blue:    "var(--accent)",   magenta: "var(--magenta)",
 };
 
+const BG_DEVICE_OPTIONS = [
+  { value: "cpu", label: "CPU / Stable", help: "Slower, safest, best while using PC." },
+  { value: "gpu", label: "GPU / Experimental", help: "Fastest if it works; may OOM or make PC lag." },
+  { value: "gpu_auto", label: "GPU + CPU fallback", help: "Tries GPU, switches to CPU if GPU OOM." },
+];
+
+function normalizeBgDeviceMode(value) {
+  return BG_DEVICE_OPTIONS.some(option => option.value === value) ? value : "cpu";
+}
+
 // ── Primitives ────────────────────────────────────────────────────────────────
 
 function Row({ label, children, className = "", controlsClassName = "" }) {
@@ -326,6 +336,7 @@ const MACHINE_TOKEN_PREFIXES = [
   "__processing_image__:",
   "__model_loading__:",
   "__model_loaded__:",
+  "__bg_device__:",
   "__stage_start__:",
   "__bg_downscale__:",
   "__skip_upscale__:",
@@ -612,6 +623,13 @@ function usePipeline() {
       return;
     }
 
+    if (raw.startsWith("__bg_device__:")) {
+      const device = raw.slice(14).trim();
+      const kind = /oom/i.test(device) ? "warn" : "info";
+      appendTelemetryEntry(setLog, telemetryEntry(`BG device: ${device}`, kind));
+      return;
+    }
+
     if (raw.startsWith("__bg_downscale__:")) {
       const [fname = "image", resize = ""] = raw.slice(17).split(":").filter(Boolean);
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, `BG safety downscale ${resize}`), "warn"));
@@ -720,7 +738,7 @@ function usePipeline() {
     }
   }, [classify, markFinalImage, pushLivePreview, revealKnownPreview]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false, upscaleMaxPx = 0, reuseExactDuplicates = true }) => {
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", bgDeviceMode = "cpu", resume = false, upscaleMaxPx = 0, reuseExactDuplicates = true }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -751,6 +769,7 @@ function usePipeline() {
           folder_mode: folderMode, do_upscale: doUpscale, scale,
           do_rembg: doRembg, input_dir: inputDir.trim(), output_dir: outputDir.trim(),
           exclude_rembg: excludeList, skip_files: skipList, rembg_model: rembgModel, resume,
+          bg_device_mode: normalizeBgDeviceMode(bgDeviceMode),
           upscale_max_px: upscaleMaxPx,
           reuse_exact_duplicates: reuseExactDuplicates,
         }),
@@ -1206,6 +1225,7 @@ export default function Pipeline({
   const [canvasSize, setCanvasSize] = useState("1440");
   const [thumbnail, setThumbnail] = useState(true);
   const [rembgModel, setRembgModel] = useState("birefnet-general");
+  const [bgDeviceMode, setBgDeviceMode] = useState("cpu");
   const [upscaleMaxPx, setUpscaleMaxPx] = useState("3600");
   const [reuseExactDuplicates, setReuseExactDuplicates] = useState(true);
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
@@ -1239,6 +1259,11 @@ export default function Pipeline({
         if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
         if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
         if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
+        if (s.processing?.bg_device_mode) {
+          setBgDeviceMode(normalizeBgDeviceMode(s.processing.bg_device_mode));
+        } else if (typeof s.processing?.force_cpu === "boolean") {
+          setBgDeviceMode(s.processing.force_cpu ? "cpu" : "gpu_auto");
+        }
         if (typeof s.processing?.reuse_exact_duplicates === "boolean") {
           setReuseExactDuplicates(s.processing.reuse_exact_duplicates);
         }
@@ -1328,13 +1353,14 @@ export default function Pipeline({
     start({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
       excludeList: activeExclude, skipList, rembgModel, resume: false,
+      bgDeviceMode,
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
       reuseExactDuplicates,
     });
     rememberInputDir?.(inputDir);
     rememberOutputDir?.(outputDir);
     setShowResume(false);
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, thumbs, rembgModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, thumbs, rembgModel, bgDeviceMode, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleResume = useCallback(() => {
     if (!resumeSession?.src_root) return;
@@ -1351,13 +1377,14 @@ export default function Pipeline({
       folderMode, doUpscale, scale, doRembg,
       inputDir: resumeInputDir,
       outputDir: resumeOutputDir, excludeList: activeExclude, skipList, rembgModel, resume: true,
+      bgDeviceMode,
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
       reuseExactDuplicates,
     });
     rememberInputDir?.(resumeInputDir);
     rememberOutputDir?.(resumeOutputDir);
     setShowResume(false);
-  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, thumbs, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
+  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, thumbs, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, bgDeviceMode, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleStartFresh = useCallback(async () => {
     try { await fetch(`${BASE}/session`, { method: "DELETE" }); } catch { void 0; }
@@ -1368,6 +1395,15 @@ export default function Pipeline({
   const handleReuseExactDuplicatesChange = useCallback((enabled) => {
     setReuseExactDuplicates(enabled);
     saveProcessingSettingsPatch({ reuse_exact_duplicates: enabled }).catch(() => {});
+  }, []);
+
+  const handleBgDeviceModeChange = useCallback((value) => {
+    const nextMode = normalizeBgDeviceMode(value);
+    setBgDeviceMode(nextMode);
+    saveProcessingSettingsPatch({
+      bg_device_mode: nextMode,
+      force_cpu: nextMode === "cpu",
+    }).catch(() => {});
   }, []);
 
   const nothingSelected = !doUpscale && !doRembg;
@@ -1512,18 +1548,38 @@ export default function Pipeline({
               </div>
             </Row>
             {doRembg && (
-              <Row label="BG model">
-                <select
-                  value={rembgModel} onChange={e => setRembgModel(e.target.value)}
-                  style={{
-                    background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
-                    borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
-                    outline: "none", fontFamily: "inherit", colorScheme: "dark",
-                  }}
-                >
-                  {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </Row>
+              <>
+                <Row label="BG model">
+                  <select
+                    value={rembgModel} onChange={e => setRembgModel(e.target.value)}
+                    style={{
+                      background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
+                      borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
+                      outline: "none", fontFamily: "inherit", colorScheme: "dark",
+                    }}
+                  >
+                    {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </Row>
+                <Row label="BG device" className="pipeline-row-bg-device" controlsClassName="pipeline-row-controls-wrap">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch", width: 170 }}>
+                    <select
+                      value={bgDeviceMode}
+                      onChange={e => handleBgDeviceModeChange(e.target.value)}
+                      style={{
+                        background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
+                        borderRadius: 4, padding: "4px 8px", fontSize: 11, width: "100%",
+                        outline: "none", fontFamily: "inherit", colorScheme: "dark",
+                      }}
+                    >
+                      {BG_DEVICE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                    <span style={{ fontSize: 10, color: C.dim, lineHeight: 1.35 }}>
+                      {(BG_DEVICE_OPTIONS.find(option => option.value === bgDeviceMode) || BG_DEVICE_OPTIONS[0]).help}
+                    </span>
+                  </div>
+                </Row>
+              </>
             )}
           </ProcessPanelSection>
 
