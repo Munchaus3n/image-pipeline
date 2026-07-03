@@ -176,13 +176,18 @@ _ANSI_RE = re.compile(
     r'|\[[0-?]*[ -/]*[@-~]'
     r'|\][^\x07\x1b]*(?:\x07|\x1b\\))'
 )
-_CTRL_RE = re.compile(r'[\r\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+_CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
 def _clean(raw: bytes) -> list[str]:
     text = raw.decode("utf-8", errors="replace")
     text = _ANSI_RE.sub("", text)
-    text = _CTRL_RE.sub("", text)
-    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+    lines = re.split(r"[\r\n]+", text)
+    cleaned = []
+    for line in lines:
+        line = _CTRL_RE.sub("", line).strip()
+        if line:
+            cleaned.append(line)
+    return cleaned
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1152,7 +1157,7 @@ async def run_pipeline(cfg: PipelineConfig):
 
         def _update_session_progress(line: str):
             nonlocal progress_index
-            if not line.startswith(done_prefixes):
+            if not any(prefix in line for prefix in done_prefixes):
                 return
             progress_index += 1
             try:

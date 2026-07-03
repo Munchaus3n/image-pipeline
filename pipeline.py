@@ -739,6 +739,7 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
 
         if already_done:
             skip(f"{src.name} (already upscaled)")
+            print(f"__processing_image__:upscale:{src}", flush=True)
             print(f"__skip_upscale__:{src.name}", flush=True)
             continue
 
@@ -748,11 +749,13 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
             w, h = img.size
             if upscale_max_px > 0 and max(w, h) >= upscale_max_px:
                 skip(f"{src.name} ({w}×{h} — already ≥ {upscale_max_px}px)")
+                print(f"__processing_image__:upscale:{src}", flush=True)
                 print(f"__skip_upscale__:{src.name}", flush=True)
                 outputs[-1] = src
                 continue
         except RuntimeError as e:
             warn(f"{src.name}: {e}")
+            print(f"__processing_image__:upscale:{src}", flush=True)
             print(f"__err_upscale__:{src.name}", flush=True)
             outputs[-1] = src
             if corrupted_dir:
@@ -880,6 +883,7 @@ def batch_remove_bg(
 
         if dst.exists() and _is_valid_existing_output(dst):
             skip(f"{src.name} (already processed)")
+            print(f"__processing_image__:rembg:{src}", flush=True)
             print(f"__skip_rembg__:{src.name}", flush=True)
         elif src in no_rembg_paths or src in excluded_paths:
             if dst.exists():
@@ -889,9 +893,11 @@ def batch_remove_bg(
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tight_crop(_open_image_checked(src).convert("RGBA")).save(dst, format="PNG")
                 ok(f"{src.name} → processed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
+                print(f"__processing_image__:rembg:{src}", flush=True)
                 print(f"__skip_rembg__:{src.name}", flush=True)
             except Exception as e:
                 err(f"Crop failed on {src.name}: {e}")
+                print(f"__processing_image__:rembg:{src}", flush=True)
                 print(f"__err_rembg__:{src.name}", flush=True)
         else:
             if dst.exists():

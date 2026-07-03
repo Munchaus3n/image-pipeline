@@ -9,6 +9,7 @@ KNOWN LIMITATIONS (web build):
 */
 
 const BASE = apiBase();
+const AUTO_OPEN_EDITOR_AFTER_PROCESS = true;
 
 // Opens a folder in the native OS file explorer via the API server.
 // path="" → server defaults to OUTPUT_ROOT.
@@ -321,6 +322,42 @@ function parseMatchCount(payload) {
   return match ? Number.parseInt(match[1], 10) : 0;
 }
 
+const MACHINE_TOKEN_PREFIXES = [
+  "__processing_image__:",
+  "__model_loading__:",
+  "__model_loaded__:",
+  "__stage_start__:",
+  "__bg_downscale__:",
+  "__skip_upscale__:",
+  "__err_upscale__:",
+  "__ok_upscale__:",
+  "__skip_rembg__:",
+  "__err_rembg__:",
+  "__ok_rembg__:",
+  "__err_oom_gpu__:",
+  "__processing__:",
+  "__total__:",
+  "__done__",
+];
+
+function extractMachineToken(raw) {
+  const line = String(raw ?? "");
+  let best = null;
+  MACHINE_TOKEN_PREFIXES.forEach((prefix) => {
+    const index = line.indexOf(prefix);
+    if (index === -1) return;
+    if (!best || index < best.index || (index === best.index && prefix.length > best.prefix.length)) {
+      best = { index, prefix };
+    }
+  });
+  if (!best) return "";
+  return line.slice(best.index).trim();
+}
+
+function fileNameFromPath(path = "") {
+  return String(path || "").replace(/.*[/\\]/, "");
+}
+
 function duplicateReuseCount(raw) {
   const line = normalizeTelemetryLine(raw);
   const match =
@@ -391,6 +428,10 @@ function usePipeline() {
   const stageRef    = useRef("upscale");
   const recentLog   = useRef([]);
   const previewPathByFile = useRef(new Map());
+  const previewPathRef = useRef("");
+  const finalStageRef = useRef("rembg");
+  const completedImageSet = useRef(new Set());
+  const completionLoggedRef = useRef(false);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -426,7 +467,30 @@ function usePipeline() {
     });
   }, []);
 
+  const resolvePreviewPath = useCallback((fname) => {
+    const mapped = previewPathByFile.current.get(fname);
+    if (mapped) return mapped;
+    return fileNameFromPath(previewPathRef.current) === fname ? previewPathRef.current : "";
+  }, []);
+
+  const revealKnownPreview = useCallback((fname) => {
+    const path = resolvePreviewPath(fname);
+    if (path) {
+      previewPathRef.current = path;
+      setPreviewPath(path);
+    }
+    pushLivePreview(fname, path);
+  }, [pushLivePreview, resolvePreviewPath]);
+
+  const markFinalImage = useCallback((stageName, fname) => {
+    if (!fname || stageName !== finalStageRef.current || completedImageSet.current.has(fname)) return;
+    completedImageSet.current.add(fname);
+    setImageDone(completedImageSet.current.size);
+    setRecentDone(prev => [fname, ...prev].slice(0, 8));
+  }, []);
+
   const appendLine = useCallback((raw) => {
+    raw = extractMachineToken(raw) || raw;
     // ── Structured machine-readable tokens ──────────────────────────────────
     if (raw.startsWith("__total__:")) {
       const n = parseInt(raw.slice(10), 10);
@@ -436,12 +500,9 @@ function usePipeline() {
     if (raw.startsWith("__ok_upscale__:")) {
       const fname = raw.slice(15);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "ok" } }));
-      pushLivePreview(fname, previewPathByFile.current.get(fname) || "");
-      if (!doneSet.current.has(fname)) {
-        doneSet.current.add(fname);
-        setImageDone(doneSet.current.size);
-        setRecentDone(prev => [fname, ...prev].slice(0, 8));
-      }
+      revealKnownPreview(fname);
+      doneSet.current.add(`upscale:${fname}`);
+      markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, done: s.done + 1 }));
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [DONE]"), "success"), { clearPending: true });
       return;
@@ -449,12 +510,9 @@ function usePipeline() {
     if (raw.startsWith("__ok_rembg__:")) {
       const fname = raw.slice(13);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "ok" } }));
-      pushLivePreview(fname, previewPathByFile.current.get(fname) || "");
-      if (!doneSet.current.has(fname)) {
-        doneSet.current.add(fname);
-        setImageDone(doneSet.current.size);
-        setRecentDone(prev => [fname, ...prev].slice(0, 8));
-      }
+      revealKnownPreview(fname);
+      doneSet.current.add(`rembg:${fname}`);
+      markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, done: s.done + 1 }));
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [DONE]"), "success"), { clearPending: true });
       return;
@@ -462,7 +520,9 @@ function usePipeline() {
     if (raw.startsWith("__skip_upscale__:")) {
       const fname = raw.slice(17);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "skip" } }));
-      if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
+      revealKnownPreview(fname);
+      if (!skipSet.current.has(`upscale:${fname}`)) { skipSet.current.add(`upscale:${fname}`); setImageSkipped(skipSet.current.size); }
+      markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, skip: s.skip + 1 }));
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [SKIP]"), "skip"), { clearPending: true });
       return;
@@ -470,7 +530,9 @@ function usePipeline() {
     if (raw.startsWith("__skip_rembg__:")) {
       const fname = raw.slice(15);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "skip" } }));
-      if (!skipSet.current.has(fname)) { skipSet.current.add(fname); setImageSkipped(skipSet.current.size); }
+      revealKnownPreview(fname);
+      if (!skipSet.current.has(`rembg:${fname}`)) { skipSet.current.add(`rembg:${fname}`); setImageSkipped(skipSet.current.size); }
+      markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, skip: s.skip + 1 }));
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [SKIP]"), "skip"), { clearPending: true });
       return;
@@ -478,7 +540,9 @@ function usePipeline() {
     if (raw.startsWith("__err_upscale__:")) {
       const fname = raw.slice(16);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "error" } }));
-      if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
+      revealKnownPreview(fname);
+      if (!errSet.current.has(`upscale:${fname}`)) { errSet.current.add(`upscale:${fname}`); setImageError(errSet.current.size); }
+      markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, err: s.err + 1 }));
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [ERROR]"), "error"), { clearPending: true });
       return;
@@ -486,7 +550,9 @@ function usePipeline() {
     if (raw.startsWith("__err_rembg__:")) {
       const fname = raw.slice(14);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "error" } }));
-      if (!errSet.current.has(fname)) { errSet.current.add(fname); setImageError(errSet.current.size); }
+      revealKnownPreview(fname);
+      if (!errSet.current.has(`rembg:${fname}`)) { errSet.current.add(`rembg:${fname}`); setImageError(errSet.current.size); }
+      markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, err: s.err + 1 }));
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [ERROR]"), "error"), { clearPending: true });
       return;
@@ -494,6 +560,7 @@ function usePipeline() {
     if (raw.startsWith("__err_oom_gpu__:")) {
       const fname = raw.slice(16);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "oom" } }));
+      revealKnownPreview(fname);
       setOomGpuCount(c => c + 1);
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "GPU OOM fallback [WARN]"), "warn"), { clearPending: true });
       return;
@@ -555,7 +622,9 @@ function usePipeline() {
       stageRef.current = normalizedStage;
       setStage(normalizedStage);
       setPreviewPath(fullPath);
+      previewPathRef.current = fullPath;
       previewPathByFile.current.set(fileName, fullPath);
+      pushLivePreview(fileName, fullPath);
       setImageProgress(prev => ({
         ...prev,
         [fileName]: {
@@ -576,7 +645,9 @@ function usePipeline() {
       const fullPath = raw.slice(15);
       const fileName = fullPath.replace(/.*[/\\]/, "");
       setPreviewPath(fullPath);
+      previewPathRef.current = fullPath;
       previewPathByFile.current.set(fileName, fullPath);
+      pushLivePreview(fileName, fullPath);
       if (!sentinelSet.current.has(fileName)) {
         sentinelSet.current.add(fileName);
         setLog(prev => (
@@ -593,16 +664,21 @@ function usePipeline() {
 
     // ── Human-readable log lines ─────────────────────────────────────────────
     if (raw.startsWith("__done__")) {
+      if (completionLoggedRef.current) return;
+      completionLoggedRef.current = true;
       const ok = raw.includes("exit=0");
+      const entry = telemetryEntry(ok ? "Pipeline complete [DONE]" : "Pipeline exited with errors [ERROR]", ok ? "success" : "error");
       appendTelemetryEntry(
         setLog,
-        telemetryEntry(ok ? "Pipeline complete [DONE]" : "Pipeline exited with errors [ERROR]", ok ? "success" : "error"),
+        entry,
         { clearPending: true }
       );
+      if (!ok) {
+        setErrors(prev => [...prev.slice(-200), { raw: entry.raw, kind: entry.kind, context: [...recentLog.current] }]);
+      }
       return;
     }
     if (/Pipeline complete/i.test(raw)) {
-      appendTelemetryEntry(setLog, telemetryEntry("Pipeline complete [DONE]", "success"), { clearPending: true });
       return;
     }
     if (/Pipeline exited with errors/i.test(raw)) {
@@ -632,7 +708,7 @@ function usePipeline() {
         return [...prev.slice(-200), { raw, kind, context: [...recentLog.current.slice(0, -1)] }];
       });
     }
-  }, [classify, pushLivePreview]);
+  }, [classify, markFinalImage, pushLivePreview, revealKnownPreview]);
 
   const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", resume = false, upscaleMaxPx = 0, reuseExactDuplicates = true }) => {
     if (running) return;
@@ -652,6 +728,10 @@ function usePipeline() {
     stageRef.current = "upscale";
     recentLog.current = [];
     doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set(); sentinelSet.current = new Set();
+    completedImageSet.current = new Set();
+    completionLoggedRef.current = false;
+    previewPathRef.current = "";
+    finalStageRef.current = doRembg ? "rembg" : "upscale";
     previewPathByFile.current = new Map();
 
     try {
@@ -687,7 +767,8 @@ function usePipeline() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const msg = line.slice(6);
-          if (msg.startsWith("__done__")) {
+          const token = extractMachineToken(msg);
+          if (token.startsWith("__done__")) {
             finished = true;
             appendLine(msg);
             setStage("done"); setDone(true); setRunning(false);
@@ -853,6 +934,7 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale,
   const hasBothStages = doUpscale && doRembg;
   const totalUnits = (doUpscale ? n : 0) + (doRembg ? n : 0);
   const processedUnits = (doUpscale ? upProcessed : 0) + (doRembg ? bgProcessed : 0);
+  const processedImages = doRembg ? bgProcessed : upProcessed;
   const activeUnits = Object.values(imageProgress).filter(meta => meta?.status === "running").length;
   const inFlightUnits = !done && totalUnits > 0 && activeUnits > 0
     ? Math.min(activeUnits * 0.25, Math.max(0, totalUnits - processedUnits))
@@ -866,9 +948,7 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale,
     ? Math.ceil((elapsed / processedUnits) * (totalUnits - processedUnits))
     : null;
   const etaLabel = done ? "ETA done" : etaSeconds ? `ETA ${fmt(etaSeconds)}` : "ETA —";
-  const countLabel = hasBothStages
-    ? `${processedUnits}/${totalUnits} stage steps`
-    : `${processedUnits}/${totalUnits} files`;
+  const countLabel = `${processedImages}/${n} images processed`;
 
   const stagePill = done
     ? "Completed"
@@ -1185,8 +1265,11 @@ export default function Pipeline({
         thumbnail,
         session,
       });
+      if (AUTO_OPEN_EDITOR_AFTER_PROCESS && imageError === 0 && errors.length === 0) {
+        onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
+      }
     })();
-  }, [done, onPipelineDone, canvasSize, thumbnail]);
+  }, [done, onPipelineDone, onGoToEditor, canvasSize, thumbnail, imageError, errors.length]);
 
   const handleStart = useCallback(() => {
     const removedIds = removedImages ? [...removedImages] : [];
