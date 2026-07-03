@@ -16,6 +16,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, field
@@ -832,11 +833,12 @@ def batch_remove_bg(
     if device_label == "CPU" and not force_cpu:
         info("  → GPU not available: install onnxruntime-directml to enable DirectML.")
         info("  → pip uninstall onnxruntime && pip install onnxruntime-directml")
-    info(f"Loading {REMBG_MODEL} — first run downloads model weights...")
+    info(f"Loading {REMBG_MODEL} model. First use may download weights if missing.")
     print(f"__model_loading__:{REMBG_MODEL}:{device_label}", flush=True)
     console.print()
 
     sess_opts = _ort_session_options()
+    model_load_start = time.perf_counter()
 
     provider_options = None
     if any("CUDA" in p for p in providers):
@@ -867,8 +869,9 @@ def batch_remove_bg(
                 raise RuntimeError(f"GPU OOM fallback to CPU failed during model load: {cpu_e}") from cpu_e
         else:
             raise
-    ok("Model loaded.")
-    print(f"__model_loaded__:{REMBG_MODEL}:{device_label}", flush=True)
+    model_load_elapsed = time.perf_counter() - model_load_start
+    ok(f"Model loaded in {model_load_elapsed:.1f}s.")
+    print(f"__model_loaded__:{REMBG_MODEL}:{device_label}:{model_load_elapsed:.1f}", flush=True)
 
     outputs, to_run = [], []
 

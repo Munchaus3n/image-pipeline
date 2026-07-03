@@ -457,12 +457,17 @@ function usePipeline() {
     return "info";
   }, []);
 
-  const pushLivePreview = useCallback((fname, path = "") => {
+  const pushLivePreview = useCallback((fname, path = "", status = "processing", label = "") => {
     if (!fname) return;
     setLivePreviewStrip(prev => {
       const existing = prev.find(item => item.name === fname);
       const resolvedPath = path || existing?.path || "";
-      const next = [{ name: fname, path: resolvedPath }, ...prev.filter(item => item.name !== fname)];
+      const next = [{
+        name: fname,
+        path: resolvedPath,
+        status: status || existing?.status || "processing",
+        label: label || existing?.label || "",
+      }, ...prev.filter(item => item.name !== fname)];
       return next.slice(0, 4);
     });
   }, []);
@@ -473,13 +478,13 @@ function usePipeline() {
     return fileNameFromPath(previewPathRef.current) === fname ? previewPathRef.current : "";
   }, []);
 
-  const revealKnownPreview = useCallback((fname) => {
+  const revealKnownPreview = useCallback((fname, status = "done", label = "") => {
     const path = resolvePreviewPath(fname);
     if (path) {
       previewPathRef.current = path;
       setPreviewPath(path);
     }
-    pushLivePreview(fname, path);
+    pushLivePreview(fname, path, status, label);
   }, [pushLivePreview, resolvePreviewPath]);
 
   const markFinalImage = useCallback((stageName, fname) => {
@@ -500,7 +505,7 @@ function usePipeline() {
     if (raw.startsWith("__ok_upscale__:")) {
       const fname = raw.slice(15);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "ok" } }));
-      revealKnownPreview(fname);
+      revealKnownPreview(fname, "done", "DONE");
       doneSet.current.add(`upscale:${fname}`);
       markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, done: s.done + 1 }));
@@ -510,7 +515,7 @@ function usePipeline() {
     if (raw.startsWith("__ok_rembg__:")) {
       const fname = raw.slice(13);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "ok" } }));
-      revealKnownPreview(fname);
+      revealKnownPreview(fname, "done", "DONE");
       doneSet.current.add(`rembg:${fname}`);
       markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, done: s.done + 1 }));
@@ -520,7 +525,7 @@ function usePipeline() {
     if (raw.startsWith("__skip_upscale__:")) {
       const fname = raw.slice(17);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "skip" } }));
-      revealKnownPreview(fname);
+      revealKnownPreview(fname, "skip", "SKIP");
       if (!skipSet.current.has(`upscale:${fname}`)) { skipSet.current.add(`upscale:${fname}`); setImageSkipped(skipSet.current.size); }
       markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, skip: s.skip + 1 }));
@@ -530,7 +535,7 @@ function usePipeline() {
     if (raw.startsWith("__skip_rembg__:")) {
       const fname = raw.slice(15);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "skip" } }));
-      revealKnownPreview(fname);
+      revealKnownPreview(fname, "skip", "SKIP");
       if (!skipSet.current.has(`rembg:${fname}`)) { skipSet.current.add(`rembg:${fname}`); setImageSkipped(skipSet.current.size); }
       markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, skip: s.skip + 1 }));
@@ -540,7 +545,7 @@ function usePipeline() {
     if (raw.startsWith("__err_upscale__:")) {
       const fname = raw.slice(16);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "error" } }));
-      revealKnownPreview(fname);
+      revealKnownPreview(fname, "error", "ERROR");
       if (!errSet.current.has(`upscale:${fname}`)) { errSet.current.add(`upscale:${fname}`); setImageError(errSet.current.size); }
       markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, err: s.err + 1 }));
@@ -550,7 +555,7 @@ function usePipeline() {
     if (raw.startsWith("__err_rembg__:")) {
       const fname = raw.slice(14);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "error" } }));
-      revealKnownPreview(fname);
+      revealKnownPreview(fname, "error", "ERROR");
       if (!errSet.current.has(`rembg:${fname}`)) { errSet.current.add(`rembg:${fname}`); setImageError(errSet.current.size); }
       markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, err: s.err + 1 }));
@@ -560,7 +565,7 @@ function usePipeline() {
     if (raw.startsWith("__err_oom_gpu__:")) {
       const fname = raw.slice(16);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "oom" } }));
-      revealKnownPreview(fname);
+      revealKnownPreview(fname, "error", "OOM");
       setOomGpuCount(c => c + 1);
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "GPU OOM fallback [WARN]"), "warn"), { clearPending: true });
       return;
@@ -601,7 +606,8 @@ function usePipeline() {
     }
 
     if (raw.startsWith("__model_loaded__:")) {
-      const [model = "model", device = ""] = raw.slice(17).split(":");
+      const [model = "model", device = "", seconds = ""] = raw.slice(17).split(":");
+      if (seconds) appendTelemetryEntry(setLog, telemetryEntry(`Model loaded in ${seconds}s`, "success"));
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel("Model loaded", [model, device].filter(Boolean).join(" · ")), "success"));
       return;
     }
@@ -624,7 +630,7 @@ function usePipeline() {
       setPreviewPath(fullPath);
       previewPathRef.current = fullPath;
       previewPathByFile.current.set(fileName, fullPath);
-      pushLivePreview(fileName, fullPath);
+      pushLivePreview(fileName, fullPath, "processing", normalizedStage === "rembg" ? "BG running..." : "processing...");
       setImageProgress(prev => ({
         ...prev,
         [fileName]: {
@@ -635,7 +641,7 @@ function usePipeline() {
       }));
       appendTelemetryEntry(
         setLog,
-        telemetryEntry(telemetryLabel(fileName, normalizedStage === "rembg" ? "BG removal running" : "upscale running"), "pending")
+        telemetryEntry(telemetryLabel(fileName, normalizedStage === "rembg" ? "BG removal started" : "upscale started"), "pending")
       );
       sentinelSet.current.add(fileName);
       return;
@@ -647,12 +653,12 @@ function usePipeline() {
       setPreviewPath(fullPath);
       previewPathRef.current = fullPath;
       previewPathByFile.current.set(fileName, fullPath);
-      pushLivePreview(fileName, fullPath);
+      pushLivePreview(fileName, fullPath, "processing", stageRef.current === "rembg" ? "BG running..." : "processing...");
       if (!sentinelSet.current.has(fileName)) {
         sentinelSet.current.add(fileName);
         setLog(prev => (
           prev.length === 0
-            ? [telemetryEntry(telemetryLabel(fileName, "processing"), "pending")]
+            ? [telemetryEntry(telemetryLabel(fileName, stageRef.current === "rembg" ? "BG removal started" : "upscale started"), "pending")]
             : prev
         ));
         setImageProgress(prev => ({ ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } }));
@@ -673,6 +679,10 @@ function usePipeline() {
         entry,
         { clearPending: true }
       );
+      if (startRef.current) {
+        const elapsedSeconds = Math.max(0, Math.round((Date.now() - startRef.current) / 1000));
+        appendTelemetryEntry(setLog, telemetryEntry(`Batch completed in ${elapsedSeconds}s`, ok ? "success" : "error"));
+      }
       if (!ok) {
         setErrors(prev => [...prev.slice(-200), { raw: entry.raw, kind: entry.kind, context: [...recentLog.current] }]);
       }
@@ -822,16 +832,23 @@ function Zone1({ imageDone, totalImages, previewPath, livePreviewStrip }) {
 
 function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalImages }) {
   const totalLabel = totalImages > 0 ? totalImages : "-";
-  const processedLabel = `${imageDone}/${totalLabel} processed`;
+  const processedLabel = `${imageDone}/${totalLabel} complete`;
   const stripItems = Array.isArray(livePreviewStrip) ? livePreviewStrip : [];
   let sourceItems = stripItems
-    .map(item => ({ path: item?.path || "", name: item?.name || "" }))
+    .map(item => ({
+      path: item?.path || "",
+      name: item?.name || "",
+      status: item?.status || "processing",
+      label: item?.label || "",
+    }))
     .filter(item => item.path);
 
   if (previewPath) {
     const previewItem = {
       path: previewPath,
       name: previewPath.replace(/.*[/\\]/, ""),
+      status: "processing",
+      label: "processing...",
     };
     const hasPreviewInStrip = sourceItems.some(item => item.path === previewPath);
     if (!hasPreviewInStrip) {
@@ -849,7 +866,7 @@ function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalI
   return (
     <div className="pipeline-zone pipeline-progress-card pipeline-preview-strip">
       <div className="pipeline-live-title-row">
-        <div className="pipeline-live-title">Live Stream</div>
+        <div className="pipeline-live-title">Live Stream · current / recent</div>
         <div className="pipeline-live-counter">{processedLabel}</div>
       </div>
       <div className="pipeline-preview-grid">
@@ -866,12 +883,43 @@ function PipelinePreviewSlot({ item }) {
   const hasImage = Boolean(src);
   const fileLabel = item?.name || "";
   const placeholderLabel = item?.label || "";
+  const status = item?.status || "processing";
+  const statusLabel = item?.label || (status === "processing" ? "processing..." : status.toUpperCase());
+  const statusColor = {
+    processing: C.yellow,
+    done: C.green,
+    skip: C.yellow,
+    error: C.red,
+  }[status] || C.dim;
 
   return (
-    <div className="pipeline-preview-slot">
+    <div className={`pipeline-preview-slot is-${status}`} style={{ position: "relative" }}>
       {hasImage ? (
         <>
           <img className="pipeline-preview-image" src={src} alt={fileLabel} />
+          <div
+            className="pipeline-live-preview-status"
+            style={{
+              position: "absolute",
+              top: 6,
+              left: 6,
+              maxWidth: "calc(100% - 12px)",
+              padding: "2px 6px",
+              borderRadius: 4,
+              background: "rgba(0,0,0,0.62)",
+              color: statusColor,
+              border: `1px solid ${statusColor}`,
+              fontSize: 9,
+              fontWeight: 700,
+              lineHeight: 1.2,
+              textTransform: status === "processing" ? "none" : "uppercase",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {statusLabel}
+          </div>
           {fileLabel && <div className="pipeline-live-preview-name">{fileLabel}</div>}
         </>
       ) : (
