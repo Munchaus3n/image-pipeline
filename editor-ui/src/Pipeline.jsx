@@ -514,6 +514,64 @@ function usePipeline() {
       return;
     }
 
+    if (raw.startsWith("__stage_start__:")) {
+      const stageName = raw.slice(16);
+      if (stageName === "upscale" || stageName === "rembg") {
+        stageRef.current = stageName;
+        setStage(stageName);
+        appendTelemetryEntry(
+          setLog,
+          telemetryEntry(stageName === "upscale" ? "Stage 1 · Upscaling" : "Stage 2 · Background removal", "info")
+        );
+      }
+      return;
+    }
+
+    if (raw.startsWith("__model_loading__:")) {
+      const [model = "model", device = ""] = raw.slice(18).split(":");
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel("Loading model", [model, device].filter(Boolean).join(" · ")), "info"));
+      return;
+    }
+
+    if (raw.startsWith("__model_loaded__:")) {
+      const [model = "model", device = ""] = raw.slice(17).split(":");
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel("Model loaded", [model, device].filter(Boolean).join(" · ")), "success"));
+      return;
+    }
+
+    if (raw.startsWith("__bg_downscale__:")) {
+      const [fname = "image", resize = ""] = raw.slice(17).split(":").filter(Boolean);
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, `BG safety downscale ${resize}`), "warn"));
+      return;
+    }
+
+    if (raw.startsWith("__processing_image__:")) {
+      const payload = raw.slice(21);
+      const splitAt = payload.indexOf(":");
+      const stageName = splitAt >= 0 ? payload.slice(0, splitAt) : stageRef.current;
+      const fullPath = splitAt >= 0 ? payload.slice(splitAt + 1) : payload;
+      const fileName = fullPath.replace(/.*[/\\]/, "");
+      const normalizedStage = stageName === "rembg" ? "rembg" : "upscale";
+      stageRef.current = normalizedStage;
+      setStage(normalizedStage);
+      setPreviewPath(fullPath);
+      previewPathByFile.current.set(fileName, fullPath);
+      setImageProgress(prev => ({
+        ...prev,
+        [fileName]: {
+          stage: normalizedStage,
+          percent: normalizedStage === "rembg" ? 50 : 0,
+          status: "running",
+        },
+      }));
+      appendTelemetryEntry(
+        setLog,
+        telemetryEntry(telemetryLabel(fileName, normalizedStage === "rembg" ? "BG removal running" : "upscale running"), "pending")
+      );
+      sentinelSet.current.add(fileName);
+      return;
+    }
+
     if (raw.startsWith("__processing__:")) {
       const fullPath = raw.slice(15);
       const fileName = fullPath.replace(/.*[/\\]/, "");
@@ -1020,7 +1078,7 @@ export default function Pipeline({
   const [canvasSize, setCanvasSize] = useState("1440");
   const [thumbnail, setThumbnail] = useState(true);
   const [rembgModel, setRembgModel] = useState("birefnet-general");
-  const [upscaleMaxPx, setUpscaleMaxPx] = useState("");
+  const [upscaleMaxPx, setUpscaleMaxPx] = useState("3600");
   const [reuseExactDuplicates, setReuseExactDuplicates] = useState(true);
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
   const [logOpen, setLogOpen] = useState(true);
@@ -1058,7 +1116,7 @@ export default function Pipeline({
         }
         if (Object.prototype.hasOwnProperty.call(s.processing ?? {}, "upscale_max_px")) {
           const savedMaxPx = Number(s.processing.upscale_max_px);
-          setUpscaleMaxPx(Number.isFinite(savedMaxPx) && savedMaxPx > 0 ? String(savedMaxPx) : "");
+          setUpscaleMaxPx(Number.isFinite(savedMaxPx) && savedMaxPx > 0 ? String(savedMaxPx) : "3600");
         }
       })
       .catch(() => {});
@@ -1345,7 +1403,7 @@ export default function Pipeline({
                   type="number"
                   value={upscaleMaxPx}
                   onChange={e => setUpscaleMaxPx(e.target.value)}
-                  placeholder="no limit"
+                  placeholder="3600"
                   min={256} max={8192}
                   style={{
                     width: 90, background: C.panel2, color: C.text,
@@ -1354,7 +1412,7 @@ export default function Pipeline({
                     outline: "none", textAlign: "center"
                   }}
                 />
-                <span style={{ fontSize: 10, color: C.dim }}>empty = no limit</span>
+                <span style={{ fontSize: 10, color: C.dim }}>empty = safe default</span>
               </div>
             </Row>
 

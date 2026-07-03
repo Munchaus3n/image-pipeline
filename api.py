@@ -49,7 +49,8 @@ _thumb_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="thumb")
 # ── Model warm-up ─────────────────────────────────────────────────────────────
 # Runs once in a background thread when api.py starts.
 # Ensures model weights are downloaded + in OS file cache before the first
-# pipeline run, eliminating the 5-15s "first run stall".
+# pipeline run. pipeline.py runs in a subprocess, so this cannot keep a live
+# model session loaded for the actual processing run.
 
 def _warmup_worker():
     try:
@@ -91,6 +92,7 @@ PREVIEW_CACHE_DIR = BASE_DIR / ".cache" / "previews"
 PREVIEW_CACHE_VERSION = "preview-v1"
 PREVIEW_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 PREVIEW_CACHE_CLEANUP_INTERVAL_SECONDS = 15 * 60
+DEFAULT_UPSCALE_MAX_PX = 3600
 
 SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".avif"}
 IMAGE_MEDIA_TYPES = {
@@ -937,7 +939,7 @@ _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
                                           "rembg_model": "birefnet-general", "rembg_fallback": "auto",
                      "history_keep": 30, "force_cpu": False, "wipe_input_after_run": False,
-                     "reuse_exact_duplicates": True, "upscale_max_px": 0},
+                     "reuse_exact_duplicates": True, "upscale_max_px": 3600},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
@@ -1038,7 +1040,7 @@ async def run_pipeline(cfg: PipelineConfig):
 
     selection_manifest_path: Path | None = None
     cmd = [
-        sys.executable, str(BASE_DIR / "pipeline.py"),
+        sys.executable, "-u", str(BASE_DIR / "pipeline.py"),
         "--non-interactive",
         "--folder-mode", cfg.folder_mode,
         "--scale",       cfg.scale,
@@ -1061,8 +1063,7 @@ async def run_pipeline(cfg: PipelineConfig):
             encoding="utf-8",
         )
         cmd += ["--selection-manifest", str(selection_manifest_path)]
-    if cfg.upscale_max_px > 0:
-        cmd += ["--upscale-max-px", str(cfg.upscale_max_px)]
+    requested_upscale_max_px = cfg.upscale_max_px
     if not cfg.reuse_exact_duplicates:
         cmd.append("--no-reuse-exact-duplicates")
     if cfg.resume:
@@ -1077,12 +1078,20 @@ async def run_pipeline(cfg: PipelineConfig):
         rembg_fallback = _normalize_rembg_fallback(_s.get("processing", {}).get("rembg_fallback", "auto"))
         if rembg_fallback:
             cmd += ["--rembg-fallback", str(rembg_fallback)]
+        if requested_upscale_max_px <= 0:
+            try:
+                requested_upscale_max_px = int(_s.get("processing", {}).get("upscale_max_px") or 0)
+            except Exception:
+                requested_upscale_max_px = 0
         if _s.get("processing", {}).get("wipe_input_after_run", False):
             cmd.append("--wipe-input-after-run")
         if _s.get("processing", {}).get("force_cpu", False):
             cmd.append("--force-cpu")
     except Exception:
         pass
+    if requested_upscale_max_px <= 0:
+        requested_upscale_max_px = DEFAULT_UPSCALE_MAX_PX
+    cmd += ["--upscale-max-px", str(requested_upscale_max_px)]
 
     pipeline_output_root = (
         Path(cfg.output_dir.strip())

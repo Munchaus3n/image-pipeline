@@ -51,6 +51,8 @@ SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
 _AVIF_DECODE_SUPPORTED = Image.registered_extensions().get(".avif") is not None
 _ALLOWED_REMBG_FALLBACKS = {"auto"}
+DEFAULT_UPSCALE_MAX_PX = 3600
+DEFAULT_REMBG_MAX_PX = 4096
 
 console = Console()
 
@@ -643,10 +645,27 @@ def _prefetch_image(path: Path) -> None:
         pass
 
 
-def remove_bg(src: Path, dst: Path, session, model_name: str = "") -> tuple[bool, str | None]:
+def remove_bg(
+    src: Path,
+    dst: Path,
+    session,
+    model_name: str = "",
+    max_input_px: int = DEFAULT_REMBG_MAX_PX,
+) -> tuple[bool, str | None]:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         img = _open_image_checked(src).convert("RGBA")
+        original_w, original_h = img.size
+        safe_max = int(max_input_px or DEFAULT_REMBG_MAX_PX)
+        if safe_max > 0 and max(original_w, original_h) > safe_max:
+            scale = safe_max / max(original_w, original_h)
+            next_size = (max(1, int(original_w * scale)), max(1, int(original_h * scale)))
+            warn(f"{src.name} downscaled for BG safety: {original_w}×{original_h} → {next_size[0]}×{next_size[1]}")
+            print(
+                f"__bg_downscale__:{src.name}:{original_w}x{original_h}->{next_size[0]}x{next_size[1]}",
+                flush=True,
+            )
+            img = img.resize(next_size, Image.LANCZOS)
 
         # Already transparent — clean up edges and crop, skip inference entirely
         if has_transparency(src):
@@ -701,6 +720,7 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                   upscale_max_px: int = 0,
                   corrupted_dir: Path | None = None) -> list[Path]:
     section("Stage 1 / 2 — Upscaling")
+    print("__stage_start__:upscale", flush=True)
     print(f"__total__:{len(images)}", flush=True)
     outputs, to_run = [], []
 
@@ -754,6 +774,7 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
         task = progress.add_task("Upscaling...", total=len(to_run))
         for src, dst in to_run:
             progress.update(task, description=src.name)
+            print(f"__processing_image__:upscale:{src}", flush=True)
             print(f"__processing__:{src}", flush=True)
             if upscale_ncnn(src, dst, model, scale):
                 ok(f"{src.name} → upscaled/{dst.relative_to(dst_root)}")
@@ -780,8 +801,10 @@ def batch_remove_bg(
     corrupted_dir: Path | None = None,
     force_cpu: bool = False,
     rembg_fallback: str = "auto",
+    max_input_px: int = DEFAULT_REMBG_MAX_PX,
 ) -> list[Path]:
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
+    print("__stage_start__:rembg", flush=True)
 
     no_rembg_tokens = {
         _relative_image_id(p, src_root)
@@ -807,6 +830,7 @@ def batch_remove_bg(
         info("  → GPU not available: install onnxruntime-directml to enable DirectML.")
         info("  → pip uninstall onnxruntime && pip install onnxruntime-directml")
     info(f"Loading {REMBG_MODEL} — first run downloads model weights...")
+    print(f"__model_loading__:{REMBG_MODEL}:{device_label}", flush=True)
     console.print()
 
     sess_opts = _ort_session_options()
@@ -835,11 +859,13 @@ def batch_remove_bg(
                 session = new_session(REMBG_MODEL,
                                       providers=["CPUExecutionProvider"],
                                       sess_options=sess_opts)
+                device_label = "CPU"
             except Exception as cpu_e:
                 raise RuntimeError(f"GPU OOM fallback to CPU failed during model load: {cpu_e}") from cpu_e
         else:
             raise
     ok("Model loaded.")
+    print(f"__model_loaded__:{REMBG_MODEL}:{device_label}", flush=True)
 
     outputs, to_run = [], []
 
@@ -892,6 +918,7 @@ def batch_remove_bg(
                     prefetch_future = prefetch_pool.submit(_prefetch_image, next_src)
 
                 progress.update(task, description=src.name)
+                print(f"__processing_image__:rembg:{src}", flush=True)
                 print(f"__processing__:{src}", flush=True)
 
                 if not src.exists():
@@ -900,7 +927,7 @@ def batch_remove_bg(
                     progress.advance(task)
                     continue
 
-                success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL)
+                success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px)
 
                 if (not success) and (not force_cpu) and _is_oom_error(error_msg or ""):
                     print(f"__err_oom_gpu__:{src.name}", flush=True)
@@ -920,7 +947,7 @@ def batch_remove_bg(
                             progress.advance(task)
                             continue
                     session = cpu_session  # permanent switch for all remaining images
-                    success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL)
+                    success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px)
 
                 if success:
                     ok(f"{src.name} → processed/{dst.relative_to(dst_root)}")
@@ -954,7 +981,8 @@ def main():
     parser.add_argument("--selection-manifest", default="")
     parser.add_argument("--rembg-fallback",   default="auto")
     parser.add_argument("--wipe-input-after-run", action="store_true")
-    parser.add_argument("--upscale-max-px",   type=int, default=0)
+    parser.add_argument("--upscale-max-px",   type=int, default=DEFAULT_UPSCALE_MAX_PX)
+    parser.add_argument("--rembg-max-px",     type=int, default=DEFAULT_REMBG_MAX_PX)
     parser.add_argument("--no-reuse-exact-duplicates", action="store_true")
     parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
@@ -1119,6 +1147,8 @@ def main():
     table.add_row("Upscale",   f"NCNN {ncnn_model} ×{ncnn_scale}" if do_upscale else "skip")
     if do_upscale and args.upscale_max_px > 0:
         table.add_row("Upscale skip", f"images already ≥ {args.upscale_max_px}px")
+    if do_rembg and args.rembg_max_px > 0:
+        table.add_row("BG max input", f"downscale longest edge above {args.rembg_max_px}px")
     table.add_row("Remove BG", REMBG_MODEL if do_rembg else "skip")
     table.add_row("Input →",   str(input_dir))
     table.add_row("Output →",  str(rembg_dir))
@@ -1184,6 +1214,7 @@ def main():
             corrupted_dir=corrupted_dir,
             force_cpu=args.force_cpu,
             rembg_fallback=args.rembg_fallback,
+            max_input_px=args.rembg_max_px,
         )
     else:
         skip("background removal")

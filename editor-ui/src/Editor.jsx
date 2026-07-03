@@ -390,6 +390,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const srcFolderRef = useRef("");
   const singleFileInputRef = useRef(null);
   const singleObjectUrlRef = useRef("");
+  const saveInFlightRef = useRef(false);
   // BUG-06 FIX: loadImage is useCallback but called from initFromFolder/advance which
   // need stable references. A ref breaks the circular dep chain cleanly — callers
   // always get the latest version without needing it in their own dep arrays.
@@ -1184,12 +1185,14 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   }, [generateThumbnail, isSingleImageMode, items, queue, queueIdx, renderExportCanvas, renderThumbnailCanvas, resetEditorToDefaultState, singleImageName, srcFolder]);
 
   const doSave = useCallback(async () => {
+    if (saveInFlightRef.current) return;
     if (!items.length) return;
-    if (isSingleImageMode) {
-      await doDownload(true);
-      return;
-    }
+    saveInFlightRef.current = true;
     try {
+      if (isSingleImageMode) {
+        await doDownload(true);
+        return;
+      }
       prefetchNextImage(queue, queueIdx + 1);
 
       const payload = items.map(it => ({
@@ -1212,6 +1215,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     } catch (e) {
       prefetchRef.current = null;
       setStatus(`save failed: ${e.message}`);
+    } finally {
+      saveInFlightRef.current = false;
     }
   }, [items, isSingleImageMode, doDownload, queue, queueIdx, srcFolder, comboMode, generateThumbnail, canvasSizeProp, canvasSizeState, advance, prefetchNextImage, activeOutputDir, saveSessionCheckpoint]);
 
@@ -1227,6 +1232,20 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   }, [isSingleImageMode, queue, queueIdx, advance, prefetchNextImage, srcFolder, activeOutputDir, saveSessionCheckpoint]);
 
   const onKeyDown = useCallback((e) => {
+    const target = e.target;
+    const tagName = target?.tagName?.toLowerCase?.() || "";
+    const isEditingText = (
+      tagName === "input" ||
+      tagName === "select" ||
+      tagName === "textarea" ||
+      target?.isContentEditable
+    );
+    if (e.key === "Enter") {
+      if (isEditingText || saveInFlightRef.current) return;
+      e.preventDefault();
+      doSave();
+      return;
+    }
     const n = e.shiftKey ? 10 : 1;
     const map = { ArrowLeft:[-n,0], ArrowRight:[n,0], ArrowUp:[0,-n], ArrowDown:[0,n] };
     if (map[e.key]) {
@@ -1236,7 +1255,6 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       setItems(prev => prev.map(it => it.id===selId ? {...it,canvasX:it.canvasX+dx,canvasY:it.canvasY+dy} : it));
       return;
     }
-    if (e.key==="Enter") doSave();
     if (e.key==="s"||e.key==="S") doSkip();
     if ((e.ctrlKey||e.metaKey) && e.key==="z") doUndo();
   }, [selId, doSave, doSkip, doUndo]);
