@@ -559,7 +559,7 @@ def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
 def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
     """GPU-first provider selection. DML → CUDA → CPU fallback chain."""
     if force_cpu:
-        return ["CPUExecutionProvider"], "CPU (forced)"
+        return ["CPUExecutionProvider"], "CPU / Stable"
     try:
         available = ort.get_available_providers()
         if "DmlExecutionProvider" in available:
@@ -591,13 +591,13 @@ def _available_gpu_provider() -> str | None:
 def _select_bg_device_providers(bg_device_mode: str = "cpu") -> tuple[list[str], str, bool, bool]:
     mode = _normalize_bg_device_mode(bg_device_mode)
     if mode == "cpu":
-        return ["CPUExecutionProvider"], "CPU / stable", False, False
+        return ["CPUExecutionProvider"], "CPU / Stable", False, False
 
     gpu_provider = _available_gpu_provider()
     if mode == "gpu":
         if gpu_provider:
-            return [gpu_provider], "GPU / experimental", False, True
-        return ["CPUExecutionProvider"], "GPU / experimental", False, False
+            return [gpu_provider], "GPU / Experimental", False, True
+        return ["CPUExecutionProvider"], "GPU / Experimental", False, False
 
     if gpu_provider:
         return [gpu_provider, "CPUExecutionProvider"], "GPU + CPU fallback", True, True
@@ -903,7 +903,7 @@ def batch_remove_bg(
                 session = new_session(REMBG_MODEL,
                                       providers=["CPUExecutionProvider"],
                                       sess_options=sess_opts)
-                device_label = "CPU / stable"
+                device_label = "CPU / Stable"
                 providers = ["CPUExecutionProvider"]
             except Exception as cpu_e:
                 raise RuntimeError(f"GPU OOM fallback to CPU failed during model load: {cpu_e}") from cpu_e
@@ -1047,7 +1047,7 @@ def main():
     rembg_fallback_raw = args.rembg_fallback
     args.rembg_fallback = _normalize_rembg_fallback(args.rembg_fallback)
     if str(rembg_fallback_raw or "").strip().lower() != args.rembg_fallback:
-        warn("rembg fallback mode is now automatic; normalizing to 'auto'.")
+        warn("Background removal recovery setting normalized to automatic.")
 
     header()
 

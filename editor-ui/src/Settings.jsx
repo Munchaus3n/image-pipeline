@@ -198,8 +198,42 @@ function Select({ value, onChange, options, wide }) {
   );
 }
 
+const BG_DEVICE_OPTIONS = [
+  ["cpu", "CPU / Stable"],
+  ["gpu", "GPU / Experimental"],
+  ["gpu_auto", "GPU + CPU fallback"],
+];
+
+const BG_DEVICE_HELP = {
+  cpu: "CPU / Stable: safest, slower, best while using PC.",
+  gpu: "GPU / Experimental: fastest if it works, may OOM or make PC lag.",
+  gpu_auto: "GPU + CPU fallback: tries GPU first, switches to CPU if GPU runs out of memory.",
+};
+
+function normalizeBgDeviceMode(value, processing = {}) {
+  if (BG_DEVICE_OPTIONS.some(([optionValue]) => optionValue === value)) return value;
+  if (Object.prototype.hasOwnProperty.call(processing, "force_cpu")) {
+    return processing.force_cpu ? "cpu" : "gpu_auto";
+  }
+  return "cpu";
+}
+
+function normalizeSettings(rawSettings) {
+  const next = rawSettings || DEFAULT;
+  const processing = next.processing || {};
+  const bgDeviceMode = normalizeBgDeviceMode(processing.bg_device_mode, processing);
+  return {
+    ...next,
+    processing: {
+      ...processing,
+      bg_device_mode: bgDeviceMode,
+      force_cpu: bgDeviceMode === "cpu",
+    },
+  };
+}
+
 const DEFAULT = {
-  processing: { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", history_keep: 30, force_cpu: false, wipe_input_after_run: false, upscale_max_px: 0 },
+  processing: { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", bg_device_mode: "cpu", history_keep: 30, force_cpu: true, wipe_input_after_run: false, upscale_max_px: 0 },
   rembg_api: { provider: "local", url: "", key: "" },
   upscaler_api: { provider: "local", url: "", key: "", model: "" },
   output: { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, do_rembg: true, upscale_scale: "2" },
@@ -215,12 +249,20 @@ export default function Settings({ onThemeChange }) {
   useEffect(() => {
     fetch(`${BASE}/settings`)
       .then(response => response.ok ? response.json() : null)
-      .then(data => { if (data?.settings) setSettings(data.settings); })
+      .then(data => { if (data?.settings) setSettings(normalizeSettings(data.settings)); })
       .catch(() => {});
   }, []);
 
   const setSetting = useCallback((section, key, value) => {
-    setSettings(previous => ({ ...previous, [section]: { ...previous[section], [key]: value } }));
+    setSettings(previous => {
+      const nextSection = { ...previous[section], [key]: value };
+      if (section === "processing" && key === "bg_device_mode") {
+        const bgDeviceMode = normalizeBgDeviceMode(value, nextSection);
+        nextSection.bg_device_mode = bgDeviceMode;
+        nextSection.force_cpu = bgDeviceMode === "cpu";
+      }
+      return { ...previous, [section]: nextSection };
+    });
     setDirty(true);
     if (section === "appearance" && key === "theme" && onThemeChange) onThemeChange(value);
   }, [onThemeChange]);
@@ -246,7 +288,7 @@ export default function Settings({ onThemeChange }) {
   }, [settings]);
 
   const reset = useCallback(() => {
-    setSettings(DEFAULT);
+    setSettings(normalizeSettings(DEFAULT));
     setDirty(true);
   }, []);
 
@@ -465,10 +507,15 @@ export default function Settings({ onThemeChange }) {
                   ]}
                 />
               </Row>
-              <Row label="Force CPU" hint="Skip DirectML/CUDA. GPU OOM fallback to CPU is automatic.">
-                <Toggle
-                  value={settings.processing.force_cpu ?? false}
-                  onChange={value => setSetting("processing", "force_cpu", value)}
+              <Row
+                label="Background removal device"
+                hint={BG_DEVICE_HELP[normalizeBgDeviceMode(settings.processing.bg_device_mode, settings.processing)]}
+              >
+                <Select
+                  value={normalizeBgDeviceMode(settings.processing.bg_device_mode, settings.processing)}
+                  onChange={value => setSetting("processing", "bg_device_mode", value)}
+                  options={BG_DEVICE_OPTIONS}
+                  wide
                 />
               </Row>
               <Row label="Crop padding" hint="Fraction added after crop.">

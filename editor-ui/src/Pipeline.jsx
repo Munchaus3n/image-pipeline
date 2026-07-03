@@ -1409,6 +1409,7 @@ export default function Pipeline({
   const nothingSelected = !doUpscale && !doRembg;
   const skipCount = removedImages?.size ?? 0;
   const activeExcludeCount = excludeTags.filter(n => !removedImages?.has(n)).length;
+  const bgDeviceLabel = (BG_DEVICE_OPTIONS.find(option => option.value === bgDeviceMode) || BG_DEVICE_OPTIONS[0]).label;
 
   return (
     <div className="pipeline-screen" style={{
@@ -1579,6 +1580,14 @@ export default function Pipeline({
                     </span>
                   </div>
                 </Row>
+                <div style={{
+                  padding: "7px 0 2px",
+                  color: C.dim,
+                  fontSize: 10,
+                  lineHeight: 1.35,
+                }}>
+                  Using <span style={{ color: C.text }}>{rembgModel}</span> on <span style={{ color: C.text }}>{bgDeviceLabel}</span>
+                </div>
               </>
             )}
           </ProcessPanelSection>
