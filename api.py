@@ -93,6 +93,15 @@ PREVIEW_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 PREVIEW_CACHE_CLEANUP_INTERVAL_SECONDS = 15 * 60
 
 SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".avif"}
+IMAGE_MEDIA_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".avif": "image/avif",
+}
 AVIF_DECODE_ERROR = "AVIF preview decode failed. Install pillow-avif-plugin in the API environment."
 
 PREVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -125,6 +134,19 @@ def _open_image_checked(path: Path) -> Image.Image:
         if path.suffix.lower() == ".avif":
             raise HTTPException(status_code=400, detail=AVIF_DECODE_ERROR) from e
         raise
+
+
+def _media_type_for_image(path: Path) -> str:
+    return IMAGE_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
+
+
+def _read_image_snapshot(path: Path, *, missing_detail: str) -> bytes:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=missing_detail) from e
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"Image snapshot read failed, file may still be changing: {e}") from e
 
 def _normalize_rembg_fallback(value: Any) -> str:
     raw = str(value or "").strip().lower()
@@ -678,7 +700,8 @@ def serve_image(path: str = Query(...)):
         raise HTTPException(status_code=400, detail="Unsupported file type")
     if p.suffix.lower() == ".avif":
         _open_image_checked(p)
-    return FileResponse(str(p))
+    payload = _read_image_snapshot(p, missing_detail=f"Not found: {path}")
+    return Response(content=payload, media_type=_media_type_for_image(p))
 
 
 @app.get("/preview")
@@ -702,11 +725,15 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
     cached = _preview_cached_file(cache_key)
     if cached is not None:
         media_type = "image/png" if cached.suffix.lower() == ".png" else "image/jpeg"
-        return FileResponse(
-            str(cached),
-            media_type=media_type,
-            headers={"Cache-Control": "public, max-age=60"},
-        )
+        try:
+            payload = cached.read_bytes()
+            return Response(
+                content=payload,
+                media_type=media_type,
+                headers={"Cache-Control": "public, max-age=60"},
+            )
+        except OSError:
+            pass
 
     img: Image.Image | None = None
     fmt = "unknown"

@@ -29,6 +29,7 @@ session.json
 settings.json
 .smoke-test-sandbox/
 editor-ui/dist/
+dist/
 node_modules/
 editor-ui/node_modules/
 .vite/
@@ -39,3 +40,8 @@ editor-ui/node_modules/.vite/
 .idea/
 Thumbs.db
 desktop.ini
+dist/
+*.blockmap
+builder-debug.yml
+builder-effective-config.yaml
+latest.yml

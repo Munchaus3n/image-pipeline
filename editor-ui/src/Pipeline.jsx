@@ -613,8 +613,14 @@ function usePipeline() {
         appendLine(`Error: ${e.detail}`);
         setRunning(false); return;
       }
+      if (!r.body) {
+        appendLine("Error: Pipeline response stream was empty.");
+        setRunning(false);
+        return;
+      }
       const reader = r.body.getReader(), dec = new TextDecoder();
       let buf = "";
+      let finished = false;
       while (true) {
         const { done: sd, value } = await reader.read();
         if (sd) break;
@@ -624,15 +630,21 @@ function usePipeline() {
           if (!line.startsWith("data: ")) continue;
           const msg = line.slice(6);
           if (msg.startsWith("__done__")) {
+            finished = true;
             appendLine(msg);
             setStage("done"); setDone(true); setRunning(false);
           } else if (msg.startsWith("__error__")) {
+            finished = true;
             appendLine(`Error: ${msg.replace("__error__ ", "")}`);
             setRunning(false);
           } else {
             appendLine(msg);
           }
         }
+      }
+      if (!finished) {
+        appendLine("Error: Pipeline stream ended before completion.");
+        setRunning(false);
       }
     } catch (e) {
       if (e.name === "AbortError") return;
