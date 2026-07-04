@@ -55,7 +55,6 @@ const pyinstallerArgs = [
   "-m", "PyInstaller",
   "--noconfirm",
   "--clean",
-  "--onefile",
   "--name", "image-pipeline-api",
   "--distpath", "backend-dist",
   "--workpath", path.join("backend-build", "work"),
@@ -107,7 +106,7 @@ if (build.status !== 0) {
   process.exit(build.status || 1);
 }
 
-const exePath = path.join(rootDir, "backend-dist", "image-pipeline-api.exe");
+const exePath = path.join(rootDir, "backend-dist", "image-pipeline-api", "image-pipeline-api.exe");
 if (!fs.existsSync(exePath)) {
   console.error(`Backend build finished but ${exePath} was not created.`);
   process.exit(1);

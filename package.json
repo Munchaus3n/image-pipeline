@@ -50,8 +50,8 @@
     ],
     "extraResources": [
       {
-        "from": "backend-dist/image-pipeline-api.exe",
-        "to": "backend/image-pipeline-api.exe"
+        "from": "backend-dist/image-pipeline-api",
+        "to": "backend/image-pipeline-api"
       }
     ],
     "win": {

@@ -22,7 +22,7 @@ function pythonExecutable(rootDir = appRoot()) {
 }
 
 function packagedBackendExecutable() {
-  return path.join(process.resourcesPath, "backend", "image-pipeline-api.exe");
+  return path.join(process.resourcesPath, "backend", "image-pipeline-api", "image-pipeline-api.exe");
 }
 
 function ensurePackagedDataDirs(userDataPath) {
@@ -164,7 +164,7 @@ async function startPythonApi({ packaged = false, userDataPath = "", resourceDir
 
   if (packaged) {
     if (!fs.existsSync(executable)) {
-      throw new Error(`Bundled backend is missing: ${executable}. Run npm run backend:build before packaging.`);
+      throw new Error("Bundled backend is missing. Run npm run backend:build before packaging.");
     }
     ensurePackagedDataDirs(userDataPath);
     backendLogFile = path.join(userDataPath, "logs", "backend.log");
