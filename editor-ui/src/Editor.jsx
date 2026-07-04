@@ -12,7 +12,7 @@ import {
   getSession, saveSession, clearSession,
   browseFolder,
 } from "./api.js";
-import { apiBase } from "./runtime.js";
+import { apiBase, pathForFile } from "./runtime.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // CANVAS_SIZE: logical composition size (matches pipeline output, e.g. 1440)
@@ -24,9 +24,9 @@ const DISPLAY_ZOOM_MULTIPLIER = 0.74;
 const scaleFactor = () => DS / CANVAS_SIZE;
 
 const BASE = apiBase();
-const SINGLE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
-const SUPPORTED_SINGLE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const SUPPORTED_SINGLE_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);
+const SINGLE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/tiff,image/avif,.png,.jpg,.jpeg,.webp,.tif,.tiff,.avif";
+const SUPPORTED_SINGLE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/tiff", "image/avif"]);
+const SUPPORTED_SINGLE_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "tif", "tiff", "avif"]);
 const DEFAULT_THUMBNAIL_SIZE = 400;
 
 // Opens a folder in the native OS file explorer via the API server
@@ -141,6 +141,77 @@ function isSupportedSingleImageFile(file) {
   if (SUPPORTED_SINGLE_IMAGE_MIME_TYPES.has(file.type)) return true;
   const extension = file.name.split(".").pop()?.toLowerCase() || "";
   return SUPPORTED_SINGLE_IMAGE_EXTENSIONS.has(extension);
+}
+
+function pathDirectory(path = "") {
+  const normalized = toForwardSlashes(path).replace(/\/+$/, "");
+  const slash = normalized.lastIndexOf("/");
+  return slash > 0 ? normalized.slice(0, slash) : "";
+}
+
+function commonDirectory(paths = []) {
+  const directories = paths.map(pathDirectory).filter(Boolean);
+  if (!directories.length) return "";
+  const firstParts = directories[0].split("/");
+  let end = firstParts.length;
+  for (const directory of directories.slice(1)) {
+    const parts = directory.split("/");
+    end = Math.min(end, parts.length);
+    for (let i = 0; i < end; i += 1) {
+      if (firstParts[i].toLowerCase() !== parts[i].toLowerCase()) {
+        end = i;
+        break;
+      }
+    }
+  }
+  return firstParts.slice(0, end).join("/");
+}
+
+function fileFromEntry(entry) {
+  return new Promise((resolve) => {
+    entry.file(resolve, () => resolve(null));
+  });
+}
+
+function readDirectoryEntries(reader) {
+  return new Promise((resolve) => {
+    reader.readEntries(resolve, () => resolve([]));
+  });
+}
+
+async function filesFromEntry(entry) {
+  if (!entry) return [];
+  if (entry.isFile) {
+    const file = await fileFromEntry(entry);
+    return file && isSupportedSingleImageFile(file) ? [file] : [];
+  }
+  if (!entry.isDirectory) return [];
+
+  const reader = entry.createReader();
+  const files = [];
+  while (true) {
+    const entries = await readDirectoryEntries(reader);
+    if (!entries.length) break;
+    const nested = await Promise.all(entries.map(filesFromEntry));
+    files.push(...nested.flat());
+  }
+  return files;
+}
+
+async function droppedImageFiles(dataTransfer) {
+  const items = Array.from(dataTransfer?.items || []);
+  const entries = items
+    .map(item => (typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null))
+    .filter(Boolean);
+  if (entries.length) {
+    const nested = await Promise.all(entries.map(filesFromEntry));
+    return {
+      files: nested.flat(),
+      hasDirectory: entries.some(entry => entry.isDirectory),
+    };
+  }
+  const files = Array.from(dataTransfer?.files || []).filter(isSupportedSingleImageFile);
+  return { files, hasDirectory: false };
 }
 
 function safeDownloadBaseName(name = "edited-image") {
@@ -640,6 +711,33 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     setStatus("");
   }, [revokeSingleImageUrl]); // getImages is a stable import; all setters are stable; uses ref for loadImage
 
+  const initFromDroppedPaths = useCallback(async (paths, label = "Dropped folder") => {
+    const uniquePaths = [...new Set(paths.filter(Boolean))];
+    if (!uniquePaths.length) return;
+    const root = commonDirectory(uniquePaths);
+    const nextQueue = sortImageQueue(uniquePaths, root);
+    revokeSingleImageUrl();
+    prefetchRef.current = null;
+    undoRef.current = null;
+    dragRef.current = null;
+    srcFolderRef.current = root;
+    sessionRunIdRef.current = `drop-${Date.now()}`;
+    setSourceMode("batch");
+    setSingleImageName("");
+    setSessionOutputDir("");
+    setSourceStage("dropped");
+    setSrcFolder(root);
+    setSrcLabel(label);
+    setQueue(nextQueue);
+    setQueueIdx(0);
+    setItems([]);
+    setSelId(null);
+    setActiveSnapZone(null);
+    setSaved(false);
+    await loadImageRef.current(nextQueue, 0, false, configRef.current.guides);
+    setStatus(`Loaded ${nextQueue.length} image${nextQueue.length === 1 ? "" : "s"} from dropped folder.`);
+  }, [revokeSingleImageUrl]);
+
   // ── Init effect ───────────────────────────────────────────────────────────
   const clearToEmptySource = useCallback((message, label = "no output") => {
     revokeSingleImageUrl();
@@ -811,7 +909,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       return;
     }
     if (!isSupportedSingleImageFile(file)) {
-      setStatus("Unsupported file. Use PNG, JPG, JPEG, or WebP.");
+      setStatus("Unsupported file. Use PNG, JPG, JPEG, WebP, TIFF, or AVIF.");
       return;
     }
 
@@ -897,8 +995,27 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     event.preventDefault();
     event.stopPropagation();
     setSingleDropActive(false);
-    loadSingleImageFromFiles(event.dataTransfer.files);
-  }, [loadSingleImageFromFiles]);
+    droppedImageFiles(event.dataTransfer)
+      .then(async ({ files, hasDirectory }) => {
+        if (!files.length) {
+          setStatus(hasDirectory ? "Dropped folder does not contain supported images." : "Unsupported file. Use PNG, JPG, JPEG, WebP, TIFF, or AVIF.");
+          return;
+        }
+        if (hasDirectory) {
+          const paths = files.map(file => pathForFile(file)).filter(Boolean);
+          if (!paths.length) {
+            setStatus("Folder drop needs the desktop app so image paths can be loaded.");
+            return;
+          }
+          await initFromDroppedPaths(paths, commonDirectory(paths) || "Dropped folder");
+          return;
+        }
+        loadSingleImageFromFiles(files);
+      })
+      .catch((error) => {
+        setStatus(`drop failed: ${error.message}`);
+      });
+  }, [initFromDroppedPaths, loadSingleImageFromFiles]);
 
   const browseSingleImage = useCallback(() => {
     singleFileInputRef.current?.click();
@@ -1417,8 +1534,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
               onDrop={onSingleImageDrop}
             >
               <span className="editor-empty-dropzone-icon">＋</span>
-              <strong>Drop an image here to edit</strong>
-              <span>or browse a single PNG, JPG, or WebP.</span>
+              <strong>Drop an image or folder here to edit</strong>
+              <span>or browse a single PNG, JPG, WebP, TIFF, or AVIF.</span>
             </button>
           )}
         </div>
@@ -1474,7 +1591,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
                   <>
                     <span className="editor-single-drop-icon">＋</span>
                     <span className="editor-single-drop-title">Drop or select</span>
-                    <span className="editor-single-drop-hint">PNG · JPG · WebP</span>
+                    <span className="editor-single-drop-hint">PNG · JPG · WebP · TIFF · AVIF</span>
                   </>
                 )}
               </button>
@@ -1503,7 +1620,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
               }}>↺ Reload</button>
             </div>
             <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer", marginBottom:2 }}>
-              <input type="checkbox" checked={comboMode} disabled={isSingleImageMode} onChange={e=>setComboMode(e.target.checked)} />
+              <input type="checkbox" checked={comboMode} onChange={e=>setComboMode(e.target.checked)} />
               Combo mode
             </label>
           </CollSection>
@@ -1666,6 +1783,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
                     borderLeft: `3px solid ${item.id===selId ? "var(--accent)" : "transparent"}`,
                     borderRadius:5, padding:"4px 8px", fontSize:10,
                     cursor:"pointer", textAlign:"left", fontFamily:"JetBrains Mono",
+                    minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
                   }}>
                     {item.label}
                   </button>

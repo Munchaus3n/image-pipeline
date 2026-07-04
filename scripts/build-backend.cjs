@@ -40,6 +40,9 @@ if (pyinstallerCheck.status !== 0) {
 
 const optionalHiddenImports = [
   "pillow_avif",
+  "rembg",
+  "rembg.bg",
+  "rembg.session_factory",
   "rembg.sessions.birefnet_general",
   "rembg.sessions.birefnet_general_lite",
   "rembg.sessions.birefnet_massive",

@@ -15,3 +15,12 @@ export async function selectFile(initial = "", filter = "image") {
   if (!window.electronAPI?.selectFile) return null;
   return window.electronAPI.selectFile(initial, filter);
 }
+
+export function pathForFile(file) {
+  if (!window.electronAPI?.pathForFile) return "";
+  try {
+    return window.electronAPI.pathForFile(file) || "";
+  } catch {
+    return "";
+  }
+}

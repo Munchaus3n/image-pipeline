@@ -221,6 +221,16 @@ _ANSI_RE = re.compile(
     r'|\][^\x07\x1b]*(?:\x07|\x1b\\))'
 )
 _CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+_PIPELINE_NOISE_PATTERNS = (
+    "provider_bridge_ort.cc",
+    "onnxruntime::providerlibrary::get",
+    "failed to load library",
+    "onnxruntime_providers_cuda.dll",
+    "onnxruntime_providers_tensorrt.dll",
+    "loadlibrary failed",
+    "available providers:",
+    "ep error",
+)
 
 def _clean(raw: bytes) -> list[str]:
     text = raw.decode("utf-8", errors="replace")
@@ -229,8 +239,12 @@ def _clean(raw: bytes) -> list[str]:
     cleaned = []
     for line in lines:
         line = _CTRL_RE.sub("", line).strip()
-        if line:
-            cleaned.append(line)
+        if not line:
+            continue
+        lower = line.lower()
+        if any(pattern in lower for pattern in _PIPELINE_NOISE_PATTERNS):
+            continue
+        cleaned.append(line)
     return cleaned
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

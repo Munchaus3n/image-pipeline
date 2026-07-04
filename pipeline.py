@@ -13,7 +13,9 @@ if sys.stderr.encoding.lower() != "utf-8":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 import hashlib
+import ctypes
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -25,11 +27,14 @@ from pathlib import Path, PurePosixPath
 from PIL import Image, ImageFilter, ImageChops, UnidentifiedImageError
 import numpy as np
 from scipy.ndimage import binary_fill_holes, label
-import onnxruntime as ort
 
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
+import onnxruntime as ort
+try:
+    ort.set_default_logger_severity(3)
+except Exception:
+    pass
 
-from rembg import remove as rembg_remove, new_session
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -68,6 +73,28 @@ DEFAULT_UPSCALE_MAX_PX = 3600
 DEFAULT_REMBG_MAX_PX = 4096
 
 console = Console()
+
+_rembg_remove_fn = None
+_new_session_fn = None
+
+
+def _ensure_rembg_loaded():
+    global _rembg_remove_fn, _new_session_fn
+    if _rembg_remove_fn is None or _new_session_fn is None:
+        from rembg import remove as remove_fn, new_session as session_fn
+        _rembg_remove_fn = remove_fn
+        _new_session_fn = session_fn
+    return _rembg_remove_fn, _new_session_fn
+
+
+def rembg_remove(*args, **kwargs):
+    remove_fn, _ = _ensure_rembg_loaded()
+    return remove_fn(*args, **kwargs)
+
+
+def new_session(*args, **kwargs):
+    _, session_fn = _ensure_rembg_loaded()
+    return session_fn(*args, **kwargs)
 
 # ── UI helpers ─────────────────────────────────────────────────────────────────
 
@@ -616,8 +643,92 @@ def _select_bg_device_providers(bg_device_mode: str = "cpu") -> tuple[list[str],
     return ["CPUExecutionProvider"], "GPU + CPU fallback", True, False
 
 
+GPU_PROVIDER_NAMES = {"DmlExecutionProvider", "CUDAExecutionProvider"}
+_ANSI_RE = re.compile(
+    r"\x1b"
+    r"(?:[@-Z\\-_]"
+    r"|\[[0-?]*[ -/]*[@-~]"
+    r"|\][^\x07\x1b]*(?:\x07|\x1b\\))"
+)
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", str(text or ""))
+
+
+def _gpu_provider_from(providers: list[str]) -> str | None:
+    for provider in providers:
+        if provider in GPU_PROVIDER_NAMES:
+            return provider
+    return None
+
+
+def _provider_label(provider: str | None) -> str:
+    if provider == "CUDAExecutionProvider":
+        return "CUDA"
+    if provider == "DmlExecutionProvider":
+        return "DirectML"
+    return "GPU"
+
+
+def _active_session_providers(session) -> list[str]:
+    inner_session = getattr(session, "inner_session", None)
+    get_providers = getattr(inner_session, "get_providers", None)
+    if not callable(get_providers):
+        return []
+    try:
+        return list(get_providers())
+    except Exception:
+        return []
+
+
+def _gpu_provider_is_active(session) -> bool:
+    return _gpu_provider_from(_active_session_providers(session)) is not None
+
+
+def _is_gpu_runtime_error(msg: str) -> bool:
+    m = _strip_ansi(msg).lower()
+    return any(token in m for token in (
+        "cudaexecutionprovider",
+        "dmlexecutionprovider",
+        "cuda",
+        "directml",
+        "cublas",
+        "cublaslt",
+        "cudart",
+        "cufft",
+        "cudnn",
+        "onnxruntime",
+        "provider_bridge",
+        "loadlibrary",
+        "failed to create session",
+    ))
+
+
+def _clean_gpu_error_message(message: str, provider: str | None = None) -> str:
+    text = _strip_ansi(message)
+    provider_label = _provider_label(provider)
+    if provider == "CUDAExecutionProvider":
+        return "CUDA provider unavailable: missing cublasLt64_12.dll. Use CPU / Stable or GPU + CPU fallback."
+    if provider == "DmlExecutionProvider":
+        return "DirectML provider unavailable. Use CPU / Stable or GPU + CPU fallback."
+    return f"{provider_label} provider unavailable. Use CPU / Stable or GPU + CPU fallback."
+
+
+def _provider_dependency_error(provider: str | None) -> str:
+    if provider != "CUDAExecutionProvider":
+        return ""
+    required_dlls = ["cublasLt64_12.dll"]
+    for dll_name in required_dlls:
+        try:
+            ctypes.WinDLL(dll_name)
+        except Exception:
+            return f"CUDA provider unavailable: missing {dll_name}. Use CPU / Stable or GPU + CPU fallback."
+    return ""
+
+
 def _is_oom_error(msg: str) -> bool:
-    m = (msg or "").lower()
+    m = _strip_ansi(msg).lower()
     return any(token in m for token in (
         "out of memory",
         "not enough memory",
@@ -878,11 +989,27 @@ def batch_remove_bg(
         bg_device_mode = "cpu"
     bg_device_mode = _normalize_bg_device_mode(bg_device_mode)
     providers, device_label, fallback_enabled, gpu_available = _select_bg_device_providers(bg_device_mode)
+    requested_gpu_provider = _gpu_provider_from(providers)
     info(f"BG device: {device_label}.")
     print(f"__bg_device__:{device_label}", flush=True)
     info(f"Using providers: {', '.join(providers)}")
-    if bg_device_mode in {"gpu", "gpu_auto"} and not gpu_available:
-        warn("No DirectML/CUDA provider available; using CPU for this run.")
+    if bg_device_mode == "gpu" and not gpu_available:
+        raise RuntimeError(
+            "GPU / Experimental selected, but no DirectML/CUDA provider is available. "
+            "Use CPU / Stable or GPU + CPU fallback."
+        )
+    dependency_error = _provider_dependency_error(requested_gpu_provider)
+    if bg_device_mode == "gpu" and dependency_error:
+        raise RuntimeError(dependency_error)
+    if bg_device_mode == "gpu_auto" and dependency_error:
+        warn(f"{dependency_error} Falling back to CPU / Stable for this run.")
+        print("__bg_device__:GPU dependency missing -> switched to CPU", flush=True)
+        providers = ["CPUExecutionProvider"]
+        requested_gpu_provider = None
+        device_label = "CPU / Stable"
+    if bg_device_mode == "gpu_auto" and not gpu_available:
+        warn("No DirectML/CUDA provider available; falling back to CPU / Stable for this run.")
+        print("__bg_device__:GPU unavailable -> switched to CPU", flush=True)
         info("  -> install onnxruntime-directml to enable DirectML.")
     info(f"Loading {REMBG_MODEL} model. First use may download weights if missing.")
     print(f"__model_loading__:{REMBG_MODEL}:{device_label}", flush=True)
@@ -907,10 +1034,10 @@ def batch_remove_bg(
     except Exception as e:
         if (
             fallback_enabled
-            and _is_oom_error(str(e))
+            and (_is_oom_error(str(e)) or _is_gpu_runtime_error(str(e)))
         ):
-            warn("GPU OOM during model load — falling back to CPU for entire batch.")
-            print("__bg_device__:GPU OOM -> switched to CPU for remainder", flush=True)
+            warn(f"{_clean_gpu_error_message(str(e), requested_gpu_provider)} Falling back to CPU / Stable for entire batch.")
+            print("__bg_device__:GPU failed -> switched to CPU", flush=True)
             try:
                 session = new_session(REMBG_MODEL,
                                       providers=["CPUExecutionProvider"],
@@ -918,13 +1045,27 @@ def batch_remove_bg(
                 device_label = "CPU / Stable"
                 providers = ["CPUExecutionProvider"]
             except Exception as cpu_e:
-                raise RuntimeError(f"GPU OOM fallback to CPU failed during model load: {cpu_e}") from cpu_e
-        elif bg_device_mode == "gpu" and _is_oom_error(str(e)):
-            raise RuntimeError(
-                "GPU OOM in experimental mode. Try CPU / Stable or GPU + CPU fallback."
-            ) from e
+                raise RuntimeError(f"GPU fallback to CPU failed during model load: {cpu_e}") from cpu_e
+        elif bg_device_mode == "gpu" and (_is_oom_error(str(e)) or _is_gpu_runtime_error(str(e))):
+            raise RuntimeError(_clean_gpu_error_message(str(e), requested_gpu_provider)) from e
         else:
             raise
+
+    active_providers = _active_session_providers(session)
+    active_gpu_provider = _gpu_provider_from(active_providers)
+    if bg_device_mode == "gpu" and not active_gpu_provider:
+        raise RuntimeError(_clean_gpu_error_message("", requested_gpu_provider))
+    if bg_device_mode == "gpu_auto" and requested_gpu_provider and not active_gpu_provider:
+        warn(
+            f"{_provider_label(requested_gpu_provider)} provider did not stay active; "
+            "falling back to CPU / Stable for this run."
+        )
+        print("__bg_device__:GPU provider inactive -> switched to CPU", flush=True)
+        device_label = "CPU / Stable"
+        providers = active_providers or ["CPUExecutionProvider"]
+    elif active_gpu_provider:
+        providers = active_providers
+
     model_load_elapsed = time.perf_counter() - model_load_start
     ok(f"Model loaded in {model_load_elapsed:.1f}s.")
     print(f"__model_loaded__:{REMBG_MODEL}:{device_label}:{model_load_elapsed:.1f}", flush=True)
@@ -994,10 +1135,14 @@ def batch_remove_bg(
 
                 success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px)
 
-                if (not success) and fallback_enabled and _is_oom_error(error_msg or ""):
+                if (
+                    (not success)
+                    and fallback_enabled
+                    and (_is_oom_error(error_msg or "") or _is_gpu_runtime_error(error_msg or ""))
+                ):
                     print(f"__err_oom_gpu__:{src.name}", flush=True)
-                    print("__bg_device__:GPU OOM -> switched to CPU for remainder", flush=True)
-                    warn(f"GPU OOM on {src.name} — switching to CPU for remainder of batch.")
+                    print("__bg_device__:GPU failed -> switched to CPU for remainder", flush=True)
+                    warn(f"GPU failed on {src.name} - switching to CPU for remainder of batch.")
                     if cpu_session is None:
                         try:
                             cpu_session = new_session(
@@ -1005,7 +1150,7 @@ def batch_remove_bg(
                                 providers=["CPUExecutionProvider"],
                             )
                         except Exception as cpu_e:
-                            err(f"CPU fallback failed after GPU OOM on {src.name}: {cpu_e}")
+                            err(f"CPU fallback failed after GPU error on {src.name}: {cpu_e}")
                             print(f"__err_rembg__:{src.name}", flush=True)
                             if corrupted_dir:
                                 _copy_corrupted(src, upscale_root, corrupted_dir)
@@ -1013,9 +1158,15 @@ def batch_remove_bg(
                             progress.advance(task)
                             continue
                     session = cpu_session  # permanent switch for all remaining images
+                    providers = ["CPUExecutionProvider"]
                     success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px)
-                elif (not success) and bg_device_mode == "gpu" and _is_oom_error(error_msg or ""):
-                    err("GPU OOM in experimental mode. Try CPU / Stable or GPU + CPU fallback.")
+                elif (
+                    (not success)
+                    and bg_device_mode == "gpu"
+                    and (_is_oom_error(error_msg or "") or _is_gpu_runtime_error(error_msg or ""))
+                ):
+                    print(f"__err_rembg__:{src.name}", flush=True)
+                    raise RuntimeError(_clean_gpu_error_message(error_msg or "", requested_gpu_provider))
 
                 if success:
                     ok(f"{src.name} → processed/{dst.relative_to(dst_root)}")
@@ -1332,4 +1483,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as e:
+        err(str(e))
+        sys.exit(1)
