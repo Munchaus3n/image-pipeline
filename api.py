@@ -72,27 +72,63 @@ def _warmup_worker():
 
 @asynccontextmanager
 async def lifespan(app_instance: "FastAPI"):
+    _cleanup_app_cache()
     t = threading.Thread(target=_warmup_worker, daemon=True, name="model-warmup")
     t.start()
     yield
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-BASE_DIR = Path(__file__).parent
+def _env_path(name: str) -> Path | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return Path(raw).expanduser().resolve()
+    except Exception:
+        return Path(raw).expanduser()
+
+
+BASE_DIR = _env_path("CUTOUT_STUDIO_RESOURCE_DIR") or Path(__file__).parent
+APP_DATA_ROOT = _env_path("CUTOUT_STUDIO_USER_DATA")
+PACKAGED_MODE = bool(APP_DATA_ROOT and os.environ.get("CUTOUT_STUDIO_PACKAGED") == "1")
+
+CONFIG_DIR = APP_DATA_ROOT / "config" if PACKAGED_MODE else BASE_DIR
+SESSION_DIR = APP_DATA_ROOT / "session" if PACKAGED_MODE else BASE_DIR
+CACHE_ROOT = APP_DATA_ROOT / "cache" if PACKAGED_MODE else BASE_DIR / ".cache"
+PREVIEW_CACHE_DIR = CACHE_ROOT / "previews"
+TEMP_CACHE_DIR = CACHE_ROOT / "temp"
+THUMBNAIL_CACHE_DIR = CACHE_ROOT / "thumbnails"
+MODELS_DIR = APP_DATA_ROOT / "models" if PACKAGED_MODE else None
+LOGS_DIR = APP_DATA_ROOT / "logs" if PACKAGED_MODE else BASE_DIR
+HISTORY_DIR = APP_DATA_ROOT / "history" if PACKAGED_MODE else BASE_DIR / "history"
 
 _cfg = configparser.ConfigParser()
 _cfg.read(BASE_DIR / "config.ini")
 
 CANVAS_SIZE   = _cfg.getint("canvas", "canvas_size",  fallback=1440)
-OUTPUT_ROOT   = BASE_DIR / _cfg.get("paths", "output_root",   fallback="output")
+OUTPUT_ROOT   = (APP_DATA_ROOT / "exports") if PACKAGED_MODE else BASE_DIR / _cfg.get("paths", "output_root",   fallback="output")
 TEMPLATES_DIR = BASE_DIR / _cfg.get("paths", "templates_dir", fallback="templates")
-SESSION_FILE  = BASE_DIR / "session.json"
-SETTINGS_FILE = BASE_DIR / "settings.json"
-PREVIEW_CACHE_DIR = BASE_DIR / ".cache" / "previews"
+SESSION_FILE  = SESSION_DIR / "session.json"
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
 PREVIEW_CACHE_VERSION = "preview-v1"
 PREVIEW_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 PREVIEW_CACHE_CLEANUP_INTERVAL_SECONDS = 15 * 60
+APP_CACHE_MAX_BYTES = 5 * 1024 * 1024 * 1024
+APP_CACHE_TARGET_BYTES = 4 * 1024 * 1024 * 1024
 DEFAULT_UPSCALE_MAX_PX = 3600
+
+for _dir in (CONFIG_DIR, SESSION_DIR, PREVIEW_CACHE_DIR, TEMP_CACHE_DIR, THUMBNAIL_CACHE_DIR, LOGS_DIR, OUTPUT_ROOT):
+    _dir.mkdir(parents=True, exist_ok=True)
+if MODELS_DIR is not None:
+    for _dir in (MODELS_DIR / "rembg", MODELS_DIR / "huggingface", MODELS_DIR / "onnx"):
+        _dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("HF_HOME", str(MODELS_DIR / "huggingface"))
+    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(MODELS_DIR / "huggingface" / "hub"))
+    os.environ.setdefault("XDG_CACHE_HOME", str(MODELS_DIR))
+    os.environ.setdefault("U2NET_HOME", str(MODELS_DIR / "rembg"))
+    os.environ.setdefault("REMBG_HOME", str(MODELS_DIR / "rembg"))
+    os.environ.setdefault("ONNXRUNTIME_HOME", str(MODELS_DIR / "onnx"))
 
 SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".avif"}
 IMAGE_MEDIA_TYPES = {
@@ -106,7 +142,6 @@ IMAGE_MEDIA_TYPES = {
 }
 AVIF_DECODE_ERROR = "AVIF preview decode failed. Install pillow-avif-plugin in the API environment."
 
-PREVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 _preview_cache_cleanup_lock = threading.Lock()
 _preview_cache_last_cleanup = 0.0
 
@@ -295,9 +330,10 @@ if platform.system() == "Windows":
             continue
 _drive_roots.add(Path.home())
 
-_ALLOWED_ROOTS = tuple(p.resolve() for p in (
-    {BASE_DIR, OUTPUT_ROOT, TEMPLATES_DIR, BASE_DIR / "input"} | _drive_roots
-))
+_allowed_roots_seed = {BASE_DIR, OUTPUT_ROOT, TEMPLATES_DIR, BASE_DIR / "input"} | _drive_roots
+if APP_DATA_ROOT is not None:
+    _allowed_roots_seed.add(APP_DATA_ROOT)
+_ALLOWED_ROOTS = tuple(p.resolve() for p in _allowed_roots_seed)
 
 def _resolve_safe_path(raw: str, *, must_exist: bool = True, allow_file: bool = True, allow_dir: bool = True) -> Path:
     value = (raw or "").strip()
@@ -411,31 +447,80 @@ def _cleanup_preview_cache_if_due() -> None:
     finally:
         _preview_cache_cleanup_lock.release()
 
+
+def _app_cache_files() -> list[tuple[float, int, Path]]:
+    files: list[tuple[float, int, Path]] = []
+    for root in (PREVIEW_CACHE_DIR, TEMP_CACHE_DIR, THUMBNAIL_CACHE_DIR):
+        try:
+            if not root.exists():
+                continue
+            for file_path in root.rglob("*"):
+                try:
+                    if not file_path.is_file():
+                        continue
+                    stat = file_path.stat()
+                    files.append((stat.st_mtime, stat.st_size, file_path))
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return files
+
+
+def _cleanup_app_cache() -> None:
+    if not PACKAGED_MODE:
+        return
+    files = _app_cache_files()
+    total = sum(size for _, size, _ in files)
+    if total <= APP_CACHE_MAX_BYTES:
+        return
+    for _, size, file_path in sorted(files, key=lambda item: item[0]):
+        if total <= APP_CACHE_TARGET_BYTES:
+            break
+        try:
+            file_path.unlink(missing_ok=True)
+            total -= size
+        except Exception:
+            continue
+
 # ── Template helpers ──────────────────────────────────────────────────────────
 
-CUSTOM_TEMPLATES_FILE = BASE_DIR / "templates_custom.json"
+CUSTOM_TEMPLATES_FILE = CONFIG_DIR / "templates_custom.json"
+RESOURCE_TEMPLATES_FILE = BASE_DIR / "templates_custom.json"
+
+
+def _load_templates_file(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _builtin_templates() -> dict:
+    if RESOURCE_TEMPLATES_FILE.resolve() == CUSTOM_TEMPLATES_FILE.resolve():
+        return {}
+    return _load_templates_file(RESOURCE_TEMPLATES_FILE)
 
 def _load_custom_templates() -> dict:
-    if CUSTOM_TEMPLATES_FILE.exists():
-        try:
-            return json.loads(CUSTOM_TEMPLATES_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return dict(BUILTIN_TEMPLATES)
+    return _load_templates_file(CUSTOM_TEMPLATES_FILE) or _builtin_templates()
 
 def _seed_templates():
-    """Write builtin templates if file missing. If file exists, backfill any missing ref_image fields."""
+    """Write bundled templates to the writable config file if it is missing."""
     if not CUSTOM_TEMPLATES_FILE.exists():
+        CUSTOM_TEMPLATES_FILE.parent.mkdir(parents=True, exist_ok=True)
         CUSTOM_TEMPLATES_FILE.write_text(
-            json.dumps(BUILTIN_TEMPLATES, indent=2, ensure_ascii=False),
+            json.dumps(_builtin_templates(), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         return
-    # File exists — backfill ref_image for any builtin template that lacks it
+    # File exists - backfill ref_image for any bundled template that lacks it.
     try:
         data = json.loads(CUSTOM_TEMPLATES_FILE.read_text(encoding="utf-8"))
         changed = False
-        for name, tpl in BUILTIN_TEMPLATES.items():
+        for name, tpl in _builtin_templates().items():
             if name in data and not data[name].get("ref_image") and tpl.get("ref_image"):
                 data[name]["ref_image"] = tpl["ref_image"]
                 changed = True
@@ -559,6 +644,8 @@ def get_config():
         "canvas_size": CANVAS_SIZE,
         "guides":      GUIDES,
         "templates":   _load_custom_templates(),
+        "app_data_root": str(APP_DATA_ROOT) if PACKAGED_MODE else "",
+        "default_output_dir": str(OUTPUT_ROOT),
     }
 
 
@@ -1040,7 +1127,7 @@ def list_rembg_models():
 
 @app.get("/history-path")
 def get_history_path():
-    return {"path": str(BASE_DIR / "history")}
+    return {"path": str(HISTORY_DIR)}
 
 
 # ── Pipeline ──────────────────────────────────────────────────────────────────
@@ -1056,6 +1143,30 @@ def pipeline_status():
         "pillow_avif_import_error": _PILLOW_AVIF_IMPORT_ERROR if not _PILLOW_AVIF_IMPORTED else "",
     }
 
+
+def _pipeline_command() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--pipeline"]
+    return [sys.executable, "-u", str(BASE_DIR / "pipeline.py")]
+
+
+def _pipeline_env() -> dict:
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["CUTOUT_STUDIO_RESOURCE_DIR"] = str(BASE_DIR)
+    env["CUTOUT_STUDIO_DEFAULT_OUTPUT_DIR"] = str(OUTPUT_ROOT)
+    if PACKAGED_MODE and APP_DATA_ROOT is not None and MODELS_DIR is not None:
+        env["CUTOUT_STUDIO_PACKAGED"] = "1"
+        env["CUTOUT_STUDIO_USER_DATA"] = str(APP_DATA_ROOT)
+        env.setdefault("HF_HOME", str(MODELS_DIR / "huggingface"))
+        env.setdefault("HUGGINGFACE_HUB_CACHE", str(MODELS_DIR / "huggingface" / "hub"))
+        env.setdefault("XDG_CACHE_HOME", str(MODELS_DIR))
+        env.setdefault("U2NET_HOME", str(MODELS_DIR / "rembg"))
+        env.setdefault("REMBG_HOME", str(MODELS_DIR / "rembg"))
+        env.setdefault("ONNXRUNTIME_HOME", str(MODELS_DIR / "onnx"))
+    return env
+
+
 @app.post("/pipeline/run")
 async def run_pipeline(cfg: PipelineConfig):
     global _pipeline_running
@@ -1064,7 +1175,7 @@ async def run_pipeline(cfg: PipelineConfig):
 
     selection_manifest_path: Path | None = None
     cmd = [
-        sys.executable, "-u", str(BASE_DIR / "pipeline.py"),
+        *_pipeline_command(),
         "--non-interactive",
         "--folder-mode", cfg.folder_mode,
         "--scale",       cfg.scale,
@@ -1079,7 +1190,7 @@ async def run_pipeline(cfg: PipelineConfig):
         "skip_files": [f.strip() for f in cfg.skip_files if f.strip()],
     }
     if selection_payload["exclude_rembg"] or selection_payload["skip_files"]:
-        manifest_dir = BASE_DIR / ".cache" / "selection-manifests"
+        manifest_dir = TEMP_CACHE_DIR / "selection-manifests"
         manifest_dir.mkdir(parents=True, exist_ok=True)
         selection_manifest_path = manifest_dir / f"selection-{uuid.uuid4().hex}.json"
         selection_manifest_path.write_text(
@@ -1196,6 +1307,7 @@ async def run_pipeline(cfg: PipelineConfig):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(BASE_DIR),
+                env=_pipeline_env(),
             )
             _pipeline_proc = proc
             try:
@@ -1241,6 +1353,7 @@ async def run_pipeline(cfg: PipelineConfig):
                     selection_manifest_path.unlink(missing_ok=True)
                 except Exception:
                     pass
+            _cleanup_app_cache()
 
     return EventSourceResponse(event_stream())
 
@@ -1265,6 +1378,15 @@ async def stop_pipeline():
 
 # ── Entry ─────────────────────────────────────────────────────────────────────
 
+def _run_embedded_pipeline() -> None:
+    from pipeline import main as pipeline_main
+    sys.argv = [str(BASE_DIR / "pipeline.py"), *sys.argv[2:]]
+    pipeline_main()
+
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=7421, log_level="warning")
+    if len(sys.argv) > 1 and sys.argv[1] == "--pipeline":
+        _run_embedded_pipeline()
+    else:
+        import uvicorn
+        uvicorn.run(app, host="127.0.0.1", port=7421, log_level="warning")

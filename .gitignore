@@ -29,6 +29,8 @@ session.json
 settings.json
 .smoke-test-sandbox/
 editor-ui/dist/
+backend-dist/
+backend-build/
 dist/
 node_modules/
 editor-ui/node_modules/
@@ -45,3 +47,4 @@ dist/
 builder-debug.yml
 builder-effective-config.yaml
 latest.yml
+tatus/

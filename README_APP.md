@@ -5,9 +5,9 @@ Cutout Studio prepares product photos for review and export. It can upscale imag
 ## What The App Version Will Do
 
 - Launch as a Windows desktop app.
-- Start the local Python API behind the scenes.
+- Start the bundled local backend behind the scenes.
 - Provide Process, Editor, Input, Templates, and Settings screens in one Electron shell.
-- Keep normal users away from terminal setup once backend bundling is finished.
+- Keep normal users away from terminal setup for packaged app runs.
 
 ## Processing Device Modes
 
@@ -21,17 +21,25 @@ Available modes:
 
 ## Packaging Status
 
-Electron packaging v1 exists, but the backend Python runtime is not bundled yet. The app currently starts `api.py` with `venv311/Scripts/python.exe` when present, otherwise `python` from PATH.
+Electron packaging now expects a bundled backend executable at:
 
-Do not treat the current build as a standalone installer for normal external users until portable Python bundling and packaged data paths are finished.
+`resources/backend/image-pipeline-api.exe`
 
-## Future App Data Locations
+Build it locally with:
 
-The packaged app should store app data under:
+```powershell
+npm run backend:build
+```
+
+The packaged app does not silently fall back to system Python. If the backend executable is missing, Cutout Studio shows a startup error instead of pretending the app is standalone.
+
+## App Data Locations
+
+The packaged app stores writable data under:
 
 `%LOCALAPPDATA%\Cutout Studio\`
 
-Planned layout:
+Layout:
 
 - `config/settings.json`
 - `session/session.json`
@@ -48,7 +56,14 @@ See [docs/DATA_LOCATIONS.md](docs/DATA_LOCATIONS.md) for the full layout.
 
 ## Cache And Models
 
-Cache files can be deleted and regenerated. Downloaded models should not be removed automatically because re-downloads can be large and slow.
+Cache files can be deleted and regenerated. The app cache policy is:
+
+- Maximum cache size: 5GB
+- Cleanup target: 4GB
+- Oldest cache files are deleted first
+- Cleanup runs on backend startup and after processing completes
+
+Downloaded models are stored separately under `models/` and are not removed automatically because re-downloads can be large and slow.
 
 The app should eventually provide:
 
@@ -60,7 +75,7 @@ See [docs/CACHE_POLICY.md](docs/CACHE_POLICY.md).
 
 ## Clear Cache
 
-Current local development cache lives in this checkout under `.cache/`. For the future packaged app, cache will live under `%LOCALAPPDATA%\Cutout Studio\cache\`.
+Current local development cache lives in this checkout under `.cache/`. Packaged app cache lives under `%LOCALAPPDATA%\Cutout Studio\cache\`.
 
 To clear cache manually in development, stop the app and delete the cache folders only. Do not delete output, settings, session, templates, or models unless you intend to reset those.
 

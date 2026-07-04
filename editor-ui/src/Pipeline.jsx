@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { apiBase } from "./runtime.js";
 import { browseFolder } from "./api.js";
+import { bgModelLabel } from "./modelLabels.js";
 /*
 KNOWN LIMITATIONS (web build):
 - Focus-based settings reload is a temporary sync workaround; desktop Electron should use explicit app events.
@@ -1565,7 +1566,7 @@ export default function Pipeline({
                       outline: "none", fontFamily: "inherit", colorScheme: "dark",
                     }}
                   >
-                    {rembgModels.map(m => <option key={m} value={m}>{m}</option>)}
+                    {rembgModels.map(m => <option key={m} value={m}>{bgModelLabel(m)}</option>)}
                   </select>
                 </Row>
                 <div style={{
@@ -1575,7 +1576,7 @@ export default function Pipeline({
                   lineHeight: 1.35,
                 }}>
                   <div>
-                    Using <span style={{ color: C.text }}>{rembgModel}</span>{" \u00b7 "}<span style={{ color: C.text }}>{bgDeviceLabel}</span>
+                    Using <span style={{ color: C.text }}>{bgModelLabel(rembgModel)}</span>{" \u00b7 "}<span style={{ color: C.text }}>{bgDeviceLabel}</span>
                   </div>
                   <div style={{ color: C.dim2, marginTop: 2 }}>Device mode is set in Settings.</div>
                 </div>

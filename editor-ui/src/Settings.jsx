@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { browseFolder } from "./api";
 import { apiBase } from "./runtime.js";
+import { BG_MODEL_OPTIONS } from "./modelLabels.js";
 
 const BASE = apiBase();
 
@@ -498,14 +499,7 @@ export default function Settings({ onThemeChange }) {
                   value={settings.processing.rembg_model}
                   onChange={value => setSetting("processing", "rembg_model", value)}
                   wide
-                  options={[
-                    ["birefnet-general", "birefnet-general (recommended)"],
-                    ["birefnet-general-lite", "birefnet-general-lite (faster)"],
-                    ["birefnet-massive", "birefnet-massive (high quality)"],
-                    ["birefnet-dis", "birefnet-dis (illustration)"],
-                    ["birefnet-hrsod", "birefnet-hrsod (salient object)"],
-                    ["bria-rmbg", "BRIA RMBG-2.0 (non-commercial)"],
-                  ]}
+                  options={BG_MODEL_OPTIONS}
                 />
               </Row>
               <Row

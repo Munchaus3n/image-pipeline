@@ -39,7 +39,19 @@ from rich.rule import Rule
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-BASE_DIR  = Path(__file__).parent
+def _env_path(name: str) -> Path | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return Path(raw).expanduser().resolve()
+    except Exception:
+        return Path(raw).expanduser()
+
+
+BASE_DIR  = _env_path("CUTOUT_STUDIO_RESOURCE_DIR") or Path(__file__).parent
+DEFAULT_INPUT_DIR = _env_path("CUTOUT_STUDIO_DEFAULT_INPUT_DIR") or BASE_DIR / "input"
+DEFAULT_OUTPUT_DIR = _env_path("CUTOUT_STUDIO_DEFAULT_OUTPUT_DIR") or BASE_DIR / "output"
 NCNN_EXE  = BASE_DIR / "realesrgan-ncnn-vulkan" / "realesrgan-ncnn-vulkan.exe"
 
 NCNN_MODELS = {
@@ -1102,8 +1114,8 @@ def main():
     using_default_paths  = using_default_input and using_default_output
     preserve_custom_data = (not using_default_paths) and (not args.wipe_input_after_run)
 
-    input_dir   = Path(args.input_dir)  if args.input_dir  else BASE_DIR / "input"
-    output_base = Path(args.output_dir) if args.output_dir else BASE_DIR / "output"
+    input_dir   = Path(args.input_dir)  if args.input_dir  else DEFAULT_INPUT_DIR
+    output_base = Path(args.output_dir) if args.output_dir else DEFAULT_OUTPUT_DIR
     upscale_dir   = output_base / "upscaled"
     rembg_dir     = output_base / "processed"
     corrupted_dir = output_base / "corrupted"

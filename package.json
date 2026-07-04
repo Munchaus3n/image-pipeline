@@ -9,8 +9,9 @@
     "electron:dev:ui": "npm --prefix editor-ui run dev -- --host 127.0.0.1 --port 5173 --strictPort",
     "electron:dev:app": "set ELECTRON_RUN_AS_NODE=&& wait-on tcp:127.0.0.1:5173 && electron .",
     "electron:build-ui": "npm --prefix editor-ui run build",
-    "electron:dist": "npm run electron:build-ui && set ELECTRON_RUN_AS_NODE=&& electron-builder",
-    "electron:dist:win": "npm run electron:build-ui && set ELECTRON_RUN_AS_NODE=&& electron-builder --win"
+    "backend:build": "node scripts/build-backend.cjs",
+    "electron:dist": "npm run electron:build-ui && npm run backend:build && set ELECTRON_RUN_AS_NODE=&& electron-builder",
+    "electron:dist:win": "npm run electron:build-ui && npm run backend:build && set ELECTRON_RUN_AS_NODE=&& electron-builder --win"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
@@ -38,11 +39,20 @@
       "!input/**",
       "!downloaded/**",
       "!test-images/**",
+      "!backend-dist/**",
+      "!backend-build/**",
       "!venv311/**",
       "!__pycache__/**",
       "!editor-ui/node_modules/**",
       "!dist/**",
+      "!tatus/**",
       "!release/**"
+    ],
+    "extraResources": [
+      {
+        "from": "backend-dist/image-pipeline-api.exe",
+        "to": "backend/image-pipeline-api.exe"
+      }
     ],
     "win": {
       "target": [

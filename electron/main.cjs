@@ -9,7 +9,41 @@ const DEV_RENDERER_URL = "http://127.0.0.1:5173";
 const APP_NAME = "Cutout Studio";
 let mainWindow = null;
 
+function localCutoutDataPath() {
+  const localAppData = process.env.LOCALAPPDATA
+    || (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Local") : "");
+  return localAppData ? path.join(localAppData, APP_NAME) : "";
+}
+
+function writeMainLog(message) {
+  if (isDev) return;
+  const userDataPath = localCutoutDataPath();
+  if (!userDataPath) return;
+  try {
+    const logDir = path.join(userDataPath, "logs");
+    require("node:fs").mkdirSync(logDir, { recursive: true });
+    require("node:fs").appendFileSync(
+      path.join(logDir, "main.log"),
+      `[${new Date().toISOString()}] ${message}\n`,
+      "utf8",
+    );
+  } catch {
+    // Startup logging must never block app launch.
+  }
+}
+
+writeMainLog(`main module loaded packaged=${app.isPackaged} exec=${process.execPath}`);
 app.setName(APP_NAME);
+
+function configurePackagedUserDataPath() {
+  if (isDev) return;
+  const userDataPath = localCutoutDataPath();
+  if (!userDataPath) return;
+  app.setPath("userData", userDataPath);
+  writeMainLog(`userData=${app.getPath("userData")}`);
+}
+
+configurePackagedUserDataPath();
 
 function appRoot() {
   return path.resolve(__dirname, "..");
@@ -80,7 +114,7 @@ function errorHtml(message) {
   <body>
     <main>
       <h1>Cutout Studio could not start</h1>
-      <p>Electron v1 uses a local or system Python runtime and a fixed local Vite port in dev. Install Python dependencies, free port 5173 if needed, and retry from this workspace.</p>
+      <p>In development, start from this workspace with the local Python and frontend dependencies available. In the packaged app, the bundled backend must be present under the app resources folder.</p>
       <pre>${escaped}</pre>
     </main>
   </body>
@@ -124,6 +158,7 @@ async function waitForRenderer({ timeoutMs = 20000, intervalMs = 300 } = {}) {
 
 async function loadStartupError(error) {
   console.error("[electron] startup failed", error);
+  writeMainLog(`startup failed: ${error?.stack || error?.message || error}`);
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
   }
@@ -132,11 +167,19 @@ async function loadStartupError(error) {
 }
 
 async function openMainWindow() {
-  await startPythonApi();
+  writeMainLog(`openMainWindow start resourceDir=${appRoot()}`);
+  await startPythonApi({
+    packaged: app.isPackaged,
+    userDataPath: app.getPath("userData"),
+    resourceDir: appRoot(),
+  });
+  writeMainLog("backend ready");
   await waitForRenderer();
+  writeMainLog("renderer ready");
 
   const win = createWindow();
   await win.loadURL(rendererUrl());
+  writeMainLog(`window loaded url=${rendererUrl()}`);
   return win;
 }
 
@@ -169,6 +212,7 @@ ipcMain.on("app:is-packaged", (event) => {
 });
 
 app.whenReady().then(async () => {
+  writeMainLog("app ready");
   try {
     await openMainWindow();
   } catch (error) {
