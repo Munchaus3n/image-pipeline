@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
 const http = require("node:http");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -34,6 +34,7 @@ function writeMainLog(message) {
 
 writeMainLog(`main module loaded packaged=${app.isPackaged} exec=${process.execPath}`);
 app.setName(APP_NAME);
+Menu.setApplicationMenu(null);
 
 function configurePackagedUserDataPath() {
   if (isDev) return;
@@ -57,6 +58,7 @@ function createWindow() {
     minWidth: 1200,
     minHeight: 700,
     show: false,
+    autoHideMenuBar: true,
     backgroundColor: "#0b0f17",
     webPreferences: {
       contextIsolation: true,

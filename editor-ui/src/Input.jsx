@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from "react";
 import { apiBase } from "./runtime.js";
 import { browseFolder } from "./api.js";
+import PageHeader from "./components/PageHeader.jsx";
 
 const BASE = apiBase();
 
@@ -277,13 +278,13 @@ export default function Input({
         .inp-card{content-visibility:auto;contain-intrinsic-size:0 150px}
       `}</style>
 
-      {/* ── Top bar ── */}
-      <div className="input-page-header">
-        <div className="input-page-title-group">
-          <h1 className="input-page-title">Input · Review</h1>
-          <p className="input-page-subtitle">Select source images, review exclusions, then continue to processing.</p>
-        </div>
-        <div className="input-page-actions">
+      <PageHeader
+        title={"INPUT \u00b7 REVIEW"}
+        subtitle="Select source images, review exclusions, then continue to processing."
+        className="input-app-header"
+        actionsClassName="input-page-actions"
+        actions={(
+        <>
           <span className="input-count input-header-count">
             {visible.length} image{visible.length !== 1 ? "s" : ""}
             {truncated && <span style={{ color: C.yellow }}> · first 500</span>}
@@ -299,8 +300,9 @@ export default function Input({
             cursor: inputDir.trim() ? "pointer" : "not-allowed",
             fontFamily: "inherit", flexShrink: 0,
           }}>Go to Process →</button>
-        </div>
-      </div>
+        </>
+        )}
+      />
 
       <div className="input-toolbar" style={{
         display: "flex", alignItems: "center", gap: 8, padding: "8px 14px",

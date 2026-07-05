@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { apiBase } from "./runtime.js";
 import { browseFolder } from "./api.js";
 import { bgModelLabel } from "./modelLabels.js";
+import PageHeader from "./components/PageHeader.jsx";
 /*
 KNOWN LIMITATIONS (web build):
 - Focus-based settings reload is a temporary sync workaround; desktop Electron should use explicit app events.
@@ -1431,9 +1432,13 @@ export default function Pipeline({
         select option{background:var(--panel2)}
       `}</style>
 
-      <div className="pipeline-header">
-        <div className="pipeline-header-title">Process · Pipeline</div>
-        <div className="pipeline-header-actions">
+      <PageHeader
+        title={"PROCESS \u00b7 PIPELINE"}
+        subtitle="Configure processing settings, then run the batch."
+        className="pipeline-app-header"
+        actionsClassName="pipeline-header-actions"
+        actions={(
+        <>
           {!running ? (
             <button
               className="pipeline-btn pipeline-header-run-button"
@@ -1458,8 +1463,9 @@ export default function Pipeline({
               Open Editor →
             </button>
           )}
-        </div>
-      </div>
+        </>
+        )}
+      />
 
       <div className="pipeline-main pipeline-layout" style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
 

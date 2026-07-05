@@ -13,6 +13,7 @@ import {
   browseFolder,
 } from "./api.js";
 import { apiBase, pathForFile } from "./runtime.js";
+import PageHeader from "./components/PageHeader.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // CANVAS_SIZE: logical composition size (matches pipeline output, e.g. 1440)
@@ -1493,9 +1494,13 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         onChange={onSingleImageInputChange}
       />
 
-      <header className="editor-topbar">
-        <h1 className="editor-title">Editor · Place &amp; Save</h1>
-        <div className="editor-topbar-actions">
+      <PageHeader
+        title={"EDITOR \u00b7 PLACE & SAVE"}
+        subtitle="Review, place, and export processed images."
+        className="editor-app-header"
+        actionsClassName="editor-topbar-actions"
+        actions={(
+        <>
           {!isSingleImageMode && (
             <button type="button" className="ed-btn editor-action-secondary" onClick={doSkip}>
               <span>Skip</span>
@@ -1507,8 +1512,9 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
             <span>{saveButtonLabel}</span>
             <kbd>↵</kbd>
           </button>
-        </div>
-      </header>
+        </>
+        )}
+      />
 
       <div className="editor-workspace">
       {/* ── Canvas area ──────────────────────────────────────────── */}
