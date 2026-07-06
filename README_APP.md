@@ -5,7 +5,8 @@ Cutout Studio prepares product photos for review and export. It can upscale imag
 ## What The App Version Does
 
 - Runs as a local-first Windows desktop app.
-- Start the bundled local backend behind the scenes.
+- Runs by double-clicking the packaged `Cutout Studio.exe`.
+- Starts the bundled local backend automatically behind the scenes.
 - Provide Process, Editor, Input, Templates, and Settings screens in one Electron shell.
 - Keep normal users away from terminal setup for packaged app runs; the packaged app does not require a manual `python api.py` terminal.
 
@@ -15,9 +16,9 @@ Background removal defaults to CPU / Stable. This is slower, but safest while us
 
 Available modes:
 
-- CPU / Stable: safest, slower, best while using PC.
-- GPU / Experimental: fastest if it works, may OOM or make PC lag.
-- GPU + CPU fallback: tries GPU first, switches to CPU if GPU runs out of memory.
+- CPU / Stable: default, safest, slower, best while using PC.
+- GPU / Experimental: fastest if it works, but can fail clearly when GPU dependencies are missing.
+- GPU + CPU fallback: tries GPU first, then continues on CPU / Stable when GPU cannot run.
 
 ## Packaging Status
 
@@ -41,14 +42,10 @@ The packaged app stores writable data under:
 
 Layout:
 
-- `config/settings.json`
-- `session/session.json`
-- `cache/previews/`
-- `cache/temp/`
-- `cache/thumbnails/`
-- `models/rembg/`
-- `models/huggingface/`
-- `models/onnx/`
+- `config/`
+- `session/`
+- `cache/`
+- `models/`
 - `logs/`
 - `exports/`
 
@@ -75,7 +72,7 @@ To clear cache manually in development, stop the app and delete the cache folder
 
 ## Full Uninstall
 
-Future packaged uninstall should remove the app binaries. A full manual cleanup should also remove:
+To fully uninstall, uninstall the app binaries when using a packaged installer. Optional manual cleanup can also remove:
 
 - `%LOCALAPPDATA%\Cutout Studio\`
 - Any user-created output/export folders, only if the user confirms they are no longer needed
