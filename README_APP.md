@@ -26,10 +26,15 @@ Electron packaging now expects a bundled backend executable at:
 
 `resources/backend/image-pipeline-api/image-pipeline-api.exe`
 
-Build it locally with:
+Install dependencies, build the backend bundle, and package the Windows app with:
 
 ```powershell
+npm install
+cd editor-ui
+npm install
+cd ..
 npm run backend:build
+npm run electron:dist:win
 ```
 
 The packaged app does not silently fall back to system Python. If the backend executable is missing, Cutout Studio shows a startup error instead of pretending the app is standalone.

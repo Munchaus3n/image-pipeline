@@ -52,3 +52,6 @@ tatus/
 # Local AI/design reference notes
 AI_*.md
 /*-contex/
+docs/BRANCH_STRATEGY.md
+docs/audit-checklist.md
+docs/later-updates.md
