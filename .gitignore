@@ -48,3 +48,7 @@ builder-debug.yml
 builder-effective-config.yaml
 latest.yml
 tatus/
+
+# Local AI/design reference notes
+AI_*.md
+/*-contex/
