@@ -2,12 +2,12 @@
 
 Cutout Studio prepares product photos for review and export. It can upscale images, remove backgrounds, show live processing telemetry, then open the placement editor for final composition and save.
 
-## What The App Version Will Do
+## What The App Version Does
 
-- Launch as a Windows desktop app.
+- Runs as a local-first Windows desktop app.
 - Start the bundled local backend behind the scenes.
 - Provide Process, Editor, Input, Templates, and Settings screens in one Electron shell.
-- Keep normal users away from terminal setup for packaged app runs.
+- Keep normal users away from terminal setup for packaged app runs; the packaged app does not require a manual `python api.py` terminal.
 
 ## Processing Device Modes
 
@@ -23,7 +23,7 @@ Available modes:
 
 Electron packaging now expects a bundled backend executable at:
 
-`resources/backend/image-pipeline-api.exe`
+`resources/backend/image-pipeline-api/image-pipeline-api.exe`
 
 Build it locally with:
 
@@ -64,12 +64,6 @@ Cache files can be deleted and regenerated. The app cache policy is:
 - Cleanup runs on backend startup and after processing completes
 
 Downloaded models are stored separately under `models/` and are not removed automatically because re-downloads can be large and slow.
-
-The app should eventually provide:
-
-- Open app data folder
-- Clear cache
-- Clear downloaded models as an advanced manual action
 
 See [docs/CACHE_POLICY.md](docs/CACHE_POLICY.md).
 
