@@ -1,6 +1,6 @@
 # Cutout Studio Terminal Workflow
 
-Cutout Studio is a local product image workflow for preparing, reviewing, and exporting product photos. This branch runs the Python API and Vite browser UI directly from a checkout.
+Cutout Studio is a local-first product image workflow for preparing, reviewing, and exporting product photos. This branch runs the Python API and Vite browser UI directly from a checkout.
 
 ## Requirements
 
@@ -66,4 +66,12 @@ Background removal defaults to CPU / Stable. GPU modes are optional:
 - GPU / Experimental: fastest when GPU dependencies are available.
 - GPU + CPU fallback: tries GPU first, then continues on CPU / Stable if GPU cannot run.
 
-First use may download model weights if they are missing from the local model cache.
+First use may download model weights if they are missing from the local model cache. Cache files are local and can be regenerated; downloaded models are kept separately because re-downloads can be large and slow.
+
+## Troubleshooting
+
+- API unavailable: confirm `python api.py` is running and check `http://127.0.0.1:7421`.
+- Browser UI unavailable: run `npm run dev -- --host 127.0.0.1 --port 5173` from `editor-ui`.
+- Background removal is slow: CPU / Stable is the safe default.
+- GPU mode fails: use CPU / Stable or GPU + CPU fallback.
+- First run appears slow: model weights may need to download or warm the local cache.

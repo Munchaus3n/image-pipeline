@@ -62,3 +62,8 @@ AI_*.md
 /docs/DATA_LOCATIONS.md
 /docs/BRANCH_STRATEGY.md
 /docs/later-updates.md
+
+# Public terminal branches do not track local planning/test helpers
+/docs/
+/scripts/safe_smoke_test.py
+/setup.bat
