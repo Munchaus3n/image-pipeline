@@ -390,7 +390,7 @@ input[type=number] { color-scheme: dark; }
   }
 }
 
-/* Visual pass: Lovable-style Input · Review screen. */
+/* Visual pass: Input review screen. */
 .input-screen {
   background:
     radial-gradient(840px 280px at 18% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 62%),

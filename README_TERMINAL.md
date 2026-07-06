@@ -29,20 +29,10 @@ In another terminal:
 
 ```powershell
 cd editor-ui
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Open the Vite URL shown in the terminal. Browser mode should use the same API and settings endpoints as Electron dev mode.
-
-## Electron Dev Mode
-
-From the repository root:
-
-```powershell
-npm run electron:dev
-```
-
-This starts Vite on fixed port `5173` and launches Electron. If the port is already in use, stop the old Vite/Electron process before retrying.
+Open the Vite URL shown in the terminal. Browser mode uses the local API and settings endpoints from this checkout.
 
 ## Local Development Data
 
@@ -62,7 +52,6 @@ Do not commit local data folders, generated output, virtual environments, or dep
 
 - API unavailable: run `python api.py` and check port `7421`.
 - Browser UI unavailable: run `npm run dev` in `editor-ui`.
-- Electron dev fails on port `5173`: stop old Vite/Electron processes and retry.
 - Background removal is slow: CPU / Stable is the default; GPU modes are opt-in.
 - GPU OOM: use CPU / Stable or GPU + CPU fallback.
 - Model download appears slow on first use: models may need to download or warm the local cache.

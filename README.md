@@ -1,21 +1,69 @@
-# Cutout Studio
+# Cutout Studio Terminal Workflow
 
-Cutout Studio is the product image workflow built in this repository. The repository can support both a packaged Electron app and a terminal/browser development workflow.
+Cutout Studio is a local product image workflow for preparing, reviewing, and exporting product photos. This branch runs the Python API and Vite browser UI directly from a checkout.
 
-## Choose Your Version
+## Requirements
 
-### App Version
+- Windows with PowerShell
+- Python 3.11
+- Node.js and npm
+- `realesrgan-ncnn-vulkan/` beside `pipeline.py` for upscale runs
 
-Use the app version when you want a normal desktop experience for batch background removal, upscaling, review, and export.
+## Setup
 
-Read: [README_APP.md](README_APP.md)
+Create and activate a Python virtual environment:
 
-### Terminal / VS Code Version
+```powershell
+python -m venv venv311
+.\venv311\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
 
-Use the terminal version when you are developing, debugging, or running the local API and browser UI directly from this checkout.
+Install frontend dependencies:
 
-Read: [README_TERMINAL.md](README_TERMINAL.md)
+```powershell
+cd editor-ui
+npm install
+cd ..
+```
 
-## Project Name
+## Run
 
-The product name is Cutout Studio. The repository and some internal package paths may still use `image-pipeline` or `editor-ui` until packaging and branch cleanup are complete.
+Start the API from the repository root:
+
+```powershell
+python api.py
+```
+
+Start the browser UI in another terminal:
+
+```powershell
+cd editor-ui
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open the Vite URL in your browser. The API listens on `http://127.0.0.1:7421`.
+
+## Local Data
+
+Terminal/browser mode stores development data in this checkout:
+
+- `settings.json`
+- `session.json`
+- `.cache/`
+- `input/`
+- `output/`
+- `templates_custom.json`
+- model caches managed by the Python libraries
+
+Do not commit generated output, cache, local settings, virtual environments, or dependency folders.
+
+## CPU And GPU Modes
+
+Background removal defaults to CPU / Stable. GPU modes are optional:
+
+- CPU / Stable: safest default.
+- GPU / Experimental: fastest when GPU dependencies are available.
+- GPU + CPU fallback: tries GPU first, then continues on CPU / Stable if GPU cannot run.
+
+First use may download model weights if they are missing from the local model cache.

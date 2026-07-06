@@ -48,3 +48,17 @@ builder-debug.yml
 builder-effective-config.yaml
 latest.yml
 tatus/
+
+# Local AI/design reference notes
+AI_*.md
+/*-contex/
+
+# App packaging files are not tracked on terminal branches
+/electron/
+/package.json
+/package-lock.json
+/README_APP.md
+/scripts/build-backend.cjs
+/docs/DATA_LOCATIONS.md
+/docs/BRANCH_STRATEGY.md
+/docs/later-updates.md
