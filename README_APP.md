@@ -1,46 +1,84 @@
-# Cutout Studio App
+# Cutout Studio
 
-Cutout Studio prepares product photos for review and export. It can upscale images, remove backgrounds, show live processing telemetry, then open the placement editor for final composition and save.
+![License](https://img.shields.io/badge/license-see%20LICENSE-blue)
+![Windows](https://img.shields.io/badge/platform-Windows-0078D6)
+![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB)
+![Electron app](https://img.shields.io/badge/app-Electron-47848F)
+![Local first](https://img.shields.io/badge/local--first-yes-2E7D32)
+![Status](https://img.shields.io/badge/status-beta-yellow)
 
-## What The App Version Does
+Local-first Windows app for preparing product photos:
 
-- Runs as a local-first Windows desktop app.
-- Runs by double-clicking the packaged `Cutout Studio.exe`.
-- Starts the bundled local backend automatically behind the scenes.
-- Provide Process, Editor, Input, Templates, and Settings screens in one Electron shell.
-- Keep normal users away from terminal setup for packaged app runs; the packaged app does not require a manual `python api.py` terminal.
+- batch input
+- background removal
+- optional upscaling
+- review/editor workflow
+- export-ready product images
 
-## Processing Device Modes
+## What It Does
 
-Background removal defaults to CPU / Stable. This is slower, but safest while using the PC because GPU mode can run out of memory or make the desktop less responsive.
+- Imports product images from files or folders.
+- Removes backgrounds with local model-backed processing.
+- Places products into a consistent crop, padding, and canvas workflow.
+- Optionally upscales images when the local upscaler is available.
+- Provides review and editor screens before export.
+- Keeps project data local to your Windows machine.
 
-Available modes:
+## App Workflow
 
-- CPU / Stable: default, safest, slower, best while using PC.
-- GPU / Experimental: fastest if it works, but can fail clearly when GPU dependencies are missing.
-- GPU + CPU fallback: tries GPU first, then continues on CPU / Stable when GPU cannot run.
+1. Add images or a folder.
+2. Review input.
+3. Choose processing settings.
+4. Run the pipeline.
+5. Review results in the editor.
+6. Save or export final product images.
 
-## Packaging Status
+## Processing Features
 
-Electron packaging now expects a bundled backend executable at:
+- Background removal.
+- Crop, padding, and placement workflow.
+- Thumbnails and previews where available.
+- CPU / Stable mode as the safest default.
+- GPU / Experimental mode as an optional faster path when dependencies work.
+- GPU + CPU fallback mode as an optional recovery path.
 
-`resources/backend/image-pipeline-api/image-pipeline-api.exe`
+## Models And Credits
 
-Build it locally with:
+| Project | Purpose | Creator | License note |
+|---|---|---|---|
+| [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) | Background removal | Peng Zheng et al. | MIT/source license note. Check the upstream project for current terms. |
+| [rembg](https://github.com/danielgatis/rembg) | Background removal wrapper | Daniel Gatis | MIT. |
+| [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) / [realesrgan-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) | Upscaling | Xintao Wang et al. | BSD-3-Clause. |
+| [BRIA RMBG-2.0](https://huggingface.co/briaai/RMBG-2.0) | Optional background removal | BRIA AI | Source-available/non-commercial unless you have a commercial agreement from BRIA. |
+
+## License Notes
+
+- Cutout Studio source license is in [LICENSE](LICENSE).
+- Third-party models and tools keep their own licenses.
+- Users are responsible for complying with third-party model and tool licenses.
+- Cutout Studio does not grant extra rights to third-party models or tools.
+- See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party project links and license notes.
+
+## Setup And Build
 
 ```powershell
+npm install
+cd editor-ui
+npm install
+cd ..
 npm run backend:build
+npm run electron:dist:win
 ```
 
-The packaged app does not silently fall back to system Python. If the backend executable is missing, Cutout Studio shows a startup error instead of pretending the app is standalone.
-
-## App Data Locations
+## Local Data
 
 The packaged app stores writable data under:
 
-`%LOCALAPPDATA%\Cutout Studio\`
+```text
+%LOCALAPPDATA%\Cutout Studio\
+```
 
-Layout:
+Expected data areas:
 
 - `config/`
 - `session/`
@@ -49,32 +87,20 @@ Layout:
 - `logs/`
 - `exports/`
 
-See [docs/DATA_LOCATIONS.md](docs/DATA_LOCATIONS.md) for the full layout.
-
 ## Cache And Models
 
-Cache files can be deleted and regenerated. The app cache policy is:
+Cache files can be deleted and regenerated.
 
-- Maximum cache size: 5GB
-- Cleanup target: 4GB
-- Oldest cache files are deleted first
-- Cleanup runs on backend startup and after processing completes
+Downloaded models are stored separately and are not auto-deleted, because re-downloads can be large and slow.
 
-Downloaded models are stored separately under `models/` and are not removed automatically because re-downloads can be large and slow.
+## Support / Donation
 
-See [docs/CACHE_POLICY.md](docs/CACHE_POLICY.md).
+<a href="YOUR_BUY_ME_A_COFFEE_LINK">
+  <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-support-yellow?style=for-the-badge" alt="Buy me a coffee">
+</a>
 
-## Clear Cache
+Donations are optional and do not unlock extra features.
 
-Current local development cache lives in this checkout under `.cache/`. Packaged app cache lives under `%LOCALAPPDATA%\Cutout Studio\cache\`.
+## Project Status
 
-To clear cache manually in development, stop the app and delete the cache folders only. Do not delete output, settings, session, templates, or models unless you intend to reset those.
-
-## Full Uninstall
-
-To fully uninstall, uninstall the app binaries when using a packaged installer. Optional manual cleanup can also remove:
-
-- `%LOCALAPPDATA%\Cutout Studio\`
-- Any user-created output/export folders, only if the user confirms they are no longer needed
-
-User output must not be deleted automatically.
+Cutout Studio is a beta, local-first Windows app. Expect rough edges, especially around optional GPU processing and first-run model setup.
