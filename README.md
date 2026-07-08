@@ -49,7 +49,7 @@ Local-first Windows app for preparing product photos:
 | [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) | Background removal | Peng Zheng et al. | MIT/source license note. Check the upstream project for current terms. |
 | [rembg](https://github.com/danielgatis/rembg) | Background removal wrapper | Daniel Gatis | MIT. |
 | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) / [realesrgan-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) | Upscaling | Xintao Wang et al. | BSD-3-Clause. |
-| [BRIA RMBG-2.0](https://huggingface.co/briaai/RMBG-2.0) | Optional background removal | BRIA AI | Source-available/non-commercial unless you have a commercial agreement from BRIA. |
+| BRIA RMBG-2.0 | Optional background removal | BRIA AI | Non-commercial by default; commercial use requires BRIA permission/license |
 
 ## License Notes
 
@@ -57,6 +57,10 @@ Local-first Windows app for preparing product photos:
 - Third-party models and tools keep their own licenses.
 - Users are responsible for complying with third-party model and tool licenses.
 - Cutout Studio does not grant extra rights to third-party models or tools.
+- BRIA RMBG-2.0 is optional and is not commercially free by default.
+- BRIA RMBG-2.0 is available for non-commercial use under its upstream license terms.
+- Commercial use of BRIA RMBG-2.0 requires permission or a commercial license from BRIA AI.
+- Cutout Studio does not grant commercial rights to BRIA RMBG-2.0.
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party project links and license notes.
 
 ## Setup And Build
