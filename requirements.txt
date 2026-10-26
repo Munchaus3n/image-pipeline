@@ -22,7 +22,6 @@ networkx==3.6.1
 numba==0.65.0
 numpy==2.4.4
 onnxruntime-directml==1.24.4
-opencv-python==4.13.0.92
 packaging==26.0
 pillow==12.2.0
 pillow-avif-plugin
@@ -33,7 +32,6 @@ pydantic==2.12.5
 pydantic_core==2.41.5
 Pygments==2.20.0
 PyMatting==1.1.15
-python-dotenv==1.2.2
 referencing==0.37.0
 rembg==2.0.74
 requests==2.33.1

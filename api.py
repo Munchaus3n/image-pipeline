@@ -13,7 +13,6 @@ import os
 import platform
 import re
 import shutil
-import string
 import subprocess
 import sys
 import time
@@ -22,13 +21,26 @@ import configparser
 from pathlib import Path
 from typing import Any, Literal
 
+# Frozen builds reuse this executable for the pipeline subprocess
+# (`<exe> --pipeline ...`, see _pipeline_command). Dispatch before the server
+# imports and module-level setup below, none of which the pipeline needs.
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--pipeline":
+    from pipeline import main as _pipeline_main, err as _pipeline_err
+    sys.argv = ["pipeline.py", *sys.argv[2:]]
+    try:
+        _pipeline_main()
+    except RuntimeError as _pipeline_error:
+        _pipeline_err(str(_pipeline_error))
+        sys.exit(1)
+    sys.exit(0)
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sse_starlette.sse import EventSourceResponse
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -48,31 +60,28 @@ _thumb_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="thumb")
 
 # ── Model warm-up ─────────────────────────────────────────────────────────────
 # Runs once in a background thread when api.py starts.
-# Ensures model weights are downloaded + in OS file cache before the first
-# pipeline run. pipeline.py runs in a subprocess, so this cannot keep a live
+# Ensures model weights are downloaded before the first pipeline run. pipeline.py runs in a subprocess, so this cannot keep a live
 # model session loaded for the actual processing run.
 
 def _warmup_worker():
     try:
-        from rembg import new_session
-        import onnxruntime as ort
+        from rembg.sessions import sessions_class
         # Read model name from settings if already saved, else use default
-        model = "birefnet-general"
-        try:
-            if SETTINGS_FILE.exists():
-                _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-                model = _s.get("processing", {}).get("rembg_model", model)
-        except Exception:
-            pass
-        # Always warm up on CPU — we just want weights on disk/OS cache.
+        processing = _load_saved_settings_file().get("processing")
+        model = (processing.get("rembg_model") if isinstance(processing, dict) else None) or "birefnet-general"
+        # Only fetch the weights; building an ORT session here would cost
+        # seconds of CPU and 1-2 GB RAM for a session that is thrown away.
         # The real pipeline run will pick the right provider (DML/CUDA/CPU).
-        new_session(model, providers=["CPUExecutionProvider"])
+        for session_class in sessions_class:
+            if session_class.name() == model:
+                session_class.download_models()
+                break
     except Exception:
         pass  # Warm-up is best-effort; never crash the server
 
 @asynccontextmanager
 async def lifespan(app_instance: "FastAPI"):
-    _cleanup_app_cache()
+    await asyncio.to_thread(_cleanup_app_cache)
     t = threading.Thread(target=_warmup_worker, daemon=True, name="model-warmup")
     t.start()
     yield
@@ -101,7 +110,6 @@ TEMP_CACHE_DIR = CACHE_ROOT / "temp"
 THUMBNAIL_CACHE_DIR = CACHE_ROOT / "thumbnails"
 MODELS_DIR = APP_DATA_ROOT / "models" if PACKAGED_MODE else None
 LOGS_DIR = APP_DATA_ROOT / "logs" if PACKAGED_MODE else BASE_DIR
-HISTORY_DIR = APP_DATA_ROOT / "history" if PACKAGED_MODE else BASE_DIR / "history"
 
 _cfg = configparser.ConfigParser()
 _cfg.read(BASE_DIR / "config.ini")
@@ -110,7 +118,10 @@ CANVAS_SIZE   = _cfg.getint("canvas", "canvas_size",  fallback=1440)
 OUTPUT_ROOT   = (APP_DATA_ROOT / "exports") if PACKAGED_MODE else BASE_DIR / _cfg.get("paths", "output_root",   fallback="output")
 TEMPLATES_DIR = BASE_DIR / _cfg.get("paths", "templates_dir", fallback="templates")
 SESSION_FILE  = SESSION_DIR / "session.json"
+_session_file_lock = threading.Lock()
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
+_settings_file_lock = threading.Lock()
+_templates_file_lock = threading.Lock()
 PREVIEW_CACHE_VERSION = "preview-v1"
 PREVIEW_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 PREVIEW_CACHE_CLEANUP_INTERVAL_SECONDS = 15 * 60
@@ -159,7 +170,6 @@ def _is_avif_decode_supported() -> bool:
 
 _AVIF_DECODE_SUPPORTED = _is_avif_decode_supported()
 
-_ALLOWED_REMBG_FALLBACKS = {"auto"}
 _ALLOWED_BG_DEVICE_MODES = {"cpu", "gpu", "gpu_auto"}
 
 def _open_image_checked(path: Path) -> Image.Image:
@@ -167,7 +177,8 @@ def _open_image_checked(path: Path) -> Image.Image:
         raise HTTPException(status_code=400, detail=AVIF_DECODE_ERROR)
     try:
         with Image.open(path) as opened:
-            return opened.copy()
+            # Detached copy, rotated upright when EXIF says so.
+            return ImageOps.exif_transpose(opened)
     except (UnidentifiedImageError, OSError) as e:
         if path.suffix.lower() == ".avif":
             raise HTTPException(status_code=400, detail=AVIF_DECODE_ERROR) from e
@@ -185,10 +196,6 @@ def _read_image_snapshot(path: Path, *, missing_detail: str) -> bytes:
         raise HTTPException(status_code=404, detail=missing_detail) from e
     except OSError as e:
         raise HTTPException(status_code=503, detail=f"Image snapshot read failed, file may still be changing: {e}") from e
-
-def _normalize_rembg_fallback(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    return raw if raw in _ALLOWED_REMBG_FALLBACKS else "auto"
 
 def _normalize_bg_device_mode(value: Any, processing: dict | None = None) -> str:
     raw = str(value or "").strip().lower()
@@ -251,18 +258,14 @@ def _clean(raw: bytes) -> list[str]:
 
 def images_in_folder(folder: Path, *, recursive: bool = True, limit: int = 0) -> tuple[list[Path], bool]:
     walker = folder.rglob("*") if recursive else folder.iterdir()
-    images: list[Path] = []
-    capped = limit > 0
-    max_items = limit + 1 if capped else 0
-    for p in walker:
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
-            images.append(p)
-            if capped and len(images) >= max_items:
-                break
-    truncated = capped and len(images) > limit
+    images = sorted(
+        (p for p in walker if p.suffix.lower() in SUPPORTED_EXTS and p.is_file()),
+        key=lambda p: _natural_path_key(p, folder),
+    )
+    truncated = limit > 0 and len(images) > limit
     if truncated:
         images = images[:limit]
-    return sorted(images, key=lambda p: _natural_path_key(p, folder)), truncated
+    return images, truncated
 
 def _natural_path_key(path: Path, root: Path) -> tuple:
     try:
@@ -326,28 +329,29 @@ def mirror_save_path(src: Path, src_root: Path, output_base: Path | None = None,
 def mirror_thumbnail_path(save_path: Path, output_base: Path, thumb_size: int) -> Path:
     return save_path.parent / "thumbnail" / save_path.name
 
+def _editor_output_base(src_root_raw: str, output_dir_raw: str) -> tuple[Path | None, Path]:
+    """Resolve (src_root, output_base) for /save and /skip.
+
+    BUG-13 FIX: derive the destination from src_root when provided, so custom
+    output dirs land in the right place. src_root is resolved the same way
+    image paths are, so relative_to() works across junctions/mapped drives.
+    """
+    src_root: Path | None = None
+    if src_root_raw.strip():
+        try:
+            src_root = Path(src_root_raw.strip()).expanduser().resolve()
+        except Exception:
+            src_root = Path(src_root_raw.strip())
+    if output_dir_raw.strip():
+        output_base = _resolve_safe_path(output_dir_raw, must_exist=False, allow_file=False, allow_dir=True)
+    elif src_root:
+        output_base = _output_base_from_src_root(src_root)
+    else:
+        output_base = OUTPUT_ROOT
+    return src_root, output_base
+
 def mirror_skip_path(src: Path, src_root: Path, output_base: Path | None = None) -> Path:
     return mirror_save_path(src, src_root, output_base=output_base, stage="skipped")
-
-# Allow any path on any local drive — this is a local-only app with no remote access.
-# On Windows: add every mounted drive root (C:\, D:\, ...).
-# On all platforms: also allow the user's home directory.
-_drive_roots: set[Path] = set()
-if platform.system() == "Windows":
-    for d in string.ascii_uppercase:
-        root = Path(f"{d}:\\")
-        try:
-            if root.exists():
-                _drive_roots.add(root)
-        except OSError:
-            # Some mapped/system drives can raise access errors on stat().
-            continue
-_drive_roots.add(Path.home())
-
-_allowed_roots_seed = {BASE_DIR, OUTPUT_ROOT, TEMPLATES_DIR, BASE_DIR / "input"} | _drive_roots
-if APP_DATA_ROOT is not None:
-    _allowed_roots_seed.add(APP_DATA_ROOT)
-_ALLOWED_ROOTS = tuple(p.resolve() for p in _allowed_roots_seed)
 
 def _resolve_safe_path(raw: str, *, must_exist: bool = True, allow_file: bool = True, allow_dir: bool = True) -> Path:
     value = (raw or "").strip()
@@ -370,8 +374,6 @@ def _resolve_safe_path(raw: str, *, must_exist: bool = True, allow_file: bool = 
         else:
             raise HTTPException(status_code=400, detail="Invalid path type")
 
-    if not any(resolved == root or root in resolved.parents for root in _ALLOWED_ROOTS):
-        raise HTTPException(status_code=403, detail="Path outside allowed roots")
     return resolved
 
 
@@ -420,8 +422,6 @@ def _write_preview_cache_atomically(target: Path, content: bytes) -> bool:
     try:
         with tmp.open("wb") as f:
             f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
         os.replace(tmp, target)
         return True
     except Exception:
@@ -430,6 +430,16 @@ def _write_preview_cache_atomically(target: Path, content: bytes) -> bool:
         except Exception:
             pass
         return False
+
+
+def _write_json_atomic(path: Path, data: Any, *, indent: int | None = None) -> None:
+    """Write JSON via temp file + os.replace so readers never see a half-written file."""
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _cleanup_preview_cache_if_due() -> None:
@@ -519,16 +529,16 @@ def _builtin_templates() -> dict:
     return _load_templates_file(RESOURCE_TEMPLATES_FILE)
 
 def _load_custom_templates() -> dict:
-    return _load_templates_file(CUSTOM_TEMPLATES_FILE) or _builtin_templates()
+    # An existing file is authoritative, even when the user deleted every template.
+    if CUSTOM_TEMPLATES_FILE.exists():
+        return _load_templates_file(CUSTOM_TEMPLATES_FILE)
+    return _builtin_templates()
 
 def _seed_templates():
     """Write bundled templates to the writable config file if it is missing."""
     if not CUSTOM_TEMPLATES_FILE.exists():
         CUSTOM_TEMPLATES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CUSTOM_TEMPLATES_FILE.write_text(
-            json.dumps(_builtin_templates(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        _write_json_atomic(CUSTOM_TEMPLATES_FILE, _builtin_templates(), indent=2)
         return
     # File exists - backfill ref_image for any bundled template that lacks it.
     try:
@@ -539,9 +549,7 @@ def _seed_templates():
                 data[name]["ref_image"] = tpl["ref_image"]
                 changed = True
         if changed:
-            CUSTOM_TEMPLATES_FILE.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            _write_json_atomic(CUSTOM_TEMPLATES_FILE, data, indent=2)
     except Exception:
         pass
 
@@ -602,8 +610,13 @@ class PipelineConfig(BaseModel):
             return 0
         return value
 
+class TemplateEntry(BaseModel):
+    zone:      str = ""
+    hint:      str = ""
+    ref_image: str = ""
+
 class TemplatesPayload(BaseModel):
-    templates: dict
+    templates: dict[str, TemplateEntry]
 
 class SettingsPayload(BaseModel):
     settings: dict
@@ -613,10 +626,15 @@ class SettingsPayload(BaseModel):
 app = FastAPI(title="Image Pipeline API", version="1.2.0", lifespan=lifespan)
 
 _LOCAL_ORIGINS = [
-    "http://127.0.0.1",
-    "http://localhost",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
+    # The packaged Electron renderer loads the built UI via file://, which
+    # sends Origin: null. Needed for the packaged app to work at all; there's
+    # no auth token exchanged between the renderer and the local API, so any
+    # other local file:///sandboxed page can also reach this API while it's
+    # running — closing that gap needs a shared secret between
+    # preload.cjs/python-manager.cjs/api.py, a real follow-up, not something
+    # to silently drop here.
     "null",
 ]
 
@@ -631,6 +649,7 @@ app.add_middleware(
 
 _pipeline_running = False
 _pipeline_proc: asyncio.subprocess.Process | None = None
+_pipeline_run_token: object | None = None
 
 def _terminate_process_tree_by_pid(pid: int | None) -> None:
     if not pid:
@@ -641,6 +660,7 @@ def _terminate_process_tree_by_pid(pid: int | None) -> None:
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             return
         import signal
@@ -663,21 +683,29 @@ def get_config():
     }
 
 
-@app.get("/browse")
-def browse_folder(initial: str = ""):
+@contextmanager
+def _tk_dialog_root():
+    import tkinter as tk
+    root = tk.Tk()
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
         root.attributes("-topmost", True)
         root.focus_force()
         root.withdraw()
-        folder = filedialog.askdirectory(
-            title="Select folder",
-            initialdir=initial.strip() or str(BASE_DIR),
-            parent=root,
-        )
+        yield root
+    finally:
         root.destroy()
+
+
+@app.get("/browse")
+def browse_folder(initial: str = ""):
+    try:
+        from tkinter import filedialog
+        with _tk_dialog_root() as root:
+            folder = filedialog.askdirectory(
+                title="Select folder",
+                initialdir=initial.strip() or str(BASE_DIR),
+                parent=root,
+            )
         return {"path": folder or ""}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Folder dialog unavailable: {e}")
@@ -686,23 +714,18 @@ def browse_folder(initial: str = ""):
 @app.get("/browse-file")
 def browse_file(initial: str = "", filter: str = ""):
     try:
-        import tkinter as tk
         from tkinter import filedialog
-        root = tk.Tk()
-        root.attributes("-topmost", True)
-        root.focus_force()
-        root.withdraw()
         filetypes = (
             [("Images", "*.png *.jpg *.jpeg *.webp *.tif *.tiff *.avif"), ("All files", "*.*")]
             if filter == "image" else [("All files", "*.*")]
         )
-        path = filedialog.askopenfilename(
-            title="Select reference image",
-            initialdir=Path(initial).parent if initial and Path(initial).exists() else str(BASE_DIR),
-            filetypes=filetypes,
-            parent=root,
-        )
-        root.destroy()
+        with _tk_dialog_root() as root:
+            path = filedialog.askopenfilename(
+                title="Select reference image",
+                initialdir=Path(initial).parent if initial and Path(initial).exists() else str(BASE_DIR),
+                filetypes=filetypes,
+                parent=root,
+            )
         return {"path": path or ""}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File dialog unavailable: {e}")
@@ -743,18 +766,17 @@ def serve_template_image(name: str = Query(...)):
     # Security: allow only a bare filename, no path traversal
     fname = Path(name).name
     p = TEMPLATES_DIR / fname
-    if not p.exists():
+    if fname in ("", ".", "..") or not p.is_file():
         raise HTTPException(status_code=404, detail=f"Template image not found: {fname}")
     return FileResponse(str(p))
 
 
 @app.post("/templates/save")
 def save_templates(payload: TemplatesPayload):
-    CUSTOM_TEMPLATES_FILE.write_text(
-        json.dumps(payload.templates, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    return {"ok": True, "count": len(payload.templates)}
+    templates = {name: entry.model_dump() for name, entry in payload.templates.items()}
+    with _templates_file_lock:
+        _write_json_atomic(CUSTOM_TEMPLATES_FILE, templates, indent=2)
+    return {"ok": True, "count": len(templates)}
 
 
 # ── Source / images ───────────────────────────────────────────────────────────
@@ -796,8 +818,6 @@ def list_images(
     limit: int = Query(0, ge=0, le=5000),
 ):
     path = _resolve_safe_path(folder, must_exist=True, allow_file=False, allow_dir=True)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Folder not found: {folder}")
     images, truncated = images_in_folder(path, recursive=recursive, limit=limit)
     return {
         "folder": str(path),
@@ -812,8 +832,6 @@ def list_images(
 @app.get("/image")
 def serve_image(path: str = Query(...)):
     p = _resolve_safe_path(path, must_exist=True, allow_file=True, allow_dir=False)
-    if not p.exists():
-        raise HTTPException(status_code=404, detail=f"Not found: {path}")
     if p.suffix.lower() not in SUPPORTED_EXTS:
         raise HTTPException(status_code=400, detail="Unsupported file type")
     if p.suffix.lower() == ".avif":
@@ -827,8 +845,6 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
     """Serve a downscaled preview image — much faster than loading full-res for sidebar display.
     size: max dimension in pixels (default 800). Original returned if already smaller."""
     p = _resolve_safe_path(path, must_exist=True, allow_file=True, allow_dir=False)
-    if not p.exists():
-        raise HTTPException(status_code=404, detail=f"Missing file: {path}")
     if p.suffix.lower() not in SUPPORTED_EXTS:
         raise HTTPException(status_code=400, detail="Unsupported file type for preview")
 
@@ -901,33 +917,26 @@ def save_composition(req: SaveRequest):
     if not req.items:
         raise HTTPException(status_code=400, detail="No items to save")
 
+    output_settings = _load_saved_settings_file().get("output")
+    if not isinstance(output_settings, dict):
+        output_settings = {}
+
     # canvas_size: request > settings.json > config.ini constant
-    cs = req.canvas_size if req.canvas_size and req.canvas_size > 0 else None
-    if cs is None:
-        try:
-            if SETTINGS_FILE.exists():
-                _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-                cs = _s.get("output", {}).get("canvas_size") or None
-        except Exception:
-            pass
-    cs = int(cs) if cs else CANVAS_SIZE
-    source_used = "request" if req.canvas_size else ("settings" if cs != CANVAS_SIZE else "config")
-    print(f"__save_canvas_size__:{cs}:{source_used}", flush=True)
+    try:
+        cs = int(req.canvas_size or output_settings.get("canvas_size") or CANVAS_SIZE)
+    except (TypeError, ValueError):
+        cs = CANVAS_SIZE
+    cs = max(1, min(8192, cs))
 
     # thumbnail_size: settings.json > 400
-    thumb_size = 400
     try:
-        if SETTINGS_FILE.exists():
-            _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-            thumb_size = int(_s.get("output", {}).get("thumbnail_size") or 400)
-    except Exception:
-        pass
+        thumb_size = int(output_settings.get("thumbnail_size") or 400)
+    except (TypeError, ValueError):
+        thumb_size = 400
     canvas = Image.new("RGBA", (cs, cs), (0, 0, 0, 0))
 
     for item in req.items:
-        p = Path(item.image_path)
-        if not p.exists():
-            raise HTTPException(status_code=404, detail=f"Source image not found: {item.image_path}")
+        p = _resolve_safe_path(item.image_path, must_exist=True, allow_dir=False)
         img = _open_image_checked(p).convert("RGBA")
         w   = max(1, int(img.width  * item.scale))
         h   = max(1, int(img.height * item.scale))
@@ -936,14 +945,8 @@ def save_composition(req: SaveRequest):
         y = item.canvas_y - h // 2
         canvas.paste(resized, (x, y), resized)
 
-    ref_path = Path(req.items[0].image_path)
-    src_root = Path(req.src_root) if req.src_root.strip() else None
-    if req.output_dir.strip():
-        output_base = _resolve_safe_path(req.output_dir, must_exist=False, allow_file=False, allow_dir=True)
-    elif src_root:
-        output_base = _output_base_from_src_root(src_root)
-    else:
-        output_base = OUTPUT_ROOT
+    ref_path = _resolve_safe_path(req.items[0].image_path, must_exist=True, allow_dir=False)
+    src_root, output_base = _editor_output_base(req.src_root, req.output_dir)
 
     if src_root:
         save_path = mirror_save_path(ref_path, src_root, output_base=output_base, stage="final").with_suffix(".png")
@@ -962,20 +965,16 @@ def save_composition(req: SaveRequest):
         thumb_file.parent.mkdir(parents=True, exist_ok=True)
         thumb_path = str(thumb_file)
 
-        _canvas_snap = canvas.copy()
-        _cs          = cs
-        _tf          = thumb_file
-        _ts          = thumb_size
-
+        # `canvas` is not touched after this point, so the worker can use it directly.
         def _write_thumb(snap, size, dst, ts):
             try:
                 white = Image.new("RGBA", (size, size), (255, 255, 255, 255))
                 white.paste(snap, mask=snap.split()[3])
-                white.convert("RGB").resize((ts, ts), Image.LANCZOS).save(dst, quality=95)
-            except Exception:
-                pass
+                white.convert("RGB").resize((ts, ts), Image.LANCZOS).save(dst)
+            except Exception as e:
+                print(f"Thumbnail write failed for {dst}: {e}", flush=True)
 
-        _thumb_executor.submit(_write_thumb, _canvas_snap, _cs, _tf, _ts)
+        _thumb_executor.submit(_write_thumb, canvas, cs, thumb_file, thumb_size)
 
     return {"saved": str(save_path), "thumb": thumb_path}
 
@@ -984,27 +983,28 @@ def save_composition(req: SaveRequest):
 
 @app.post("/skip")
 def skip_image(req: SkipRequest):
-    src = Path(req.image_path)
-    if not src.exists():
-        raise HTTPException(status_code=404, detail=f"Not found: {req.image_path}")
-    src_root = Path(req.src_root) if req.src_root.strip() else None
-    # BUG-13 FIX: derive skip destination from src_root when provided,
-    # so custom output dirs land in the right place.
-    if req.output_dir.strip():
-        output_base = _resolve_safe_path(req.output_dir, must_exist=False, allow_file=False, allow_dir=True)
-    elif src_root:
-        output_base = _output_base_from_src_root(src_root)
-    else:
-        output_base = OUTPUT_ROOT
-
-    if src_root:
-        dst = mirror_skip_path(src, src_root, output_base=output_base)
-    else:
-        dst = output_base / "Editor" / "skipped" / _hashed_rel_fallback(src)
-
+    src, dst = _skip_destination(req)
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return {"skipped": str(dst)}
+
+
+@app.post("/unskip")
+def unskip_image(req: SkipRequest):
+    """Remove the Editor/skipped copy of an image the user went back to re-edit."""
+    _, dst = _skip_destination(req)
+    removed = dst.is_file()
+    if removed:
+        dst.unlink()
+    return {"removed": removed, "path": str(dst)}
+
+
+def _skip_destination(req: SkipRequest) -> tuple[Path, Path]:
+    src = _resolve_safe_path(req.image_path, must_exist=True, allow_dir=False)
+    src_root, output_base = _editor_output_base(req.src_root, req.output_dir)
+    if src_root:
+        return src, mirror_skip_path(src, src_root, output_base=output_base)
+    return src, output_base / "Editor" / "skipped" / _hashed_rel_fallback(src)
 
 
 # ── Session ───────────────────────────────────────────────────────────────────
@@ -1014,7 +1014,8 @@ def get_session():
     if not SESSION_FILE.exists():
         return {"exists": False}
     try:
-        raw_data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+        with _session_file_lock:
+            raw_data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
         if not isinstance(raw_data, dict):
             return {"exists": False}
         data = SessionData.model_validate(raw_data).model_dump()
@@ -1039,13 +1040,15 @@ def save_session(data: SessionData):
         payload["timestamp"] = int(time.time())
     if not payload.get("run_id"):
         payload["run_id"] = f"session-{uuid.uuid4().hex[:10]}"
-    SESSION_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with _session_file_lock:
+        _write_json_atomic(SESSION_FILE, payload)
     return {"ok": True}
 
 
 @app.delete("/session")
 def clear_session():
-    SESSION_FILE.unlink(missing_ok=True)
+    with _session_file_lock:
+        SESSION_FILE.unlink(missing_ok=True)
     return {"ok": True}
 
 
@@ -1053,7 +1056,7 @@ def clear_session():
 
 _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
-                                          "rembg_model": "birefnet-general", "rembg_fallback": "auto",
+                                          "rembg_model": "birefnet-general",
                      "bg_device_mode": "cpu", "history_keep": 30, "force_cpu": True, "wipe_input_after_run": False,
                      "reuse_exact_duplicates": True, "upscale_max_px": 3600},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
@@ -1092,8 +1095,6 @@ def _load_saved_settings_file() -> dict:
             return {}
         processing = data.get("processing")
         if isinstance(processing, dict):
-            if "rembg_fallback" in processing:
-                processing["rembg_fallback"] = _normalize_rembg_fallback(processing.get("rembg_fallback"))
             processing["bg_device_mode"] = _normalize_bg_device_mode(processing.get("bg_device_mode"), processing)
         return data
     except Exception:
@@ -1117,19 +1118,12 @@ def get_settings():
 @app.post("/settings")
 def save_settings(payload: SettingsPayload):
     try:
-        existing = _load_saved_settings_file()
         incoming = payload.settings if isinstance(payload.settings, dict) else {}
-        merged = _merged_settings(existing, incoming)
-        processing = merged.get("processing")
-        if isinstance(processing, dict):
-            if "rembg_fallback" in processing:
-                processing["rembg_fallback"] = _normalize_rembg_fallback(processing.get("rembg_fallback"))
-            processing["bg_device_mode"] = _normalize_bg_device_mode(processing.get("bg_device_mode"), processing)
-            processing["force_cpu"] = processing["bg_device_mode"] == "cpu"
-        SETTINGS_FILE.write_text(
-            json.dumps(merged, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        # _merged_settings already normalizes processing.bg_device_mode/force_cpu.
+        with _settings_file_lock:
+            existing = _load_saved_settings_file()
+            merged = _merged_settings(existing, incoming)
+            _write_json_atomic(SETTINGS_FILE, merged, indent=2)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save settings: {e}")
@@ -1139,9 +1133,6 @@ def list_rembg_models():
     return {"models": _REMBG_MODELS}
 
 
-@app.get("/history-path")
-def get_history_path():
-    return {"path": str(HISTORY_DIR)}
 
 
 # ── Pipeline ──────────────────────────────────────────────────────────────────
@@ -1181,12 +1172,7 @@ def _pipeline_env() -> dict:
     return env
 
 
-@app.post("/pipeline/run")
-async def run_pipeline(cfg: PipelineConfig):
-    global _pipeline_running
-    if _pipeline_running:
-        raise HTTPException(status_code=409, detail="Pipeline already running")
-
+def _build_pipeline_command(cfg: PipelineConfig) -> tuple[list[str], Path | None]:
     selection_manifest_path: Path | None = None
     cmd = [
         *_pipeline_command(),
@@ -1212,41 +1198,53 @@ async def run_pipeline(cfg: PipelineConfig):
             encoding="utf-8",
         )
         cmd += ["--selection-manifest", str(selection_manifest_path)]
-    requested_upscale_max_px = cfg.upscale_max_px
     if not cfg.reuse_exact_duplicates:
         cmd.append("--no-reuse-exact-duplicates")
     if cfg.resume:
         cmd.append("--resume")
 
-    # Read processing settings from settings.json
-    try:
-        _s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")) if SETTINGS_FILE.exists() else {}
-        rembg_model = (cfg.rembg_model or "").strip() or _s.get("processing", {}).get("rembg_model", "birefnet-general")
-        if rembg_model:
-            cmd += ["--rembg-model", rembg_model]
-        rembg_fallback = _normalize_rembg_fallback(_s.get("processing", {}).get("rembg_fallback", "auto"))
-        if rembg_fallback:
-            cmd += ["--rembg-fallback", str(rembg_fallback)]
-        processing_settings = _s.get("processing", {}) if isinstance(_s.get("processing"), dict) else {}
-        bg_device_mode = _normalize_bg_device_mode(cfg.bg_device_mode, processing_settings)
-        cmd += ["--bg-device-mode", bg_device_mode]
-        if requested_upscale_max_px <= 0:
-            try:
-                requested_upscale_max_px = int(_s.get("processing", {}).get("upscale_max_px") or 0)
-            except Exception:
-                requested_upscale_max_px = 0
-        if _s.get("processing", {}).get("wipe_input_after_run", False):
-            cmd.append("--wipe-input-after-run")
-        if bg_device_mode == "cpu":
-            cmd.append("--force-cpu")
-    except Exception:
-        cmd += ["--bg-device-mode", _normalize_bg_device_mode(cfg.bg_device_mode)]
-        if cfg.bg_device_mode == "cpu":
-            cmd.append("--force-cpu")
-        pass
+    # Processing settings from settings.json (an unreadable file reads as {}).
+    processing_settings = _load_saved_settings_file().get("processing")
+    if not isinstance(processing_settings, dict):
+        processing_settings = {}
+    rembg_model = (cfg.rembg_model or "").strip() or processing_settings.get("rembg_model") or "birefnet-general"
+    cmd += ["--rembg-model", rembg_model]
+    bg_device_mode = _normalize_bg_device_mode(cfg.bg_device_mode, processing_settings)
+    cmd += ["--bg-device-mode", bg_device_mode]
+    if bg_device_mode == "cpu":
+        cmd.append("--force-cpu")
+    if processing_settings.get("wipe_input_after_run", False):
+        cmd.append("--wipe-input-after-run")
+    requested_upscale_max_px = cfg.upscale_max_px
+    if requested_upscale_max_px <= 0:
+        try:
+            requested_upscale_max_px = int(processing_settings.get("upscale_max_px") or 0)
+        except (TypeError, ValueError):
+            requested_upscale_max_px = 0
     if requested_upscale_max_px <= 0:
         requested_upscale_max_px = DEFAULT_UPSCALE_MAX_PX
     cmd += ["--upscale-max-px", str(requested_upscale_max_px)]
+    return cmd, selection_manifest_path
+
+
+@app.post("/pipeline/run")
+async def run_pipeline(cfg: PipelineConfig):
+    global _pipeline_running, _pipeline_run_token
+    if _pipeline_running:
+        raise HTTPException(status_code=409, detail="Pipeline already running")
+    # Claim the slot synchronously here (not inside event_stream) so two
+    # requests racing before the SSE body starts iterating can't both pass
+    # the check above and launch concurrent subprocesses. The token lets a
+    # finished/stopped run release only its own claim, never a newer run's.
+    _pipeline_running = True
+    run_token = object()
+    _pipeline_run_token = run_token
+    try:
+        cmd, selection_manifest_path = _build_pipeline_command(cfg)
+    except BaseException:
+        _pipeline_running = False
+        _pipeline_run_token = None
+        raise
 
     pipeline_output_root = (
         Path(cfg.output_dir.strip())
@@ -1276,9 +1274,9 @@ async def run_pipeline(cfg: PipelineConfig):
     session_timestamp = int(time.time())
 
     async def event_stream():
-        global _pipeline_running, _pipeline_proc
+        global _pipeline_running, _pipeline_proc, _pipeline_run_token
         proc: asyncio.subprocess.Process | None = None
-        _pipeline_running = True
+        # _pipeline_running is already set True by the route handler.
         progress_index = 0
         done_prefixes = (
             ("__ok_rembg__:", "__skip_rembg__:", "__err_rembg__:")
@@ -1300,10 +1298,8 @@ async def run_pipeline(cfg: PipelineConfig):
                 timestamp=session_timestamp,
                 completed=completed,
             ).model_dump()
-            SESSION_FILE.write_text(
-                json.dumps(payload, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            with _session_file_lock:
+                _write_json_atomic(SESSION_FILE, payload)
 
         def _update_session_progress(line: str):
             nonlocal progress_index
@@ -1356,51 +1352,49 @@ async def run_pipeline(cfg: PipelineConfig):
         finally:
             if proc and proc.returncode is None:
                 try:
-                    _terminate_process_tree_by_pid(proc.pid)
+                    await asyncio.to_thread(_terminate_process_tree_by_pid, proc.pid)
                     await asyncio.wait_for(proc.wait(), timeout=2)
                 except Exception:
                     pass
-            _pipeline_running = False
-            _pipeline_proc = None
+            if _pipeline_run_token is run_token:
+                _pipeline_running = False
+                _pipeline_proc = None
+                _pipeline_run_token = None
             if selection_manifest_path:
                 try:
                     selection_manifest_path.unlink(missing_ok=True)
                 except Exception:
                     pass
-            _cleanup_app_cache()
+            await asyncio.to_thread(_cleanup_app_cache)
 
     return EventSourceResponse(event_stream())
 
 
 @app.post("/pipeline/stop")
 async def stop_pipeline():
-    global _pipeline_proc, _pipeline_running
+    global _pipeline_proc, _pipeline_running, _pipeline_run_token
 
     proc = _pipeline_proc
+    token = _pipeline_run_token
     pid = proc.pid if proc else None
-    _terminate_process_tree_by_pid(pid)
+    await asyncio.to_thread(_terminate_process_tree_by_pid, pid)
     if proc and proc.returncode is None:
         try:
             await asyncio.wait_for(proc.wait(), timeout=2)
         except Exception:
             pass
 
-    _pipeline_proc    = None
-    _pipeline_running = False
+    # A new run may have claimed the slot while we waited; leave it alone.
+    if _pipeline_run_token is token:
+        _pipeline_proc    = None
+        _pipeline_running = False
+        _pipeline_run_token = None
     return {"ok": True}
 
 
 # ── Entry ─────────────────────────────────────────────────────────────────────
 
-def _run_embedded_pipeline() -> None:
-    from pipeline import main as pipeline_main
-    sys.argv = [str(BASE_DIR / "pipeline.py"), *sys.argv[2:]]
-    pipeline_main()
-
-
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--pipeline":
-        _run_embedded_pipeline()
-    else:
-        import uvicorn
-        uvicorn.run(app, host="127.0.0.1", port=7421, log_level="warning")
+    # `--pipeline` is dispatched at the top of this file.
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=7421, log_level="warning")

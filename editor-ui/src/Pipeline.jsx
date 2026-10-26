@@ -1,7 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { apiBase } from "./runtime.js";
-import { browseFolder } from "./api.js";
-import { bgModelLabel } from "./modelLabels.js";
+import {
+  browseFolder, openFolder, previewUrl, errorDetailText,
+  getSettings, patchSettings, getRembgModels, getSession, clearSession,
+} from "./api.js";
+import { bgModelLabel, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
+import { normalizeImagePath, relativePathFromRoot, imageIdForPath } from "./paths.js";
 import PageHeader from "./components/PageHeader.jsx";
 /*
 KNOWN LIMITATIONS (web build):
@@ -12,38 +16,6 @@ KNOWN LIMITATIONS (web build):
 
 const BASE = apiBase();
 const AUTO_OPEN_EDITOR_AFTER_PROCESS = true;
-
-// Opens a folder in the native OS file explorer via the API server.
-// path="" → server defaults to OUTPUT_ROOT.
-const openFolder = (path = "") =>
-  fetch(`${BASE}/open-folder?path=${encodeURIComponent(path)}`).catch(() => {});
-
-function toForwardSlashes(path = "") {
-  return String(path || "").replace(/\\/g, "/");
-}
-
-function trimTrailingSlashes(path = "") {
-  return path.replace(/\/+$/, "");
-}
-
-function normalizeImagePathToken(path = "") {
-  return trimTrailingSlashes(toForwardSlashes(path).trim());
-}
-
-function relativePathFromInput(absPath, inputDir) {
-  const absNorm = normalizeImagePathToken(absPath);
-  const rootNorm = normalizeImagePathToken(inputDir);
-  if (!absNorm || !rootNorm) return "";
-  const absLower = absNorm.toLowerCase();
-  const rootLower = rootNorm.toLowerCase();
-  if (absLower === rootLower) return "";
-  if (absLower.startsWith(`${rootLower}/`)) return absNorm.slice(rootNorm.length + 1);
-  return "";
-}
-
-function imageIdForPath(absPath, inputDir) {
-  return normalizeImagePathToken(relativePathFromInput(absPath, inputDir) || absPath);
-}
 
 function addToken(tokens, value) {
   const token = String(value || "").trim();
@@ -56,9 +28,9 @@ function expandedImageTokens(ids, thumbs, inputDir) {
 
   (Array.isArray(thumbs) ? thumbs : []).forEach((absPath) => {
     const imageId = imageIdForPath(absPath, inputDir);
-    const relativePath = relativePathFromInput(absPath, inputDir);
+    const relativePath = relativePathFromRoot(absPath, inputDir);
     const absolutePath = String(absPath || "").trim();
-    const normalizedAbsolutePath = normalizeImagePathToken(absPath);
+    const normalizedAbsolutePath = normalizeImagePath(absPath);
     const aliases = [imageId, relativePath, absolutePath, normalizedAbsolutePath].filter(Boolean);
 
     aliasesById.set(imageId, aliases);
@@ -68,28 +40,12 @@ function expandedImageTokens(ids, thumbs, inputDir) {
 
   (Array.isArray(ids) ? ids : [...(ids || [])]).forEach((id) => {
     addToken(tokens, id);
-    const normalizedId = normalizeImagePathToken(id);
+    const normalizedId = normalizeImagePath(id);
     addToken(tokens, normalizedId);
     (aliasesById.get(id) || aliasesById.get(normalizedId) || []).forEach((alias) => addToken(tokens, alias));
   });
 
   return [...tokens];
-}
-
-async function saveProcessingSettingsPatch(patch) {
-  const response = await fetch(`${BASE}/settings`);
-  const data = response.ok ? await response.json() : { settings: {} };
-  const current = data?.settings ?? {};
-  await fetch(`${BASE}/settings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      settings: {
-        ...current,
-        processing: { ...(current.processing ?? {}), ...patch },
-      },
-    }),
-  });
 }
 
 const C = {
@@ -101,15 +57,8 @@ const C = {
   yellow:  "var(--yellow)",  blue:    "var(--accent)",   magenta: "var(--magenta)",
 };
 
-const BG_DEVICE_OPTIONS = [
-  { value: "cpu", label: "CPU / Stable", help: "Slower, safest, best while using PC." },
-  { value: "gpu", label: "GPU / Experimental", help: "Fastest if it works; may OOM or make PC lag." },
-  { value: "gpu_auto", label: "GPU + CPU fallback", help: "Tries GPU, switches to CPU if GPU OOM." },
-];
-
-function normalizeBgDeviceMode(value) {
-  return BG_DEVICE_OPTIONS.some(option => option.value === value) ? value : "cpu";
-}
+// Live strip tiles are ~134px; 320px previews stay sharp on 2x displays.
+const PREVIEW_SLOT_SIZE = 320;
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
@@ -260,16 +209,6 @@ function FieldLabel({ children }) {
   return <div className="pipeline-field-label" style={{ fontSize: 11, color: C.dim, marginBottom: 4 }}>{children}</div>;
 }
 
-function Spinner({ color = C.yellow, size = 12 }) {
-  const ch = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-  const [f, setF] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setF(x => (x + 1) % ch.length), 80);
-    return () => clearInterval(t);
-  }, [ch.length]);
-  return <span style={{ fontFamily: "JetBrains Mono", fontSize: size, color }}>{ch[f]}</span>;
-}
-
 // ── Pipeline hook ─────────────────────────────────────────────────────────────
 
 function telemetryTimestamp(date = new Date()) {
@@ -277,8 +216,12 @@ function telemetryTimestamp(date = new Date()) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+let telemetrySeq = 0;
+
+// Each entry gets a unique id so log rows keep stable React keys while the log is trimmed.
 function telemetryEntry(raw, kind = "info") {
-  return { raw, kind, time: telemetryTimestamp() };
+  telemetrySeq += 1;
+  return { id: telemetrySeq, raw, kind, time: telemetryTimestamp() };
 }
 
 function telemetryLabel(...parts) {
@@ -411,21 +354,58 @@ function telemetryStatus(raw) {
   };
 }
 
+// ── Per-stage ETA ─────────────────────────────────────────────────────────────
+// Upscale and BG removal run one after another at very different speeds, so each
+// stage keeps its own rate from the gaps between its recent completions. The gap
+// before a stage's first completion is not a sample (it includes model loading).
+
+const ETA_STAGES = ["upscale", "rembg"];
+const ETA_STAGE_LABEL = { upscale: "upscale", rembg: "BG" };
+const ETA_WINDOW = 6;
+const ETA_MIN_SAMPLES = 2;
+
+function emptyStageTiming() {
+  return {
+    upscale: { total: 0, count: 0, last: 0, samples: [] },
+    rembg: { total: 0, count: 0, last: 0, samples: [] },
+  };
+}
+
+function estimateEta(timing, stages, now) {
+  let seconds = 0;
+  const pending = [];
+  // BG removal reports its own total only when it starts; until then assume the upscale total.
+  const fallbackTotal = timing.upscale.total || timing.rembg.total;
+  for (const name of ETA_STAGES) {
+    if (!stages[name]) continue;
+    const t = timing[name];
+    const total = t.total || fallbackTotal;
+    if (!total) { pending.push(name); continue; }
+    const remaining = Math.max(0, total - t.count);
+    if (!remaining) continue;
+    if (t.samples.length < ETA_MIN_SAMPLES) { pending.push(name); continue; }
+    const perImage = t.samples.reduce((sum, value) => sum + value, 0) / t.samples.length;
+    // Count down within the image in progress, but never below the images still queued after it.
+    const sinceLast = t.last ? (now - t.last) / 1000 : 0;
+    seconds += Math.max(0, remaining * perImage - Math.min(sinceLast, perImage));
+  }
+  return { seconds: Math.round(seconds), pending };
+}
+
 function usePipeline() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
   const [log, setLog] = useState([]);
   const [errors, setErrors] = useState([]);
   const [imageDone, setImageDone] = useState(0);
-  const [imageSkipped, setImageSkipped] = useState(0);
   const [imageError, setImageError] = useState(0);
   const [totalImages, setTotalImages] = useState(0);
-  const [recentDone, setRecentDone] = useState([]);
   const [elapsed, setElapsed] = useState(0);
   const [stage, setStage] = useState(null);
   const [upStats, setUpStats] = useState({ done: 0, skip: 0, err: 0 });
   const [bgStats, setBgStats] = useState({ done: 0, skip: 0, err: 0 });
   const [oomGpuCount, setOomGpuCount] = useState(0);
+  const [eta, setEta] = useState(null);
   const [imageProgress, setImageProgress] = useState({});
   const [previewPath, setPreviewPath] = useState("");
   const [livePreviewStrip, setLivePreviewStrip] = useState([]);
@@ -434,8 +414,6 @@ function usePipeline() {
   const logRef      = useRef(null);
   const timerRef    = useRef(null);
   const startRef    = useRef(null);
-  const doneSet     = useRef(new Set());
-  const skipSet     = useRef(new Set());
   const errSet      = useRef(new Set());
   const sentinelSet = useRef(new Set());
   const stageRef    = useRef("upscale");
@@ -445,6 +423,21 @@ function usePipeline() {
   const finalStageRef = useRef("rembg");
   const completedImageSet = useRef(new Set());
   const completionLoggedRef = useRef(false);
+  const stageTimingRef = useRef(emptyStageTiming());
+  const etaStagesRef = useRef({ upscale: true, rembg: true });
+
+  const refreshEta = useCallback(() => {
+    setEta(estimateEta(stageTimingRef.current, etaStagesRef.current, Date.now()));
+  }, []);
+
+  const recordStageDone = useCallback((stageName) => {
+    const t = stageTimingRef.current[stageName];
+    const now = Date.now();
+    if (t.last) t.samples = [...t.samples.slice(-(ETA_WINDOW - 1)), (now - t.last) / 1000];
+    t.last = now;
+    t.count += 1;
+    refreshEta();
+  }, [refreshEta]);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -452,13 +445,15 @@ function usePipeline() {
   useEffect(() => {
     if (running) {
       startRef.current = Date.now();
-      timerRef.current = setInterval(() =>
-        setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000);
+      timerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+        refreshEta();
+      }, 1000);
     } else {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
-  }, [running]);
+  }, [running, refreshEta]);
 
   const classify = useCallback((raw) => {
     if (/→ bg_removed/.test(raw) || /→ upscaled/.test(raw)) return "ok";
@@ -504,7 +499,6 @@ function usePipeline() {
     if (!fname || stageName !== finalStageRef.current || completedImageSet.current.has(fname)) return;
     completedImageSet.current.add(fname);
     setImageDone(completedImageSet.current.size);
-    setRecentDone(prev => [fname, ...prev].slice(0, 8));
   }, []);
 
   const appendLine = useCallback((raw) => {
@@ -512,16 +506,20 @@ function usePipeline() {
     // ── Structured machine-readable tokens ──────────────────────────────────
     if (raw.startsWith("__total__:")) {
       const n = parseInt(raw.slice(10), 10);
-      if (!isNaN(n)) setTotalImages(n);
+      if (!isNaN(n)) {
+        setTotalImages(n);
+        stageTimingRef.current[stageRef.current === "rembg" ? "rembg" : "upscale"].total = n;
+        refreshEta();
+      }
       return;
     }
     if (raw.startsWith("__ok_upscale__:")) {
       const fname = raw.slice(15);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "ok" } }));
       revealKnownPreview(fname, "done", "DONE");
-      doneSet.current.add(`upscale:${fname}`);
       markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, done: s.done + 1 }));
+      recordStageDone("upscale");
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [DONE]"), "success"), { clearPending: true });
       return;
     }
@@ -529,9 +527,9 @@ function usePipeline() {
       const fname = raw.slice(13);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "ok" } }));
       revealKnownPreview(fname, "done", "DONE");
-      doneSet.current.add(`rembg:${fname}`);
       markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, done: s.done + 1 }));
+      recordStageDone("rembg");
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [DONE]"), "success"), { clearPending: true });
       return;
     }
@@ -539,9 +537,9 @@ function usePipeline() {
       const fname = raw.slice(17);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "skip" } }));
       revealKnownPreview(fname, "skip", "SKIP");
-      if (!skipSet.current.has(`upscale:${fname}`)) { skipSet.current.add(`upscale:${fname}`); setImageSkipped(skipSet.current.size); }
       markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, skip: s.skip + 1 }));
+      recordStageDone("upscale");
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [SKIP]"), "skip"), { clearPending: true });
       return;
     }
@@ -549,9 +547,9 @@ function usePipeline() {
       const fname = raw.slice(15);
       setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "skip" } }));
       revealKnownPreview(fname, "skip", "SKIP");
-      if (!skipSet.current.has(`rembg:${fname}`)) { skipSet.current.add(`rembg:${fname}`); setImageSkipped(skipSet.current.size); }
       markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, skip: s.skip + 1 }));
+      recordStageDone("rembg");
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [SKIP]"), "skip"), { clearPending: true });
       return;
     }
@@ -562,6 +560,7 @@ function usePipeline() {
       if (!errSet.current.has(`upscale:${fname}`)) { errSet.current.add(`upscale:${fname}`); setImageError(errSet.current.size); }
       markFinalImage("upscale", fname);
       setUpStats(s => ({ ...s, err: s.err + 1 }));
+      recordStageDone("upscale");
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [ERROR]"), "error"), { clearPending: true });
       return;
     }
@@ -572,6 +571,7 @@ function usePipeline() {
       if (!errSet.current.has(`rembg:${fname}`)) { errSet.current.add(`rembg:${fname}`); setImageError(errSet.current.size); }
       markFinalImage("rembg", fname);
       setBgStats(s => ({ ...s, err: s.err + 1 }));
+      recordStageDone("rembg");
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [ERROR]"), "error"), { clearPending: true });
       return;
     }
@@ -676,11 +676,8 @@ function usePipeline() {
       pushLivePreview(fileName, fullPath, "processing", stageRef.current === "rembg" ? "BG running..." : "processing...");
       if (!sentinelSet.current.has(fileName)) {
         sentinelSet.current.add(fileName);
-        setLog(prev => (
-          prev.length === 0
-            ? [telemetryEntry(telemetryLabel(fileName, stageRef.current === "rembg" ? "BG removal started" : "upscale started"), "pending")]
-            : prev
-        ));
+        const startedEntry = telemetryEntry(telemetryLabel(fileName, stageRef.current === "rembg" ? "BG removal started" : "upscale started"), "pending");
+        setLog(prev => (prev.length === 0 ? [startedEntry] : prev));
         setImageProgress(prev => ({ ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } }));
       } else {
         setImageProgress(prev => ({ ...prev, [fileName]: { ...prev[fileName], status: "running" } }));
@@ -738,26 +735,29 @@ function usePipeline() {
         return [...prev.slice(-200), { raw, kind, context: [...recentLog.current.slice(0, -1)] }];
       });
     }
-  }, [classify, markFinalImage, pushLivePreview, revealKnownPreview]);
+  }, [classify, markFinalImage, pushLivePreview, recordStageDone, refreshEta, revealKnownPreview]);
 
   const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", bgDeviceMode = "cpu", resume = false, upscaleMaxPx = 0, reuseExactDuplicates = true }) => {
     if (running) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setLog([]); setErrors([]);
-    setImageDone(0); setImageSkipped(0); setImageError(0);
-    setTotalImages(0); setRecentDone([]);
+    setImageDone(0); setImageError(0);
+    setTotalImages(0);
     setElapsed(0); setDone(false); setRunning(true);
     setStage(null);
     setUpStats({ done: 0, skip: 0, err: 0 });
     setBgStats({ done: 0, skip: 0, err: 0 });
     setOomGpuCount(0);
+    setEta(null);
+    stageTimingRef.current = emptyStageTiming();
+    etaStagesRef.current = { upscale: Boolean(doUpscale), rembg: Boolean(doRembg) };
     setImageProgress({});
     setPreviewPath("");
     setLivePreviewStrip([]);
     stageRef.current = "upscale";
     recentLog.current = [];
-    doneSet.current = new Set(); skipSet.current = new Set(); errSet.current = new Set(); sentinelSet.current = new Set();
+    errSet.current = new Set(); sentinelSet.current = new Set();
     completedImageSet.current = new Set();
     completionLoggedRef.current = false;
     previewPathRef.current = "";
@@ -779,7 +779,7 @@ function usePipeline() {
       });
       if (!r.ok) {
         const e = await r.json().catch(() => ({ detail: r.statusText }));
-        appendLine(`Error: ${e.detail}`);
+        appendLine(`Error: ${errorDetailText(e?.detail) || r.statusText || r.status}`);
         setRunning(false); return;
       }
       if (!r.body) {
@@ -831,25 +831,14 @@ function usePipeline() {
   }, [appendLine]);
 
   return {
-    running, done, log, errors, imageDone, imageSkipped, imageError,
-    totalImages, recentDone, elapsed, stage,
-    upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip,
+    running, done, log, errors, imageDone, imageError,
+    totalImages, elapsed, stage,
+    upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip, eta,
     logRef, start, stop
   };
 }
 
 // Zone 1: Live preview strip
-
-function Zone1({ imageDone, totalImages, previewPath, livePreviewStrip }) {
-  return (
-    <PipelinePreviewStrip
-      previewPath={previewPath}
-      livePreviewStrip={livePreviewStrip}
-      imageDone={imageDone}
-      totalImages={totalImages}
-    />
-  );
-}
 
 function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalImages }) {
   const totalLabel = totalImages > 0 ? totalImages : "-";
@@ -892,7 +881,7 @@ function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalI
       </div>
       <div className="pipeline-preview-grid">
         {slotItems.map((item, idx) => (
-          <PipelinePreviewSlot key={`preview-slot-${idx}`} item={item} />
+          <PipelinePreviewSlot key={item.path || `preview-placeholder-${idx}`} item={item} />
         ))}
       </div>
     </div>
@@ -900,7 +889,7 @@ function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalI
 }
 
 function PipelinePreviewSlot({ item }) {
-  const src = item?.path ? `${BASE}/image?path=${encodeURIComponent(item.path)}` : "";
+  const src = item?.path ? previewUrl(item.path, PREVIEW_SLOT_SIZE) : "";
   const hasImage = Boolean(src);
   const fileLabel = item?.name || "";
   const placeholderLabel = item?.label || "";
@@ -962,39 +951,7 @@ function SmStat({ label, value, color }) {
 
 // Zone 2: Per-stage stats bar
 
-function StatChip({ icon, value, color }) {
-  return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 3, minWidth: 36 }}>
-      <span style={{ fontSize: 10, color, lineHeight: 1 }}>{icon}</span>
-      <span style={{ fontSize: 14, fontWeight: 700, color, fontFamily: "JetBrains Mono", lineHeight: 1 }}>{value}</span>
-    </div>
-  );
-}
-
-function StageRow({ label, stats, total, active, stageDone, color }) {
-  const finished = stats.done + stats.skip;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <div style={{
-        fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700,
-        color: stageDone ? C.green : active ? color : C.dim,
-        width: 78, flexShrink: 0,
-      }}>{label}</div>
-      <StatChip icon="✓" value={stats.done} color={stats.done > 0 ? C.green  : C.dim} />
-      <StatChip icon="↷" value={stats.skip} color={stats.skip > 0 ? C.yellow : C.dim} />
-      <StatChip icon="✗" value={stats.err}  color={stats.err  > 0 ? C.red    : C.dim} />
-      {total > 0 && (
-        <span style={{ fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono", marginLeft: "auto" }}>
-          {finished}/{total}
-        </span>
-      )}
-      {active && <Spinner color={color} size={10} />}
-      {stageDone && <span style={{ fontSize: 10, color: C.green }}>✓</span>}
-    </div>
-  );
-}
-
-function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale, doRembg, oomGpuCount = 0, imageProgress = {} }) {
+function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale, doRembg, oomGpuCount = 0, imageProgress = {}, eta = null }) {
   const fmt = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   const n = Math.max(0, totalImages || 0);
 
@@ -1013,10 +970,14 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale,
 
   const progressRatio = totalUnits === 0 ? 0 : visibleUnits / totalUnits;
   const progressPct = done ? 100 : Math.min(100, Math.max(0, Math.round(progressRatio * 100)));
-  const etaSeconds = !done && processedUnits > 0 && elapsed > 0 && totalUnits > processedUnits
-    ? Math.ceil((elapsed / processedUnits) * (totalUnits - processedUnits))
-    : null;
-  const etaLabel = done ? "ETA done" : etaSeconds ? `ETA ${fmt(etaSeconds)}` : "ETA —";
+  const pendingEtaLabel = (eta?.pending ?? []).map(name => ETA_STAGE_LABEL[name]).join(" + ");
+  const etaLabel = done
+    ? "ETA done"
+    : !eta || (eta.pending.length && !eta.seconds)
+      ? "ETA estimating…"
+      : eta.pending.length
+        ? `ETA ${fmt(eta.seconds)} + ${pendingEtaLabel} estimating…`
+        : `ETA ${fmt(eta.seconds)}`;
   const countLabel = `${processedImages}/${n} images processed`;
 
   const stagePill = done
@@ -1099,52 +1060,6 @@ function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, sk
   );
 }
 
-// ── Tag chip input ────────────────────────────────────────────────────────────
-
-function TagInput({ tags, onChange }) {
-  const [input, setInput] = useState("");
-  const add = (raw) => {
-    const val = raw.trim().replace(/,$/, "").trim();
-    if (!val || tags.includes(val)) return;
-    onChange([...tags, val]);
-  };
-  const onKey = (e) => {
-    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(input); setInput(""); }
-    if (e.key === "Backspace" && !input && tags.length) onChange(tags.slice(0, -1));
-  };
-  return (
-    <div style={{
-      display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center",
-      background: C.panel2, border: `1px solid ${C.border}`,
-      borderRadius: 4, padding: "4px 6px", minHeight: 32, cursor: "text",
-    }} onClick={e => e.currentTarget.querySelector("input")?.focus()}>
-      {tags.map(t => (
-        <span key={t} style={{
-          display: "inline-flex", alignItems: "center", gap: 4,
-          background: C.dim2, color: C.text, borderRadius: 3,
-          padding: "2px 6px", fontSize: 10, fontFamily: "JetBrains Mono",
-        }}>
-          {t}
-          <button onClick={() => onChange(tags.filter(x => x !== t))} style={{
-            background: "none", border: "none", color: C.dim,
-            cursor: "pointer", padding: 0, lineHeight: 1, fontSize: 11,
-          }}>×</button>
-        </span>
-      ))}
-      <input
-        value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKey}
-        onBlur={() => { if (input) { add(input); setInput(""); } }}
-        placeholder={tags.length ? "" : "filename.webp  →  Enter"}
-        style={{
-          flex: 1, minWidth: 80, background: "transparent", border: "none",
-          outline: "none", color: C.text, fontSize: 10,
-          fontFamily: "JetBrains Mono", padding: "2px 2px",
-        }}
-      />
-    </div>
-  );
-}
-
 // ── ActivityPanel ─────────────────────────────────────────────────────────────
 
 function ActivityPanel({ logRef, log, running, open, setOpen }) {
@@ -1183,10 +1098,10 @@ function ActivityPanel({ logRef, log, running, open, setOpen }) {
         <div className="pipeline-log-list pipeline-activity-console" ref={logRef}>
           {entries.length === 0 ? (
             <div className="pipeline-log-empty">{running ? "Waiting for pipeline activity..." : "Configure and press Run Pipeline."}</div>
-          ) : entries.map((entry, index) => {
+          ) : entries.map((entry) => {
             const status = telemetryStatus(entry.raw);
             return (
-              <div key={`${entry.time || "00:00:00"}-${index}`} className={`pipeline-activity-entry is-${entry.kind || "info"}`}>
+              <div key={entry.id} className={`pipeline-activity-entry is-${entry.kind || "info"}`}>
                 <span className="pipeline-activity-time">[{entry.time || telemetryTimestamp()}]</span>
                 <span className="pipeline-activity-message">
                   {status.message}
@@ -1225,7 +1140,6 @@ export default function Pipeline({
   const [scale, setScale] = useState("2");
   const [doRembg, setDoRembg] = useState(true);
   const [canvasSize, setCanvasSize] = useState("1440");
-  const [thumbnail, setThumbnail] = useState(true);
   const [rembgModel, setRembgModel] = useState("birefnet-general");
   const [bgDeviceMode, setBgDeviceMode] = useState("cpu");
   const [upscaleMaxPx, setUpscaleMaxPx] = useState("3600");
@@ -1247,7 +1161,6 @@ export default function Pipeline({
     if (typeof s.output?.do_upscale === "boolean") setDoUpscale(s.output.do_upscale);
     if (s.output?.upscale_scale === "2" || s.output?.upscale_scale === "4") setScale(s.output.upscale_scale);
     if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
-    if (typeof s.output?.thumbnail === "boolean") setThumbnail(s.output.thumbnail);
     if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
     if (s.processing?.bg_device_mode) {
       setBgDeviceMode(normalizeBgDeviceMode(s.processing.bg_device_mode));
@@ -1264,18 +1177,16 @@ export default function Pipeline({
   }, []);
 
   const loadSettings = useCallback(() => {
-    fetch(`${BASE}/models/rembg`)
-      .then(r => r.ok ? r.json() : null)
+    getRembgModels()
       .then(data => {
         if (Array.isArray(data?.models) && data.models.length) setRembgModels(data.models);
       })
       .catch(() => {});
 
-    fetch(`${BASE}/settings`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data?.settings) return;
-        applySettingsData(data.settings);
+    getSettings()
+      .then(settings => {
+        if (!settings) return;
+        applySettingsData(settings);
       })
       .catch(() => {});
   }, [applySettingsData]);
@@ -1300,8 +1211,7 @@ export default function Pipeline({
   }, [applySettingsData, loadSettings]);
 
   useEffect(() => {
-    fetch(`${BASE}/session`)
-      .then(r => r.ok ? r.json() : null)
+    getSession()
       .then(data => {
         if (data?.exists) { setResumeSession(data); setShowResume(true); }
       })
@@ -1311,7 +1221,7 @@ export default function Pipeline({
   const {
     running, done, log, errors, imageDone, imageError,
     totalImages, elapsed, stage,
-    upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip,
+    upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip, eta,
     logRef, start, stop,
   } = usePipeline();
 
@@ -1344,22 +1254,20 @@ export default function Pipeline({
     (async () => {
       let session = null;
       try {
-        const r = await fetch(`${BASE}/session`);
-        const data = r.ok ? await r.json() : null;
+        const data = await getSession();
         session = data?.exists ? data : null;
       } catch {
         void 0;
       }
       onPipelineDone?.({
         canvasSize: parseInt(canvasSize, 10) || 1440,
-        thumbnail,
         session,
       });
       if (AUTO_OPEN_EDITOR_AFTER_PROCESS && imageError === 0 && errors.length === 0) {
-        onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail });
+        onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440 });
       }
     })();
-  }, [done, onPipelineDone, onGoToEditor, canvasSize, thumbnail, imageError, errors.length]);
+  }, [done, onPipelineDone, onGoToEditor, canvasSize, imageError, errors.length]);
 
   const handleStart = useCallback(() => {
     const removedIds = removedImages ? [...removedImages] : [];
@@ -1404,20 +1312,20 @@ export default function Pipeline({
   }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, thumbs, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, bgDeviceMode, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleStartFresh = useCallback(async () => {
-    try { await fetch(`${BASE}/session`, { method: "DELETE" }); } catch { void 0; }
+    try { await clearSession(); } catch { void 0; }
     setShowResume(false);
     setResumeSession(null);
   }, []);
 
   const handleReuseExactDuplicatesChange = useCallback((enabled) => {
     setReuseExactDuplicates(enabled);
-    saveProcessingSettingsPatch({ reuse_exact_duplicates: enabled }).catch(() => {});
+    patchSettings({ processing: { reuse_exact_duplicates: enabled } }).catch(() => {});
   }, []);
 
   const nothingSelected = !doUpscale && !doRembg;
   const skipCount = removedImages?.size ?? 0;
   const activeExcludeCount = excludeTags.filter(n => !removedImages?.has(n)).length;
-  const bgDeviceLabel = (BG_DEVICE_OPTIONS.find(option => option.value === bgDeviceMode) || BG_DEVICE_OPTIONS[0]).label;
+  const bgDeviceLabel = bgDeviceOption(bgDeviceMode).label;
 
   return (
     <div className="pipeline-screen" style={{
@@ -1426,7 +1334,7 @@ export default function Pipeline({
       color: C.text, fontSize: 13
     }}>
       <style>{`
-        button:hover { filter: brightness(1.15); }
+        .pipeline-screen button:hover { filter: brightness(1.15); }
         ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
         ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
         select option{background:var(--panel2)}
@@ -1458,7 +1366,7 @@ export default function Pipeline({
           {done && !running && (
             <button
               className="pipeline-btn pipeline-secondary-button pipeline-open-editor-button"
-              onClick={() => onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440, thumbnail })}
+              onClick={() => onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440 })}
             >
               Open Editor →
             </button>
@@ -1634,7 +1542,7 @@ export default function Pipeline({
           <div className="pipeline-top pipeline-settings-actions" style={{ paddingTop: 12 }}>
             <button
               className="pipeline-btn pipeline-secondary-button"
-              onClick={() => openFolder(outputDir.trim())}
+              onClick={() => openFolder(outputDir.trim()).catch(() => {})}
               style={{
                 width: "100%", marginTop: 0, padding: "10px 0",
                 background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
@@ -1660,6 +1568,7 @@ export default function Pipeline({
                     doUpscale={doUpscale} doRembg={doRembg}
                     oomGpuCount={oomGpuCount}
                     imageProgress={imageProgress}
+                    eta={eta}
                   />
                 )}
                 {!running && !done && (
@@ -1676,7 +1585,7 @@ export default function Pipeline({
               </div>
 
               <div className="pipeline-live-area">
-                <Zone1
+                <PipelinePreviewStrip
                   imageDone={imageDone} totalImages={totalImages}
                   previewPath={previewPath}
                   livePreviewStrip={livePreviewStrip}
@@ -1688,8 +1597,6 @@ export default function Pipeline({
               <ActivityPanel
                 logRef={logRef} log={log} running={running}
                 open={logOpen} setOpen={setLogOpen}
-                errors={errors} imageError={imageError}
-                imageProgress={imageProgress}
               />
             </div>
 

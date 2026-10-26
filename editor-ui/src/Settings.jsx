@@ -1,9 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { browseFolder } from "./api";
-import { apiBase } from "./runtime.js";
-import { BG_MODEL_OPTIONS } from "./modelLabels.js";
-
-const BASE = apiBase();
+import { useState, useEffect, useCallback, useRef } from "react";
+import { browseFolder, getSettings, patchSettings } from "./api.js";
+import { BG_MODEL_OPTIONS, BG_DEVICE_OPTIONS, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
 
 function Section({ title, description, children, defaultOpen = false, tone = "default" }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -199,25 +196,7 @@ function Select({ value, onChange, options, wide }) {
   );
 }
 
-const BG_DEVICE_OPTIONS = [
-  ["cpu", "CPU / Stable"],
-  ["gpu", "GPU / Experimental"],
-  ["gpu_auto", "GPU + CPU fallback"],
-];
-
-const BG_DEVICE_HELP = {
-  cpu: "CPU / Stable: safest, slower, best while using PC.",
-  gpu: "GPU / Experimental: fastest if it works, may OOM or make PC lag.",
-  gpu_auto: "GPU + CPU fallback: tries GPU first, switches to CPU if GPU runs out of memory.",
-};
-
-function normalizeBgDeviceMode(value, processing = {}) {
-  if (BG_DEVICE_OPTIONS.some(([optionValue]) => optionValue === value)) return value;
-  if (Object.prototype.hasOwnProperty.call(processing, "force_cpu")) {
-    return processing.force_cpu ? "cpu" : "gpu_auto";
-  }
-  return "cpu";
-}
+const BG_DEVICE_SELECT_OPTIONS = BG_DEVICE_OPTIONS.map(option => [option.value, option.label]);
 
 function normalizeSettings(rawSettings) {
   const next = rawSettings || DEFAULT;
@@ -233,6 +212,25 @@ function normalizeSettings(rawSettings) {
   };
 }
 
+// Only the keys that differ from what was loaded/saved, per section. The server
+// deep-merges this patch, so values changed elsewhere since load (recent folders,
+// theme toggle, Editor thumbnail switch) are not overwritten by this page's stale copy.
+function changedSettings(current, baseline) {
+  const patch = {};
+  for (const [section, values] of Object.entries(current)) {
+    if (!values || typeof values !== "object" || Array.isArray(values)) {
+      if (JSON.stringify(values) !== JSON.stringify(baseline?.[section])) patch[section] = values;
+      continue;
+    }
+    const baseSection = baseline?.[section] ?? {};
+    for (const [key, value] of Object.entries(values)) {
+      if (JSON.stringify(value) === JSON.stringify(baseSection[key])) continue;
+      patch[section] = { ...(patch[section] || {}), [key]: value };
+    }
+  }
+  return patch;
+}
+
 const DEFAULT = {
   processing: { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", bg_device_mode: "cpu", history_keep: 30, force_cpu: true, wipe_input_after_run: false, upscale_max_px: 0 },
   rembg_api: { provider: "local", url: "", key: "" },
@@ -246,11 +244,17 @@ export default function Settings({ onThemeChange }) {
   const [settings, setSettings] = useState(DEFAULT);
   const [status, setStatus] = useState("");
   const [dirty, setDirty] = useState(false);
+  // Last settings loaded from / saved to the server; save() sends only the difference.
+  const baselineRef = useRef(DEFAULT);
 
   useEffect(() => {
-    fetch(`${BASE}/settings`)
-      .then(response => response.ok ? response.json() : null)
-      .then(data => { if (data?.settings) setSettings(normalizeSettings(data.settings)); })
+    getSettings()
+      .then(saved => {
+        if (!saved) return;
+        const normalized = normalizeSettings(saved);
+        baselineRef.current = normalized;
+        setSettings(normalized);
+      })
       .catch(() => {});
   }, []);
 
@@ -270,20 +274,13 @@ export default function Settings({ onThemeChange }) {
 
   const save = useCallback(async () => {
     try {
-      const response = await fetch(`${BASE}/settings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings }),
-      });
-
-      if (response.ok) {
-        window.dispatchEvent(new CustomEvent("cutout-settings-saved", { detail: { settings } }));
-        setStatus("Saved");
-        setDirty(false);
-        setTimeout(() => setStatus(""), 2000);
-      } else {
-        setStatus("Save failed");
-      }
+      const patch = changedSettings(settings, baselineRef.current);
+      if (Object.keys(patch).length) await patchSettings(patch);
+      baselineRef.current = settings;
+      window.dispatchEvent(new CustomEvent("cutout-settings-saved", { detail: { settings } }));
+      setStatus("Saved");
+      setDirty(false);
+      setTimeout(() => setStatus(""), 2000);
     } catch {
       setStatus("Save failed");
     }
@@ -504,12 +501,12 @@ export default function Settings({ onThemeChange }) {
               </Row>
               <Row
                 label="Background removal device"
-                hint={BG_DEVICE_HELP[normalizeBgDeviceMode(settings.processing.bg_device_mode, settings.processing)]}
+                hint={bgDeviceOption(normalizeBgDeviceMode(settings.processing.bg_device_mode, settings.processing)).help}
               >
                 <Select
                   value={normalizeBgDeviceMode(settings.processing.bg_device_mode, settings.processing)}
                   onChange={value => setSetting("processing", "bg_device_mode", value)}
-                  options={BG_DEVICE_OPTIONS}
+                  options={BG_DEVICE_SELECT_OPTIONS}
                   wide
                 />
               </Row>

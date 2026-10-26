@@ -397,40 +397,6 @@ input[type=number] { color-scheme: dark; }
     var(--bg) !important;
 }
 
-.input-page-header {
-  min-height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
-  backdrop-filter: blur(10px);
-  flex-shrink: 0;
-}
-
-.input-page-title-group {
-  min-width: 0;
-}
-
-.input-page-title {
-  margin: 0;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.input-page-subtitle {
-  margin: 6px 0 0;
-  color: color-mix(in srgb, var(--dim) 82%, transparent);
-  font-size: 11px;
-  font-weight: 500;
-}
-
 .input-page-actions {
   display: flex;
   align-items: center;
@@ -799,9 +765,6 @@ input[type=number] { color-scheme: dark; }
 }
 
 @media (max-width: 1180px) {
-  .input-page-header {
-    padding: 0 18px;
-  }
 
   .input-toolbar {
     margin: 16px 18px 12px !important;
@@ -818,12 +781,6 @@ input[type=number] { color-scheme: dark; }
 }
 
 @media (max-width: 960px) {
-  .input-page-header {
-    min-height: auto;
-    align-items: flex-start;
-    flex-direction: column;
-    padding: 14px;
-  }
 
   .input-page-actions {
     width: 100%;
@@ -969,21 +926,6 @@ input[type=number] { color-scheme: dark; }
 }
 
 /* Follow-up density pass: tighter desktop proportions and safer hover inset. */
-.input-page-header {
-  min-height: 48px;
-  gap: 14px;
-  padding: 0 18px;
-}
-
-.input-page-title {
-  font-size: 12px;
-  letter-spacing: 0.14em;
-}
-
-.input-page-subtitle {
-  margin-top: 4px;
-  font-size: 10px;
-}
 
 .input-page-actions {
   gap: 10px;
@@ -1110,23 +1052,6 @@ input[type=number] { color-scheme: dark; }
 }
 
 /* Final UI polish: cleaner compact header, less dominant path control, and refined toolbar actions. */
-.input-screen .input-page-header {
-  min-height: 52px;
-  padding: 4px 20px 3px;
-  align-items: center;
-}
-
-.input-screen .input-page-title-group {
-  padding-top: 1px;
-}
-
-.input-screen .input-page-title {
-  line-height: 1.18;
-}
-
-.input-screen .input-page-subtitle {
-  line-height: 1.25;
-}
 
 .input-screen .input-toolbar {
   grid-template-columns: minmax(250px, 0.95fr) minmax(240px, 1.15fr) auto auto auto !important;
@@ -1380,9 +1305,6 @@ input[type=number] { color-scheme: dark; }
 }
 
 @media (max-width: 960px) {
-  .input-page-header {
-    padding: 10px 12px;
-  }
 
   .input-toolbar {
     margin: 10px 12px 8px !important;

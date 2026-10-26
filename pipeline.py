@@ -18,13 +18,13 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path, PurePosixPath
-from PIL import Image, ImageFilter, ImageChops, UnidentifiedImageError
+from PIL import Image, ImageFilter, ImageChops, ImageOps, UnidentifiedImageError
 import numpy as np
 from scipy.ndimage import binary_fill_holes, label
 
@@ -68,7 +68,9 @@ REMBG_MODEL    = "birefnet-general"
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
 _AVIF_DECODE_SUPPORTED = Image.registered_extensions().get(".avif") is not None
-_ALLOWED_REMBG_FALLBACKS = {"auto"}
+# Inputs are the user's own local files; 4x upscales routinely exceed Pillow's
+# decompression-bomb guard, which would otherwise abort the run.
+Image.MAX_IMAGE_PIXELS = None
 DEFAULT_UPSCALE_MAX_PX = 3600
 DEFAULT_REMBG_MAX_PX = 4096
 
@@ -146,10 +148,18 @@ def collect_images(root: Path, recursive: bool) -> tuple[list[Path], set[Path]]:
             all_images = sorted(all_images + extras)
 
     for p in all_images:
-        if "no_rembg" in (part.lower() for part in p.parts):
+        if "no_rembg" in (part.lower() for part in p.relative_to(root).parts):
             no_rembg_set.add(p)
 
     return all_images, no_rembg_set
+
+
+def _is_same_or_inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
 
 
 def mirror_path(src: Path, src_root: Path, dst_root: Path, suffix: str = ".png") -> Path:
@@ -204,7 +214,21 @@ def build_duplicate_reuse_plan(
     duplicate_to_representative: dict[Path, Path] = {}
     hash_failed: list[Path] = []
 
+    # Exact duplicates always share a byte size, so only hash files whose size collides.
+    size_counts: dict[int, int] = defaultdict(int)
+    sizes: dict[Path, int] = {}
     for src in images:
+        try:
+            sizes[src] = src.stat().st_size
+            size_counts[sizes[src]] += 1
+        except OSError:
+            pass
+
+    for src in images:
+        size = sizes.get(src)
+        if size is not None and size_counts[size] == 1:
+            representatives.append(src)
+            continue
         try:
             digest = _sha256_file(src)
         except Exception as e:
@@ -377,6 +401,9 @@ def _match_paths_from_tokens(
     tokens: set[str] | list[str] | tuple[str, ...],
     fallback_root: Path | None = None,
 ) -> tuple[set[Path], list[str]]:
+    if not tokens:
+        return set(), []
+
     by_rel: dict[str, set[Path]] = defaultdict(set)
     by_rel_no_ext: dict[str, set[Path]] = defaultdict(set)
     by_abs: dict[str, set[Path]] = defaultdict(set)
@@ -457,11 +484,34 @@ def _open_image_checked(path: Path) -> Image.Image:
         raise RuntimeError(AVIF_DECODE_ERROR)
     try:
         with Image.open(path) as opened:
-            return opened.copy()
+            # exif_transpose returns a detached copy (rotated when EXIF says so),
+            # so the file handle is released on exit.
+            return ImageOps.exif_transpose(opened)
     except (UnidentifiedImageError, OSError) as e:
         if path.suffix.lower() == ".avif":
             raise RuntimeError(AVIF_DECODE_ERROR) from e
         raise
+
+
+def _image_size_checked(path: Path) -> tuple[int, int]:
+    """Read dimensions from the header only (no full decode)."""
+    if path.suffix.lower() == ".avif" and not _AVIF_DECODE_SUPPORTED:
+        raise RuntimeError(AVIF_DECODE_ERROR)
+    try:
+        with Image.open(path) as opened:
+            return opened.size
+    except (UnidentifiedImageError, OSError) as e:
+        if path.suffix.lower() == ".avif":
+            raise RuntimeError(AVIF_DECODE_ERROR) from e
+        raise
+
+
+def _has_exif_rotation(path: Path) -> bool:
+    try:
+        with Image.open(path) as opened:
+            return opened.getexif().get(0x0112, 1) not in (0, 1)
+    except Exception:
+        return False
 
 
 def _copy_corrupted(src: Path, src_root: Path, corrupted_dir: Path) -> None:
@@ -524,9 +574,14 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
     alpha_mask = src_img.convert("RGBA").split()[3] if has_alpha else None
 
     tmp_png: Path | None = None
-    if src.suffix.lower() != ".png":
-        tmp_png = dst.parent / f"_ncnntmp_{src.stem}.png"
-        src_img.convert("RGB").save(tmp_png, format="PNG")
+    # Non-PNG sources and EXIF-rotated images go through a temp PNG so ncnn sees
+    # the same upright pixels we decoded. Kept outside the output tree so a
+    # stopped run never leaves it behind in upscaled/.
+    if src.suffix.lower() != ".png" or _has_exif_rotation(src):
+        fd, tmp_name = tempfile.mkstemp(prefix="ncnntmp_", suffix=".png")
+        os.close(fd)
+        tmp_png = Path(tmp_name)
+        src_img.convert("RGB").save(tmp_png, format="PNG", compress_level=1)
         ncnn_src = tmp_png
     else:
         ncnn_src = src
@@ -539,7 +594,7 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
                "-n", model, "-s", scale, "-f", "png"]
         if tile:
             cmd += ["-t", _NCNN_TILE_SIZE]
-        return subprocess.run(cmd, capture_output=True, text=True)
+        return subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
 
     try:
         result = _run(use_tile)
@@ -554,17 +609,20 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
             tmp_png.unlink(missing_ok=True)
 
     if alpha_mask is not None:
-        with Image.open(dst) as opened:
-            upscaled = opened.convert("RGBA")
-        upscaled.putalpha(alpha_mask.resize((upscaled.width, upscaled.height), Image.LANCZOS))
-        upscaled.save(dst, format="PNG")
+        try:
+            with Image.open(dst) as opened:
+                upscaled = opened.convert("RGBA")
+            upscaled.putalpha(alpha_mask.resize((upscaled.width, upscaled.height), Image.LANCZOS))
+            upscaled.save(dst, format="PNG")
+        except Exception as e:
+            err(f"Could not restore transparency on {src.name}: {e}")
+            return False
 
     return True
 
 
-def has_transparency(path: Path) -> bool:
+def has_transparency(img: Image.Image) -> bool:
     try:
-        img = _open_image_checked(path)
         if img.mode not in ("RGBA", "LA"):
             return False
         return img.split()[-1].getextrema()[0] < 255
@@ -593,21 +651,6 @@ def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
     inner   = alpha.point(lambda p: 255 if p >= 240 else 0)
     blurred = alpha.filter(ImageFilter.GaussianBlur(radius=blur_radius))
     return Image.merge("RGBA", (r, g, b, ImageChops.lighter(blurred, inner)))
-
-
-def _select_onnx_providers(force_cpu: bool = False) -> tuple[list[str], str]:
-    """GPU-first provider selection. DML → CUDA → CPU fallback chain."""
-    if force_cpu:
-        return ["CPUExecutionProvider"], "CPU / Stable"
-    try:
-        available = ort.get_available_providers()
-        if "DmlExecutionProvider" in available:
-            return ["DmlExecutionProvider", "CPUExecutionProvider"], "DirectML (GPU)"
-        if "CUDAExecutionProvider" in available:
-            return ["CUDAExecutionProvider", "CPUExecutionProvider"], "CUDA (GPU)"
-    except Exception:
-        pass
-    return ["CPUExecutionProvider"], "CPU"
 
 
 def _normalize_bg_device_mode(value: str) -> str:
@@ -708,6 +751,8 @@ def _is_gpu_runtime_error(msg: str) -> bool:
 def _clean_gpu_error_message(message: str, provider: str | None = None) -> str:
     text = _strip_ansi(message)
     provider_label = _provider_label(provider)
+    if _is_oom_error(text):
+        return f"{provider_label} ran out of memory. Use CPU / Stable or GPU + CPU fallback."
     if provider == "CUDAExecutionProvider":
         return "CUDA provider unavailable: missing cublasLt64_12.dll. Use CPU / Stable or GPU + CPU fallback."
     if provider == "DmlExecutionProvider":
@@ -740,33 +785,6 @@ def _is_oom_error(msg: str) -> bool:
     ))
 
 
-def _normalize_rembg_fallback(value: str) -> str:
-    raw = str(value or "").strip().lower()
-    return raw if raw in _ALLOWED_REMBG_FALLBACKS else "auto"
-
-
-_GPU_MEM_FRACTION = 0.80
-
-def _ort_session_options() -> ort.SessionOptions:
-    opts = ort.SessionOptions()
-    opts.enable_mem_pattern = False
-    return opts
-
-def _cuda_mem_limit_bytes() -> int | None:
-    try:
-        import subprocess as _sp
-        r = _sp.run(
-            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode == 0:
-            mb = int(r.stdout.strip().split("\n")[0])
-            return int(mb * _GPU_MEM_FRACTION * 1_048_576)
-    except Exception:
-        pass
-    return None
-
-
 def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: float = 0.003) -> Image.Image:
     """Fill only small enclosed holes in a BiRefNet alpha mask.
 
@@ -780,24 +798,23 @@ def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: flo
     if not np.any(new_holes):
         return mask
 
-    hole_labels, hole_count = label(new_holes)
+    hole_labels, _ = label(new_holes)
     max_hole_px = int(mask_np.size * max_hole_ratio)
+    small_hole = np.bincount(hole_labels.ravel()) <= max_hole_px
+    small_hole[0] = False  # label 0 is "not a hole"
     result = mask_np.copy()
-    for idx in range(1, hole_count + 1):
-        area = int((hole_labels == idx).sum())
-        if area <= max_hole_px:
-            result[hole_labels == idx] = 255
+    result[small_hole[hole_labels]] = 255
 
-    return Image.fromarray(result.astype(np.uint8), mode="L")
+    return Image.fromarray(result, mode="L")
 
 
 BIREFNET_MAX = 1024
 
 
 def _prefetch_image(path: Path) -> None:
-    """Pre-decode next image into OS page cache in a background thread."""
+    """Warm the OS page cache for the next image in a background thread."""
     try:
-        _open_image_checked(path).load()
+        path.read_bytes()
     except Exception:
         pass
 
@@ -811,7 +828,10 @@ def remove_bg(
 ) -> tuple[bool, str | None]:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
-        img = _open_image_checked(src).convert("RGBA")
+        decoded = _open_image_checked(src)
+        already_transparent = has_transparency(decoded)
+        img = decoded.convert("RGBA")
+        del decoded
         original_w, original_h = img.size
         safe_max = int(max_input_px or DEFAULT_REMBG_MAX_PX)
         if safe_max > 0 and max(original_w, original_h) > safe_max:
@@ -825,7 +845,7 @@ def remove_bg(
             img = img.resize(next_size, Image.LANCZOS)
 
         # Already transparent — clean up edges and crop, skip inference entirely
-        if has_transparency(src):
+        if already_transparent:
             result = tight_crop(refine_edges(img))
             result.save(dst, format="PNG")
             return True, None
@@ -840,7 +860,6 @@ def remove_bg(
         else:
             infer_img = img
 
-        mask = None
         infer_rgb = infer_img.convert("RGB")
 
         # Contrast boost helps BiRefNet edge quality.
@@ -854,11 +873,9 @@ def remove_bg(
         else:
             mask = mask_small
 
-        # Hole-fill only for BiRefNet — guarded here, never runs for Bria.
-        mask = _fill_mask_holes(mask)
-
-        if mask is None:
-            raise RuntimeError("Background mask generation failed (mask is unset).")
+        # Hole-fill only for BiRefNet — Bria masks keep intentional transparent areas.
+        if not model_name.lower().startswith("bria"):
+            mask = _fill_mask_holes(mask)
 
         img.putalpha(mask)
         result = tight_crop(refine_edges(img))
@@ -902,8 +919,7 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
 
         # 2. Image already large enough → skip upscale, use original
         try:
-            img = _open_image_checked(src)
-            w, h = img.size
+            w, h = _image_size_checked(src)
             if upscale_max_px > 0 and max(w, h) >= upscale_max_px:
                 skip(f"{src.name} ({w}×{h} — already ≥ {upscale_max_px}px)")
                 print(f"__processing_image__:upscale:{src}", flush=True)
@@ -922,7 +938,7 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
             warn(f"Could not read {src.name} dimensions: {e}")
 
         # 3. Needs upscaling
-        to_run.append((src, dst))
+        to_run.append((len(outputs) - 1, src, dst))
 
     if not to_run:
         ok("All images already upscaled.")
@@ -932,17 +948,22 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                   TextColumn("  [dim]{task.description}[/dim]"),
                   BarColumn(), TaskProgressColumn(), console=console) as progress:
         task = progress.add_task("Upscaling...", total=len(to_run))
-        for src, dst in to_run:
+        for out_idx, src, dst in to_run:
             progress.update(task, description=src.name)
             print(f"__processing_image__:upscale:{src}", flush=True)
             print(f"__processing__:{src}", flush=True)
-            if upscale_ncnn(src, dst, model, scale):
+            try:
+                upscaled_ok = upscale_ncnn(src, dst, model, scale)
+            except Exception as e:
+                err(f"Upscale failed on {src.name}: {e}")
+                upscaled_ok = False
+            if upscaled_ok:
                 ok(f"{src.name} → upscaled/{dst.relative_to(dst_root)}")
                 print(f"__ok_upscale__:{src.name}", flush=True)
             else:
                 warn(f"{src.name} failed — using original for next stage.")
                 print(f"__err_upscale__:{src.name}", flush=True)
-                outputs[outputs.index(dst)] = src
+                outputs[out_idx] = src
                 if corrupted_dir:
                     _copy_corrupted(src, src_root, corrupted_dir)
                     warn(f"  → copied to corrupted/{src.relative_to(src_root)}")
@@ -959,8 +980,6 @@ def batch_remove_bg(
     no_rembg_originals: set | None = None,
     exclude_tokens: set[str] | None = None,
     corrupted_dir: Path | None = None,
-    force_cpu: bool = False,
-    rembg_fallback: str = "auto",
     bg_device_mode: str = "cpu",
     max_input_px: int = DEFAULT_REMBG_MAX_PX,
 ) -> list[Path]:
@@ -985,8 +1004,6 @@ def batch_remove_bg(
     )
     print(f"__total__:{len(upscaled)}", flush=True)
 
-    if force_cpu:
-        bg_device_mode = "cpu"
     bg_device_mode = _normalize_bg_device_mode(bg_device_mode)
     providers, device_label, fallback_enabled, gpu_available = _select_bg_device_providers(bg_device_mode)
     requested_gpu_provider = _gpu_provider_from(providers)
@@ -1015,22 +1032,10 @@ def batch_remove_bg(
     print(f"__model_loading__:{REMBG_MODEL}:{device_label}", flush=True)
     console.print()
 
-    sess_opts = _ort_session_options()
     model_load_start = time.perf_counter()
 
-    provider_options = None
-    if any("CUDA" in p for p in providers):
-        limit = _cuda_mem_limit_bytes()
-        if limit:
-            provider_options = [{"device_id": 0,
-                                 "gpu_mem_limit": limit,
-                                 "arena_extend_strategy": "kSameAsRequested"}]
-            info(f"CUDA VRAM cap: {limit // 1_048_576} MB ({int(_GPU_MEM_FRACTION * 100)}%)")
-
     try:
-        session = new_session(REMBG_MODEL, providers=providers,
-                              sess_options=sess_opts,
-                              provider_options=provider_options)
+        session = new_session(REMBG_MODEL, providers=providers)
     except Exception as e:
         if (
             fallback_enabled
@@ -1039,9 +1044,7 @@ def batch_remove_bg(
             warn(f"{_clean_gpu_error_message(str(e), requested_gpu_provider)} Falling back to CPU / Stable for entire batch.")
             print("__bg_device__:GPU failed -> switched to CPU", flush=True)
             try:
-                session = new_session(REMBG_MODEL,
-                                      providers=["CPUExecutionProvider"],
-                                      sess_options=sess_opts)
+                session = new_session(REMBG_MODEL, providers=["CPUExecutionProvider"])
                 device_label = "CPU / Stable"
                 providers = ["CPUExecutionProvider"]
             except Exception as cpu_e:
@@ -1112,8 +1115,6 @@ def batch_remove_bg(
     cpu_session = session if providers == ["CPUExecutionProvider"] else None
 
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch") as prefetch_pool:
-        prefetch_future: Future | None = None
-
         with Progress(SpinnerColumn(spinner_name="dots"),
                       TextColumn("  [dim]{task.description}[/dim]"),
                       BarColumn(), TaskProgressColumn(), console=console) as progress:
@@ -1121,7 +1122,7 @@ def batch_remove_bg(
             for i, (src, dst) in enumerate(to_run):
                 if i + 1 < len(to_run):
                     next_src = to_run[i + 1][0]
-                    prefetch_future = prefetch_pool.submit(_prefetch_image, next_src)
+                    prefetch_pool.submit(_prefetch_image, next_src)
 
                 progress.update(task, description=src.name)
                 print(f"__processing_image__:rembg:{src}", flush=True)
@@ -1154,7 +1155,7 @@ def batch_remove_bg(
                             print(f"__err_rembg__:{src.name}", flush=True)
                             if corrupted_dir:
                                 _copy_corrupted(src, upscale_root, corrupted_dir)
-                                warn(f"  â†’ copied to corrupted/{src.name}")
+                                warn(f"  → copied to corrupted/{src.name}")
                             progress.advance(task)
                             continue
                     session = cpu_session  # permanent switch for all remaining images
@@ -1199,7 +1200,6 @@ def main():
     parser.add_argument("--exclude-rembg",    default="")
     parser.add_argument("--skip-files",       default="")
     parser.add_argument("--selection-manifest", default="")
-    parser.add_argument("--rembg-fallback",   default="auto")
     parser.add_argument("--wipe-input-after-run", action="store_true")
     parser.add_argument("--upscale-max-px",   type=int, default=DEFAULT_UPSCALE_MAX_PX)
     parser.add_argument("--rembg-max-px",     type=int, default=DEFAULT_REMBG_MAX_PX)
@@ -1207,16 +1207,12 @@ def main():
     parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
     args.bg_device_mode = "cpu" if args.force_cpu else _normalize_bg_device_mode(args.bg_device_mode)
-    rembg_fallback_raw = args.rembg_fallback
-    args.rembg_fallback = _normalize_rembg_fallback(args.rembg_fallback)
-    if str(rembg_fallback_raw or "").strip().lower() != args.rembg_fallback:
-        warn("Background removal recovery setting normalized to automatic.")
 
     header()
 
     if not NCNN_EXE.exists():
         err(f"NCNN binary not found: {NCNN_EXE}")
-        err("Place realesrgan-ncnn-vulkan/ folder next to pipeline.py")
+        err(f"Place the realesrgan-ncnn-vulkan/ folder in {BASE_DIR}")
         sys.exit(1)
 
     section("Configuration")
@@ -1272,16 +1268,16 @@ def main():
     corrupted_dir = output_base / "corrupted"
 
     # rembg-only auto-fallback: use upscaled output as source if input is empty
+    input_is_upscale_fallback = False
     if not do_upscale and do_rembg:
-        input_images = [p for p in input_dir.rglob("*")
-                        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS] \
-                       if input_dir.exists() else []
-        if not input_images and upscale_dir.exists():
-            upscale_images = [p for p in upscale_dir.rglob("*")
-                              if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS]
-            if upscale_images:
-                info("Input is empty — using existing upscaled output as source.")
-                input_dir = upscale_dir
+        def _has_images(root: Path) -> bool:
+            return root.exists() and any(
+                p.is_file() and p.suffix.lower() in SUPPORTED_EXTS for p in root.rglob("*")
+            )
+        if not _has_images(input_dir) and _has_images(upscale_dir):
+            info("Input is empty — using existing upscaled output as source.")
+            input_dir = upscale_dir
+            input_is_upscale_fallback = True
 
     if not input_dir.exists():
         err(f"Input folder not found: {input_dir}")
@@ -1405,9 +1401,13 @@ def main():
         output_base.mkdir(parents=True, exist_ok=True)
         info("Resume mode enabled — keeping existing output.")
     elif clear_previous_output:
-        if output_base.exists():
-            shutil.rmtree(output_base)
-        output_base.mkdir(parents=True)
+        # Clear only the stage folders this run regenerates. Editor/ exports and
+        # anything else the user keeps in the output folder survive, and a stage
+        # folder that is (or holds) the current input is never deleted.
+        for stage_dir in (upscale_dir, rembg_dir, corrupted_dir):
+            if stage_dir.exists() and not _is_same_or_inside(input_dir, stage_dir):
+                shutil.rmtree(stage_dir)
+        output_base.mkdir(parents=True, exist_ok=True)
         ok("Previous output cleared.")
     else:
         output_base.mkdir(parents=True, exist_ok=True)
@@ -1433,8 +1433,6 @@ def main():
             current, src_root, rembg_dir, input_dir, no_rembg_set,
             exclude_tokens=exclude_tokens,
             corrupted_dir=corrupted_dir,
-            force_cpu=args.force_cpu,
-            rembg_fallback=args.rembg_fallback,
             bg_device_mode=args.bg_device_mode,
             max_input_px=args.rembg_max_px,
         )
@@ -1452,8 +1450,13 @@ def main():
     if duplicate_outputs:
         ok(f"Reused {duplicate_outputs} exact duplicate output(s).")
 
-    if args.wipe_input_after_run:
-        for src in [p for p in input_dir.rglob("*") if p.is_file()]:
+    if args.wipe_input_after_run and input_is_upscale_fallback:
+        info("Input wipe skipped — source was the upscaled output, not the input folder.")
+    elif args.wipe_input_after_run and _is_same_or_inside(output_base, input_dir):
+        warn("Input wipe skipped — the output folder is inside the input folder.")
+    elif args.wipe_input_after_run:
+        # Only images this run processed; skipped files and non-images stay.
+        for src in images:
             try:
                 src.unlink(missing_ok=True)
             except Exception:
@@ -1477,7 +1480,7 @@ def main():
         f"[green]Done.[/green]  {ready_label} ready in [cyan]{ready_dir}[/cyan]\n"
         + (f"[yellow]⚠  {corrupted_count} image(s) failed → [dim]{corrupted_dir}[/dim][/yellow]\n"
            if corrupted_count else "")
-        + "[dim]Open placement editor to compose and export.[/dim]",
+        + "[dim]Open the Editor to compose and export.[/dim]",
         border_style="cyan", title="[bold]Pipeline complete[/bold]"
     ))
 

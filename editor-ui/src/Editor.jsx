@@ -8,11 +8,13 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ConfirmModal from "./ConfirmModal.jsx";
 import {
   getConfig, getSource, getImages,
-  imageUrl, saveComposition, skipImage,
+  imageUrl, saveComposition, skipImage, unskipImage,
   getSession, saveSession, clearSession,
-  browseFolder,
+  browseFolder, openFolder,
+  getSettings, patchSettings, templateRefUrl,
 } from "./api.js";
-import { apiBase, pathForFile } from "./runtime.js";
+import { pathForFile } from "./runtime.js";
+import { toForwardSlashes, relativePathFromRoot } from "./paths.js";
 import PageHeader from "./components/PageHeader.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -24,15 +26,10 @@ const DS = 720;
 const DISPLAY_ZOOM_MULTIPLIER = 0.74;
 const scaleFactor = () => DS / CANVAS_SIZE;
 
-const BASE = apiBase();
 const SINGLE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/tiff,image/avif,.png,.jpg,.jpeg,.webp,.tif,.tiff,.avif";
 const SUPPORTED_SINGLE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/tiff", "image/avif"]);
 const SUPPORTED_SINGLE_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "tif", "tiff", "avif"]);
 const DEFAULT_THUMBNAIL_SIZE = 400;
-
-// Opens a folder in the native OS file explorer via the API server
-const openFolder = (path = "") =>
-  fetch(`${BASE}/open-folder?path=${encodeURIComponent(path)}`).catch(() => {});
 
 const C = {
   bg:"var(--bg)", panel:"var(--panel)", panel2:"var(--panel2)",
@@ -54,25 +51,6 @@ const DEFAULT_OUTPUT_IDENTITY = "__default_output__";
 function normalizeOutputIdentity(path = "") {
   const key = normalizePathKey(path);
   return key || DEFAULT_OUTPUT_IDENTITY;
-}
-
-function toForwardSlashes(path = "") {
-  return String(path || "").replace(/\\/g, "/");
-}
-
-function trimTrailingSlashes(path = "") {
-  return path.replace(/\/+$/, "");
-}
-
-function relativePathFromRoot(absPath, rootPath) {
-  const absNorm = trimTrailingSlashes(toForwardSlashes(absPath).trim());
-  const rootNorm = trimTrailingSlashes(toForwardSlashes(rootPath).trim());
-  if (!absNorm || !rootNorm) return "";
-  const absLower = absNorm.toLowerCase();
-  const rootLower = rootNorm.toLowerCase();
-  if (absLower === rootLower) return "";
-  if (absLower.startsWith(`${rootLower}/`)) return absNorm.slice(rootNorm.length + 1);
-  return "";
 }
 
 function naturalParts(value = "") {
@@ -108,6 +86,11 @@ function sortImageQueue(images, rootPath) {
 function imageQueueLabel(path, rootPath) {
   const rel = relativePathFromRoot(path, rootPath);
   return rel || path.split(/[\\/]/).pop();
+}
+
+// Placement only (no decoded image), so the per-image history of a long batch stays light.
+function placementSnapshot({ label, filePath, canvasX, canvasY, scale, origW, origH }) {
+  return { label, filePath, canvasX, canvasY, scale, origW, origH };
 }
 
 // Returns canvas-pixel-space bounds for an item.
@@ -247,10 +230,6 @@ function triggerBlobDownload(blob, filename) {
   window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
 }
 
-function triggerPngDownload(blob, filename) {
-  triggerBlobDownload(blob, filename);
-}
-
 function canvasToPngBlob(canvas) {
   return new Promise((resolve) => {
     canvas.toBlob(resolve, "image/png");
@@ -354,22 +333,6 @@ async function createStoredZipBlob(entries) {
   return new Blob([...localParts, ...centralParts, endRecord], { type: "application/zip" });
 }
 
-async function saveOutputSettingsPatch(patch) {
-  const response = await fetch(`${BASE}/settings`);
-  const data = response.ok ? await response.json() : { settings: {} };
-  const current = data?.settings ?? {};
-  await fetch(`${BASE}/settings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      settings: {
-        ...current,
-        output: { ...(current.output ?? {}), ...patch },
-      },
-    }),
-  });
-}
-
 // Renders a template reference image with a proper error fallback
 // — key={template} on the call site ensures full remount when template changes
 function RefImage({ src }) {
@@ -457,12 +420,18 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const confirmResolverRef = useRef(null);
   const configRef = useRef({ guides: {}, templates: {} });
   const sourceLoadSeqRef = useRef(0);
+  // queue index → { action: "saved" | "skipped", comboMode, items } for Previous / re-save.
+  const historyRef = useRef(new Map());
   const resumePromptActiveRef = useRef(false);
   const sessionRunIdRef = useRef("");
   const srcFolderRef = useRef("");
-  const singleFileInputRef = useRef(null);
+  const imageFileInputRef = useRef(null);
   const singleObjectUrlRef = useRef("");
+  // Shared busy flag for Save and Skip so neither can start while the other runs.
   const saveInFlightRef = useRef(false);
+  const savedResetTimerRef = useRef(null);
+  const dragFrameRef = useRef(null);
+  const dragPointRef = useRef(null);
   // BUG-06 FIX: loadImage is useCallback but called from initFromFolder/advance which
   // need stable references. A ref breaks the circular dep chain cleanly — callers
   // always get the latest version without needing it in their own dep arrays.
@@ -493,28 +462,23 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const [sessionOutputDir, setSessionOutputDir] = useState("");
   const [sourceMode, setSourceMode] = useState("batch");
   const [singleImageName, setSingleImageName] = useState("");
-  const [singleDropActive, setSingleDropActive] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
   const [activeSnapZone, setActiveSnapZone] = useState(null); // tracks last snapped guide zone
   const [showRefOnCanvas, setShowRefOnCanvas] = useState(true);
   const [refOpacity, setRefOpacity] = useState(0.22);
   const [refCanvasImage, setRefCanvasImage] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
+  // Queue of the batch that just finished, so Previous still works after the last image.
+  const [finishedQueue, setFinishedQueue] = useState([]);
 
   // Phase 4: canvas view zoom (CSS scale, does not affect composition output)
   const [zoom, setZoom] = useState(1.0);
 
   const sel = items.find(it => it.id === selId) ?? null;
-  const templateRefSrc = useMemo(() => {
-    const ri = templates[template]?.ref_image;
-    if (!ri) return null;
-    if (ri.startsWith("data:")) return ri;
-    if (ri.includes("/") || ri.includes("\\")) return `${BASE}/image?path=${encodeURIComponent(ri)}`;
-    return `${BASE}/templates/image?name=${encodeURIComponent(ri)}`;
-  }, [template, templates]);
-
-  useEffect(() => {
-    if (!sel && items.length > 0) setSelId(items[0].id);
-  }, [items, sel]);
+  const templateRefSrc = useMemo(
+    () => templateRefUrl(templates[template]?.ref_image),
+    [template, templates],
+  );
 
   useEffect(() => {
     if (selId !== null) {
@@ -590,6 +554,33 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   useEffect(() => revokeSingleImageUrl, [revokeSingleImageUrl]);
 
+  // The "Saved!/Downloaded!" flash resets after a delay; in single image mode that
+  // reset also clears the canvas, so a new load must cancel any pending reset.
+  const clearSavedResetTimer = useCallback(() => {
+    if (savedResetTimerRef.current === null) return;
+    window.clearTimeout(savedResetTimerRef.current);
+    savedResetTimerRef.current = null;
+  }, []);
+
+  const scheduleSavedReset = useCallback((afterReset) => {
+    clearSavedResetTimer();
+    savedResetTimerRef.current = window.setTimeout(() => {
+      savedResetTimerRef.current = null;
+      setSaved(false);
+      afterReset?.();
+    }, 1600);
+  }, [clearSavedResetTimer]);
+
+  const resetQueueHistory = useCallback(() => {
+    historyRef.current = new Map();
+    setFinishedQueue([]);
+  }, []);
+
+  useEffect(() => () => {
+    clearSavedResetTimer();
+    if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current);
+  }, [clearSavedResetTimer]);
+
   // ── BUG-06 FIX: convert plain functions to useCallback for stable references ──
 
   const resetEditorToDefaultState = useCallback(() => {
@@ -612,9 +603,10 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   }, [revokeSingleImageUrl, sourceStage, srcFolder]);
 
   // allDone has no state/callback deps — clearSession is a stable import
-  const allDone = useCallback(async () => {
+  const allDone = useCallback(async (finished = []) => {
     resetEditorToDefaultState();
-    setStatus(`all images processed.\noutput → ${activeOutputDir}/Editor/`);
+    setFinishedQueue(finished);
+    setStatus(`all images processed.\noutput → ${activeOutputDir}/Editor/${finished.length ? "\nPress P to go back to the last image." : ""}`);
     await clearSession().catch(() => {});
   }, [activeOutputDir, resetEditorToDefaultState]);
 
@@ -642,7 +634,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   // loadImage: stable per template/guides/comboMode combo; calls allDone when queue exhausted
   const loadImage = useCallback(async (q, idx, isCombo, guidesOverride) => {
-    if (idx >= q.length) { allDone(); return; }
+    if (idx >= q.length) { allDone(q); return; }
 
     let prefetched = null;
     if (prefetchRef.current) {
@@ -693,10 +685,18 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   // without needing loadImage in their own dep arrays (breaks circular dep chain).
   loadImageRef.current = loadImage;
 
-  // initFromFolder: stable (uses loadImageRef to avoid circular dep on loadImage)
+  // initFromFolder: stable (uses loadImageRef to avoid circular dep on loadImage).
+  // Guarded by sourceLoadSeqRef so a slower call (e.g. a stale "Change Source
+  // Folder" request) can't clobber state set by a faster, later one (e.g. a
+  // "Reload" click fired right after it) — see doc/plan item 9.
   const initFromFolder = useCallback(async (folder, startIdx, guidesOverride) => {
+    const runSeq = ++sourceLoadSeqRef.current;
     const result = await getImages(folder);
+    if (runSeq !== sourceLoadSeqRef.current) return;
     const nextQueue = sortImageQueue(result.images, folder);
+    clearSavedResetTimer();
+    resetQueueHistory();
+    setSaved(false);
     revokeSingleImageUrl();
     srcFolderRef.current = folder;
     setSourceMode("batch");
@@ -709,14 +709,17 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     setSelId(null);
     setActiveSnapZone(null);
     await loadImageRef.current(nextQueue, startIdx, false, guidesOverride);
+    if (runSeq !== sourceLoadSeqRef.current) return;
     setStatus("");
-  }, [revokeSingleImageUrl]); // getImages is a stable import; all setters are stable; uses ref for loadImage
+  }, [clearSavedResetTimer, resetQueueHistory, revokeSingleImageUrl]); // getImages is a stable import; all setters are stable; uses ref for loadImage
 
   const initFromDroppedPaths = useCallback(async (paths, label = "Dropped folder") => {
     const uniquePaths = [...new Set(paths.filter(Boolean))];
     if (!uniquePaths.length) return;
     const root = commonDirectory(uniquePaths);
     const nextQueue = sortImageQueue(uniquePaths, root);
+    clearSavedResetTimer();
+    resetQueueHistory();
     revokeSingleImageUrl();
     prefetchRef.current = null;
     undoRef.current = null;
@@ -736,12 +739,13 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     setActiveSnapZone(null);
     setSaved(false);
     await loadImageRef.current(nextQueue, 0, false, configRef.current.guides);
-    setStatus(`Loaded ${nextQueue.length} image${nextQueue.length === 1 ? "" : "s"} from dropped folder.`);
-  }, [revokeSingleImageUrl]);
+    setStatus(`Loaded ${nextQueue.length} dropped image${nextQueue.length === 1 ? "" : "s"} into the queue.`);
+  }, [clearSavedResetTimer, resetQueueHistory, revokeSingleImageUrl]);
 
   // ── Init effect ───────────────────────────────────────────────────────────
   const clearToEmptySource = useCallback((message, label = "no output") => {
     revokeSingleImageUrl();
+    resetQueueHistory();
     setSourceMode("batch");
     setSingleImageName("");
     setSrcFolder("");
@@ -753,7 +757,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     setActiveSnapZone(null);
     setSourceStage("none");
     setStatus(message);
-  }, [revokeSingleImageUrl]);
+  }, [resetQueueHistory, revokeSingleImageUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -763,11 +767,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
         let settings = {};
         try {
-          const sRes = await fetch(`${BASE}/settings`);
-          if (sRes.ok) {
-            const sData = await sRes.json();
-            settings = sData?.settings ?? {};
-          }
+          settings = (await getSettings()) ?? {};
         } catch {
           void 0;
         }
@@ -923,6 +923,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       const initScale = (guide.bottom - guide.top) / htmlImg.naturalHeight;
       const previousUrl = singleObjectUrlRef.current;
 
+      clearSavedResetTimer();
+      resetQueueHistory();
       singleObjectUrlRef.current = objectUrl;
       if (previousUrl && previousUrl !== objectUrl) window.URL.revokeObjectURL(previousUrl);
       prefetchRef.current = null;
@@ -961,78 +963,118 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       window.URL.revokeObjectURL(objectUrl);
       setStatus(`single image load failed: ${error.message}`);
     }
-  }, [bootstrapReady, guides, template, templates]);
+  }, [bootstrapReady, clearSavedResetTimer, guides, resetQueueHistory, template, templates]);
 
-  const loadSingleImageFromFiles = useCallback((fileList) => {
-    const files = Array.from(fileList || []);
-    const [file] = files;
-    if (!file) return;
-    if (files.length > 1) {
-      setStatus("One image at a time. Loading the first file only.");
+  // Any mix of dropped/browsed images and folders. One loose image opens in single
+  // image mode (works in the browser too); anything more becomes the Editor queue,
+  // which needs real file paths (desktop app).
+  const loadDroppedFiles = useCallback(async (files, hasDirectory = false) => {
+    if (!files.length) {
+      setStatus(hasDirectory ? "Dropped folder does not contain supported images." : "Unsupported file. Use PNG, JPG, JPEG, WebP, TIFF, or AVIF.");
+      return;
     }
-    loadSingleImageFile(file).catch((error) => {
-      setStatus(`single image load failed: ${error.message}`);
-    });
-  }, [loadSingleImageFile]);
+    if (files.length === 1 && !hasDirectory) {
+      await loadSingleImageFile(files[0]);
+      return;
+    }
+    const paths = files.map(file => pathForFile(file)).filter(Boolean);
+    if (!paths.length) {
+      if (hasDirectory) {
+        setStatus("Folder drop needs the desktop app so image paths can be loaded.");
+        return;
+      }
+      await loadSingleImageFile(files[0]);
+      setStatus("Several images need the desktop app to queue. Loaded the first image only.");
+      return;
+    }
+    const label = hasDirectory && paths.length === files.length
+      ? commonDirectory(paths) || "Dropped folder"
+      : `${paths.length} dropped image${paths.length === 1 ? "" : "s"}`;
+    await initFromDroppedPaths(paths, label);
+    if (paths.length < files.length) {
+      setStatus(`Queued ${paths.length} of ${files.length} images; ${files.length - paths.length} had no readable file path.`);
+    }
+  }, [initFromDroppedPaths, loadSingleImageFile]);
 
-  const onSingleImageInputChange = useCallback((event) => {
-    loadSingleImageFromFiles(event.target.files);
+  const onImageInputChange = useCallback((event) => {
+    const files = Array.from(event.target.files || []).filter(isSupportedSingleImageFile);
     event.target.value = "";
-  }, [loadSingleImageFromFiles]);
+    loadDroppedFiles(files).catch((error) => {
+      setStatus(`image load failed: ${error.message}`);
+    });
+  }, [loadDroppedFiles]);
 
-  const onSingleImageDragOver = useCallback((event) => {
+  const onDropDragOver = useCallback((event) => {
     event.preventDefault();
     event.stopPropagation();
-    setSingleDropActive(true);
+    setDropActive(true);
   }, []);
 
-  const onSingleImageDragLeave = useCallback((event) => {
+  const onDropDragLeave = useCallback((event) => {
     event.preventDefault();
     event.stopPropagation();
-    setSingleDropActive(false);
+    // dragleave also fires when moving onto a child element; only clear when leaving the target.
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setDropActive(false);
   }, []);
 
-  const onSingleImageDrop = useCallback((event) => {
+  const onDrop = useCallback((event) => {
     event.preventDefault();
     event.stopPropagation();
-    setSingleDropActive(false);
+    setDropActive(false);
     droppedImageFiles(event.dataTransfer)
-      .then(async ({ files, hasDirectory }) => {
-        if (!files.length) {
-          setStatus(hasDirectory ? "Dropped folder does not contain supported images." : "Unsupported file. Use PNG, JPG, JPEG, WebP, TIFF, or AVIF.");
-          return;
-        }
-        if (hasDirectory) {
-          const paths = files.map(file => pathForFile(file)).filter(Boolean);
-          if (!paths.length) {
-            setStatus("Folder drop needs the desktop app so image paths can be loaded.");
-            return;
-          }
-          await initFromDroppedPaths(paths, commonDirectory(paths) || "Dropped folder");
-          return;
-        }
-        loadSingleImageFromFiles(files);
-      })
+      .then(({ files, hasDirectory }) => loadDroppedFiles(files, hasDirectory))
       .catch((error) => {
         setStatus(`drop failed: ${error.message}`);
       });
-  }, [initFromDroppedPaths, loadSingleImageFromFiles]);
+  }, [loadDroppedFiles]);
 
-  const browseSingleImage = useCallback(() => {
-    singleFileInputRef.current?.click();
+  const browseImages = useCallback(() => {
+    imageFileInputRef.current?.click();
+  }, []);
+
+  // Puts back the placement an image was saved with (images are re-decoded from disk).
+  // Returns false when there is nothing saved to restore.
+  const restoreSavedPlacement = useCallback(async (entry) => {
+    if (entry?.action !== "saved" || !entry.items?.length) return false;
+    const restored = await Promise.all(entry.items.map(async (item) => {
+      const htmlImg = new window.Image();
+      await new Promise(resolve => { htmlImg.onload = resolve; htmlImg.onerror = resolve; htmlImg.src = imageUrl(item.filePath); });
+      return { ...item, id: nextItemIdRef.current++, htmlImg };
+    }));
+    setComboMode(entry.comboMode);
+    setItems(restored);
+    setSelId(restored[restored.length - 1].id);
+    return true;
+  }, []);
+
+  const historyStatus = useCallback((q, idx, prefix) => {
+    const entry = historyRef.current.get(idx);
+    const label = imageQueueLabel(q[idx], srcFolderRef.current);
+    if (entry?.action === "saved") return `${prefix} ${label}: saved earlier. Save again to overwrite it.`;
+    if (entry?.action === "skipped") return `${prefix} ${label}: skipped earlier. Saving it now removes the skipped copy.`;
+    return `${prefix} ${label}.`;
   }, []);
 
   // ── BUG-17 FIX: advance was a plain function — converted to useCallback ──
   // Uses loadImageRef so loadImage doesn't need to be in deps (avoids stale closure).
-  const advance = useCallback(() => {
+  const advance = useCallback(async () => {
     const nextIdx = queueIdx + 1;
     setQueueIdx(nextIdx);
     setActiveSnapZone(null);
     undoRef.current = null;
     dragRef.current = null;
     if (!comboMode) { setItems([]); setSelId(null); }
-    loadImageRef.current(queue, nextIdx, comboMode);
-  }, [queueIdx, comboMode, queue]);
+    // Moving forward again after going back: show images already handled as they were saved.
+    const entry = nextIdx < queue.length ? historyRef.current.get(nextIdx) : null;
+    if (entry) {
+      const message = historyStatus(queue, nextIdx, "next:");
+      if (!await restoreSavedPlacement(entry)) await loadImageRef.current(queue, nextIdx, comboMode);
+      setStatus(message);
+      return;
+    }
+    return loadImageRef.current(queue, nextIdx, comboMode);
+  }, [queueIdx, comboMode, queue, historyStatus, restoreSavedPlacement]);
 
   // ── Canvas draw ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1120,7 +1162,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     }
 
     ctx.setLineDash([]);
-  }, [items, selId, sel, template, scaleLocked, guides, templates, guideOpacity, canvasBgColor, activeSnapZone, showRefOnCanvas, refOpacity, refCanvasImage]);
+  }, [items, selId, sel, guides, guideOpacity, canvasBgColor, activeSnapZone, showRefOnCanvas, refOpacity, refCanvasImage]);
 
   // ── Wheel zoom (product scale) ────────────────────────────────────────────
   useEffect(() => {
@@ -1172,25 +1214,63 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   const onMouseMove = useCallback((e) => {
     if (!dragRef.current) return;
+    if (e.buttons === 0) { dragRef.current = null; return; }
     const { mx, my } = toCanvasCoords(e.clientX, e.clientY);
-    const S = scaleFactor();
     const { itemId, ox, oy } = dragRef.current;
-    setItems(prev => prev.map(it =>
-      it.id===itemId ? {...it, canvasX:Math.round((mx-ox)/S), canvasY:Math.round((my-oy)/S)} : it
-    ));
+    // Coalesce mousemoves into one state update per animation frame. The pending
+    // point carries its own drag info so a mouseup before the frame still lands it.
+    dragPointRef.current = { itemId, ox, oy, mx, my };
+    if (dragFrameRef.current !== null) return;
+    dragFrameRef.current = window.requestAnimationFrame(() => {
+      dragFrameRef.current = null;
+      const point = dragPointRef.current;
+      dragPointRef.current = null;
+      if (!point) return;
+      const S = scaleFactor();
+      setItems(prev => prev.map(it =>
+        it.id===point.itemId ? {...it, canvasX:Math.round((point.mx-point.ox)/S), canvasY:Math.round((point.my-point.oy)/S)} : it
+      ));
+    });
   }, []);
 
   const onMouseUp = useCallback(() => { dragRef.current = null; }, []);
 
+  // Bound to window (not just the canvas) so a drag that leaves the canvas
+  // bounds before mouseup still tracks the cursor and still releases the
+  // drag on button-up, instead of "sticking" the item to the next cursor
+  // position when the mouse re-enters the canvas.
+  useEffect(() => {
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [onMouseMove, onMouseUp]);
+
   const doUndo = useCallback(() => {
     if (!undoRef.current) return;
     const { id,canvasX,canvasY,scale } = undoRef.current;
-    setItems(prev => prev.map(it => it.id===id ? {...it,canvasX,canvasY,scale} : it));
     undoRef.current = null;
+    if (!items.some(it => it.id === id)) {
+      setStatus("nothing to undo.");
+      return;
+    }
+    setItems(prev => prev.map(it => it.id===id ? {...it,canvasX,canvasY,scale} : it));
     setStatus("undone.");
-  }, []);
+  }, [items]);
+
+  const removeSelected = useCallback(() => {
+    if (!selId) return;
+    if (undoRef.current?.id === selId) undoRef.current = null;
+    setItems(prev => prev.filter(it => it.id!==selId));
+    setSelId(null);
+  }, [selId]);
 
   const saveSessionCheckpoint = useCallback(async (nextQueueIndex) => {
+    // A dropped selection is not a folder the session can reopen (resume rescans src_root),
+    // so its progress is not written; resuming would land on the wrong images.
+    if (sourceStage === "dropped") return;
     await saveSession({
       src_root: srcFolder,
       queue_index: nextQueueIndex,
@@ -1205,7 +1285,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   const toggleGenerateThumbnail = useCallback((enabled) => {
     setGenerateThumbnail(enabled);
-    saveOutputSettingsPatch({ thumbnail: enabled }).catch(() => {
+    patchSettings({ output: { thumbnail: enabled } }).catch(() => {
       setStatus("thumbnail preference changed locally, but settings save failed");
     });
   }, []);
@@ -1286,8 +1366,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       triggerBlobDownload(packageBlob, zipDownloadName(currentName));
       packageDownloaded = true;
     } else {
-      triggerPngDownload(finalBlob, finalDownloadName(currentName));
-      if (thumbnailBlob) triggerPngDownload(thumbnailBlob, thumbnailDownloadName(currentName));
+      triggerBlobDownload(finalBlob, finalDownloadName(currentName));
+      if (thumbnailBlob) triggerBlobDownload(thumbnailBlob, thumbnailDownloadName(currentName));
     }
 
     if (fromSave) setSaved(true);
@@ -1297,10 +1377,15 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     setStatus(fromSave && isSingleImageMode
       ? `${downloadLabel} Single image mode does not write to batch output.`
       : downloadLabel);
-    if (fromSave && isSingleImageMode) resetEditorToDefaultState();
-    if (fromSave) window.setTimeout(() => setSaved(false), 1600);
+    if (fromSave) {
+      // Let the "Downloaded!" flash actually paint before resetting state —
+      // resetEditorToDefaultState() itself sets saved back to false, so
+      // calling it synchronously here would batch away the flash entirely.
+      // The timer is cancelled if a new image is loaded before it fires.
+      scheduleSavedReset(isSingleImageMode ? resetEditorToDefaultState : undefined);
+    }
     return true;
-  }, [generateThumbnail, isSingleImageMode, items, queue, queueIdx, renderExportCanvas, renderThumbnailCanvas, resetEditorToDefaultState, singleImageName, srcFolder]);
+  }, [generateThumbnail, isSingleImageMode, items, queue, queueIdx, renderExportCanvas, renderThumbnailCanvas, resetEditorToDefaultState, scheduleSavedReset, singleImageName, srcFolder]);
 
   const doSave = useCallback(async () => {
     if (saveInFlightRef.current) return;
@@ -1325,29 +1410,98 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         canvasSizeProp ?? canvasSizeState,
         activeOutputDir,
       );
+      const wasSkipped = historyRef.current.get(queueIdx)?.action === "skipped";
+      historyRef.current.set(queueIdx, { action: "saved", comboMode, items: items.map(placementSnapshot) });
+      let skippedNote = "";
+      if (wasSkipped) {
+        try {
+          await unskipImage(queue[queueIdx], srcFolder, activeOutputDir);
+          skippedNote = " · removed skipped copy";
+        } catch (e) {
+          skippedNote = e.status === 404
+            ? " · skipped copy kept (API has no /unskip yet)"
+            : ` · skipped copy kept (${e.message})`;
+        }
+      }
       setSaved(true);
-      setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}${generateThumbnail && result.thumb ? " + thumbnail" : ""}`);
-      setTimeout(() => setSaved(false), 1600);
+      setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}${generateThumbnail && result.thumb ? " + thumbnail" : ""}${skippedNote}`);
+      scheduleSavedReset();
       await saveSessionCheckpoint(queueIdx + 1);
-      advance();
+      // Await the chained load so the in-flight guard stays set until the
+      // next item has actually finished loading — otherwise, in combo mode
+      // (where `items` isn't cleared by advance()), a fast double-save can
+      // start a second save/advance cycle while this one's loadImage is
+      // still mid-flight, racing both against `items`/`selId`.
+      await advance();
     } catch (e) {
       prefetchRef.current = null;
       setStatus(`save failed: ${e.message}`);
     } finally {
       saveInFlightRef.current = false;
     }
-  }, [items, isSingleImageMode, doDownload, queue, queueIdx, srcFolder, comboMode, generateThumbnail, canvasSizeProp, canvasSizeState, advance, prefetchNextImage, activeOutputDir, saveSessionCheckpoint]);
+  }, [items, isSingleImageMode, doDownload, queue, queueIdx, srcFolder, comboMode, generateThumbnail, canvasSizeProp, canvasSizeState, advance, prefetchNextImage, activeOutputDir, saveSessionCheckpoint, scheduleSavedReset]);
 
   const doSkip = useCallback(async () => {
     if (isSingleImageMode) return;
-    prefetchNextImage(queue, queueIdx + 1);
-    if (queueIdx < queue.length) {
-      try { await skipImage(queue[queueIdx], srcFolder, activeOutputDir); } catch { void 0; }
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    try {
+      prefetchNextImage(queue, queueIdx + 1);
+      if (queueIdx < queue.length) {
+        try {
+          await skipImage(queue[queueIdx], srcFolder, activeOutputDir);
+        } catch (e) {
+          prefetchRef.current = null;
+          setStatus(`skip failed: ${e.message}`);
+          return;
+        }
+      }
+      const wasSaved = historyRef.current.get(queueIdx)?.action === "saved";
+      historyRef.current.set(queueIdx, { action: "skipped" });
+      await saveSessionCheckpoint(queueIdx + 1).catch(() => {});
+      setStatus(wasSaved ? "skipped. Its earlier saved output is still in the output folder." : "skipped.");
+      await advance();
+    } finally {
+      saveInFlightRef.current = false;
     }
-    await saveSessionCheckpoint(queueIdx + 1).catch(() => {});
-    setStatus("skipped.");
-    advance();
   }, [isSingleImageMode, queue, queueIdx, advance, prefetchNextImage, srcFolder, activeOutputDir, saveSessionCheckpoint]);
+
+  // Back to the previous queue image (also after the batch finished) to fix and re-save it.
+  const goPrevious = useCallback(async () => {
+    if (isSingleImageMode || saveInFlightRef.current) return;
+    const reopenFinished = !queue.length && finishedQueue.length > 0;
+    const q = reopenFinished ? finishedQueue : queue;
+    const prevIdx = (reopenFinished ? q.length : queueIdx) - 1;
+    if (prevIdx < 0) {
+      setStatus("already at the first image.");
+      return;
+    }
+    saveInFlightRef.current = true;
+    try {
+      clearSavedResetTimer();
+      setSaved(false);
+      prefetchRef.current = null;
+      undoRef.current = null;
+      dragRef.current = null;
+      if (reopenFinished) {
+        setQueue(q);
+        setFinishedQueue([]);
+      }
+      setQueueIdx(prevIdx);
+      setActiveSnapZone(null);
+      setItems([]);
+      setSelId(null);
+      const message = historyStatus(q, prevIdx, "back to");
+      if (!await restoreSavedPlacement(historyRef.current.get(prevIdx))) {
+        await loadImageRef.current(q, prevIdx, false);
+      }
+      // Keep the saved session on the image now being edited.
+      await saveSessionCheckpoint(prevIdx).catch(() => {});
+      setStatus(message);
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  }, [clearSavedResetTimer, finishedQueue, historyStatus, isSingleImageMode, queue, queueIdx, restoreSavedPlacement, saveSessionCheckpoint]);
 
   const onKeyDown = useCallback((e) => {
     const target = e.target;
@@ -1364,6 +1518,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       doSave();
       return;
     }
+    // Arrows, S, Ctrl+Z and Delete belong to the focused field while typing or using a slider/select.
+    if (isEditingText) return;
     const n = e.shiftKey ? 10 : 1;
     const map = { ArrowLeft:[-n,0], ArrowRight:[n,0], ArrowUp:[0,-n], ArrowDown:[0,n] };
     if (map[e.key]) {
@@ -1373,15 +1529,15 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       setItems(prev => prev.map(it => it.id===selId ? {...it,canvasX:it.canvasX+dx,canvasY:it.canvasY+dy} : it));
       return;
     }
-    if (e.key==="s"||e.key==="S") doSkip();
+    const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat;
+    if ((e.key==="s"||e.key==="S") && plainKey) doSkip();
+    if ((e.key==="p"||e.key==="P") && plainKey) goPrevious();
     if ((e.ctrlKey||e.metaKey) && e.key==="z") doUndo();
-  }, [selId, doSave, doSkip, doUndo]);
-
-  function removeSelected() {
-    if (!selId) return;
-    setItems(prev => prev.filter(it => it.id!==selId));
-    setSelId(null);
-  }
+    if ((e.key==="Delete"||e.key==="Backspace") && selId) {
+      e.preventDefault();
+      removeSelected();
+    }
+  }, [selId, doSave, doSkip, doUndo, goPrevious, removeSelected]);
 
   function snapTo(zone) {
     if (!sel) { setStatus("select an item first."); return; }
@@ -1458,13 +1614,13 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const canvasDisplaySize = zoom === 1.0
     ? `min(${canvasDisplayPixels}px, calc(100vh - 156px), calc(100% - 12px))`
     : `${canvasDisplayPixels}px`;
+  const canGoPrevious = !isSingleImageMode && (queue.length ? queueIdx > 0 : finishedQueue.length > 0);
   const queueChip = isSingleImageMode
     ? "single"
     : queue.length ? `${Math.min(queueIdx + 1, queue.length)} / ${queue.length}` : "— / —";
   const currentFileLabel = isSingleImageMode
     ? singleImageName || "Single image"
     : queue[queueIdx] ? imageQueueLabel(queue[queueIdx], srcFolder) : (srcLabel || "No image loaded");
-  const singlePreviewSrc = isSingleImageMode ? items[0]?.htmlImg?.src || "" : "";
   const saveButtonLabel = saved
     ? isSingleImageMode ? "Downloaded!" : "Saved!"
     : isSingleImageMode ? "Download" : "Save & Next";
@@ -1481,17 +1637,18 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
         ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
         .ed-btn:active{transform:scale(0.98)}
-        select,input{outline:none} input[type=range]{accent-color:var(--green)}
+        .editor-root select,.editor-root input{outline:none} input[type=range]{accent-color:var(--green)}
         input[type=checkbox]{accent-color:var(--accent)}
         [data-theme="dark"] select option{background:hsl(222,20%,16%);color:hsl(210,40%,95%)}
         [data-theme="light"] select option{background:hsl(220,14%,94%);color:hsl(224,20%,15%)}
       `}</style>
       <input
-        ref={singleFileInputRef}
+        ref={imageFileInputRef}
         className="editor-single-file-input"
         type="file"
+        multiple
         accept={SINGLE_IMAGE_ACCEPT}
-        onChange={onSingleImageInputChange}
+        onChange={onImageInputChange}
       />
 
       <PageHeader
@@ -1501,6 +1658,12 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         actionsClassName="editor-topbar-actions"
         actions={(
         <>
+          {!isSingleImageMode && (
+            <button type="button" className="ed-btn editor-action-secondary" onClick={goPrevious} disabled={!canGoPrevious} title="Back to the previous image to fix and save it again">
+              <span>Previous</span>
+              <kbd>P</kbd>
+            </button>
+          )}
           {!isSingleImageMode && (
             <button type="button" className="ed-btn editor-action-secondary" onClick={doSkip}>
               <span>Skip</span>
@@ -1519,13 +1682,18 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       <div className="editor-workspace">
       {/* ── Canvas area ──────────────────────────────────────────── */}
       <div className="editor-canvas-column">
-        <div className="editor-canvas-viewport">
+        <div
+          className={dropActive && items.length ? "editor-canvas-viewport is-drop-target" : "editor-canvas-viewport"}
+          onDragOver={onDropDragOver}
+          onDragLeave={onDropDragLeave}
+          onDrop={onDrop}
+        >
           {items.length ? (
             <div className="editor-canvas-frame" style={{ width: canvasDisplaySize, height: canvasDisplaySize }}>
               <div className="editor-artboard" style={{ background: canvasBgColor }}>
                 <canvas
                   ref={canvasRef} width={DS} height={DS}
-                  onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
+                  onMouseDown={onMouseDown}
                   style={{ cursor:"crosshair", display:"block" }}
                 />
               </div>
@@ -1533,15 +1701,12 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           ) : (
             <button
               type="button"
-              className={singleDropActive ? "ed-btn editor-empty-dropzone is-dragging" : "ed-btn editor-empty-dropzone"}
-              onClick={browseSingleImage}
-              onDragOver={onSingleImageDragOver}
-              onDragLeave={onSingleImageDragLeave}
-              onDrop={onSingleImageDrop}
+              className={dropActive ? "ed-btn editor-empty-dropzone is-dragging" : "ed-btn editor-empty-dropzone"}
+              onClick={browseImages}
             >
               <span className="editor-empty-dropzone-icon">＋</span>
-              <strong>Drop an image or folder here to edit</strong>
-              <span>or browse a single PNG, JPG, WebP, TIFF, or AVIF.</span>
+              <strong>Drop images or folders here to edit</strong>
+              <span>Several at once go straight into the queue. PNG, JPG, WebP, TIFF, or AVIF.</span>
             </button>
           )}
         </div>
@@ -1554,7 +1719,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         {/* ── Footer bar ── */}
         <div className="editor-footer">
           <div className="editor-footer-hints">
-            {["Drag=Move","Scroll=Resize","Arrows=Nudge","Ctrl+Z=Undo"].map(h => (
+            {["Drag=Move","Scroll=Resize","Arrows=Nudge","Ctrl+Z=Undo","P=Previous"].map(h => (
               <span key={h}>{h}</span>
             ))}
           </div>
@@ -1578,49 +1743,29 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         {/* Scrollable content */}
         <div key={sidebarResetKey} className="editor-sidebar-scroll">
 
-          <CollSection label="Single Image" accent="var(--green)" defaultOpen={false}>
-            <div
-              className={singleDropActive ? "editor-single-source is-dragging" : "editor-single-source"}
-              onDragOver={onSingleImageDragOver}
-              onDragLeave={onSingleImageDragLeave}
-              onDrop={onSingleImageDrop}
-            >
-              <button
-                type="button"
-                className="ed-btn editor-single-drop-field"
-                onClick={browseSingleImage}
-                aria-label={isSingleImageMode ? "Replace single image" : "Select single image"}
-              >
-                {singlePreviewSrc ? (
-                  <img src={singlePreviewSrc} alt="" />
-                ) : (
-                  <>
-                    <span className="editor-single-drop-icon">＋</span>
-                    <span className="editor-single-drop-title">Drop or select</span>
-                    <span className="editor-single-drop-hint">PNG · JPG · WebP · TIFF · AVIF</span>
-                  </>
-                )}
-              </button>
-              <div className="editor-single-file-row">
-                <span className="editor-single-file-name" title={isSingleImageMode ? singleImageName : ""}>
-                  {isSingleImageMode ? singleImageName || "Single image selected" : "No direct image selected"}
-                </span>
-              </div>
-            </div>
+          <CollSection label="Source" defaultOpen={false}>
             <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:4, marginBottom:4 }}>
               <Btn className="ed-btn" onClick={async () => {
+                let path = "";
                 try {
-                  const { path } = await browseFolder(srcFolder);
-                  if (!path) return;
-                  setSessionOutputDir("");
-                  await initFromFolder(path, 0);
+                  ({ path } = await browseFolder(srcFolder));
                 } catch {
                   setStatus("folder picker unavailable\ncheck that api.py is running");
+                  return;
                 }
+                if (!path) return;
+                setSessionOutputDir("");
+                await initFromFolder(path, 0).catch((e) => {
+                  setStatus(`folder load failed: ${e.message}`);
+                });
               }} style={{ fontSize:10, color:C.dim, textAlign:"center", marginBottom:0 }}>
                 📂 Change Source Folder
               </Btn>
-              <button className="ed-btn" onClick={() => initFromFolder(srcFolder, 0)} disabled={!srcFolder || isSingleImageMode} style={{
+              <button className="ed-btn" onClick={() => {
+                initFromFolder(srcFolder, 0).catch((e) => {
+                  setStatus(`reload failed: ${e.message}`);
+                });
+              }} disabled={!srcFolder || isSingleImageMode} style={{
                 border:`1px solid ${C.border}`, background:C.panel2, color:C.dim, borderRadius:5,
                 padding:"0 8px", fontSize:10, cursor:"pointer", fontFamily:"inherit"
               }}>↺ Reload</button>
@@ -1632,7 +1777,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           </CollSection>
 
           {/* ── Template ── */}
-          <CollSection label="Template" accent="var(--magenta)" defaultOpen>
+          <CollSection label="Template" defaultOpen>
           <select value={template} onChange={e => onTemplateChange(e.target.value)} style={{
             background:C.panel2, color:C.text, border:`1px solid ${C.border}`, borderRadius:5,
             padding:"5px 7px", fontSize:11, width:"100%", marginBottom:3,
@@ -1679,7 +1824,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           </CollSection>
 
           {/* ── Snap & Align ── */}
-          <CollSection label="Snap & Align" accent="hsl(191 85% 52%)" defaultOpen>
+          <CollSection label="Snap & Align" defaultOpen>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, marginBottom:5 }}>
               {snapBtns.map(({ lbl, zone, col }) => (
                 <button key={zone} className="ed-btn" onClick={() => { snapTo(zone); }} style={{
@@ -1732,7 +1877,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           </CollSection>
 
           {/* ── Scale ── */}
-          <CollSection label="Scale" accent="var(--accent)" defaultOpen>
+          <CollSection label="Scale" defaultOpen>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
               <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer" }}>
                 <input type="checkbox" checked={scaleLocked} onChange={e=>setScaleLocked(e.target.checked)} style={{ accentColor:"var(--red)" }} />
@@ -1762,7 +1907,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           </CollSection>
 
           {/* ── Canvas Settings ── */}
-          <CollSection label="Canvas" accent="hsl(32 90% 54%)" defaultOpen={false}>
+          <CollSection label="Canvas" defaultOpen={false}>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <span style={{ fontSize:10, color:C.dim }}>Background</span>
               <div style={{ display:"flex", alignItems:"center", gap:5 }}>
@@ -1779,7 +1924,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
           {/* ── Canvas Items ── */}
           {items.length > 0 && (
-             <CollSection label="Items" accent="hsl(246 82% 66%)" defaultOpen={false}>
+             <CollSection label="Items" defaultOpen={false}>
               <div style={{ display:"flex", flexDirection:"column", gap:2, marginBottom:2 }}>
                 {items.map(item => (
                   <button key={item.id} className="ed-btn" onClick={() => setSelId(item.id)} style={{
@@ -1802,7 +1947,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           )}
 
           {/* ── Output ── */}
-          <CollSection label="Output" accent="var(--green)" defaultOpen={false}>
+          <CollSection label="Output" defaultOpen={false}>
           <label className="editor-output-toggle">
             <span className="editor-output-toggle-copy">
               <strong>Generate thumbnail</strong>
@@ -1822,14 +1967,14 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
             <>
               {/* BUG-03 FIX: was openFolder() with no arg — opened OUTPUT_ROOT on server.
                   Now passes srcFolder so Explorer opens the actual session source folder. */}
-              <Btn className="ed-btn" onClick={() => openFolder(activeOutputDir || srcFolder)} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
+              <Btn className="ed-btn" onClick={() => openFolder(activeOutputDir || srcFolder).catch(() => {})} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
                 📁 Open Output Folder
               </Btn>
             </>
           )}
           </CollSection>
 
-          <CollSection label="History" accent="var(--accent)" defaultOpen={false}>
+          <CollSection label="History" defaultOpen={false}>
             <div className="editor-history-list">
               {statusHistory.length ? statusHistory.map((entry, index) => (
                 <div key={entry.id} className={index === 0 ? "editor-history-entry is-current" : "editor-history-entry"}>

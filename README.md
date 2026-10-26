@@ -7,24 +7,76 @@
 ![Local first](https://img.shields.io/badge/local--first-yes-2E7D32)
 ![Status](https://img.shields.io/badge/status-beta-yellow)
 
-Local-first Windows app for preparing product photos:
+Local-first Windows tool for preparing product photos: batch input, background removal, optional upscaling, a placement editor, and export-ready images. Everything runs on your machine.
 
-- batch input
-- background removal
-- optional upscaling
-- review/editor workflow
-- export-ready product images
+This repository contains the full source: the Python API and pipeline, the React editor UI, and the Electron desktop shell. You can run it either as a desktop app or as a terminal + browser workflow — both use the same code.
 
-## What It Does
+## Project Layout
 
-- Imports product images from files or folders.
-- Removes backgrounds with local model-backed processing.
-- Places products into a consistent crop, padding, and canvas workflow.
-- Optionally upscales images when the local upscaler is available.
-- Provides review and editor screens before export.
-- Keeps project data local to your Windows machine.
+| Path | What it is |
+|---|---|
+| `api.py` | FastAPI server the UI talks to (`http://127.0.0.1:7421`) |
+| `pipeline.py` | Upscale + background-removal batch pipeline (also runnable on its own) |
+| `editor-ui/` | React + Vite UI (Input, Process, Editor, Templates, Settings) |
+| `electron/` | Desktop shell: window, native dialogs, backend process manager |
+| `scripts/` | Backend build (PyInstaller) and a safe smoke test |
+| `realesrgan-ncnn-vulkan/` | Bundled upscaler binary and model weights |
+| `templates/`, `templates_custom.json` | Built-in placement templates |
+| `docs/` | Cache policy, data locations, branding, review notes |
 
-## App Workflow
+## Setup
+
+Requires Windows, Python 3.11 (with the `py` launcher) and Node.js.
+
+Easiest: double-click `setup.bat` (creates `venv311`, installs Python and npm packages).
+
+Manual equivalent:
+
+```powershell
+py -3.11 -m venv venv311
+.\venv311\Scripts\python -m pip install -r requirements.txt
+
+npm install
+cd editor-ui
+npm install
+cd ..
+```
+
+## Run As A Desktop App (development)
+
+```powershell
+npm run electron:dev
+```
+
+This starts the Vite UI and Electron together; Electron starts `api.py` from `venv311` for you.
+
+## Run In Terminal + Browser
+
+Terminal 1:
+
+```powershell
+.\venv311\Scripts\python api.py
+```
+
+Terminal 2:
+
+```powershell
+cd editor-ui
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open the Vite URL in your browser.
+
+## Build The Windows App
+
+```powershell
+.\venv311\Scripts\python -m pip install pyinstaller
+npm run electron:dist:win
+```
+
+This builds the UI, freezes the Python backend with PyInstaller, and writes the installer to `dist/`.
+
+## Workflow
 
 1. Add images or a folder.
 2. Review input.
@@ -33,14 +85,22 @@ Local-first Windows app for preparing product photos:
 5. Review results in the editor.
 6. Save or export final product images.
 
-## Processing Features
+## Checks Before A Pull Request
 
-- Background removal.
-- Crop, padding, and placement workflow.
-- Thumbnails and previews where available.
-- CPU / Stable mode as the safest default.
-- GPU / Experimental mode as an optional faster path when dependencies work.
-- GPU + CPU fallback mode as an optional recovery path.
+```powershell
+.\venv311\Scripts\python scripts\safe_smoke_test.py
+cd editor-ui
+npm run lint
+npm run build
+```
+
+Do not commit generated output, cache, local settings (`settings.json`, `session.json`), virtual environments, `node_modules/`, or build folders (`dist/`, `backend-dist/`, `backend-build/`).
+
+## Local Data
+
+- Terminal/browser and `electron:dev` mode keep data in this checkout: `settings.json`, `session.json`, `.cache/`, `input/`, `output/`, `templates_custom.json`.
+- The packaged app stores data under `%LOCALAPPDATA%\Cutout Studio\` (`config/`, `session/`, `cache/`, `models/`, `logs/`, `exports/`). See [docs/DATA_LOCATIONS.md](docs/DATA_LOCATIONS.md).
+- Cache files can be deleted and regenerated. Downloaded models are not auto-deleted, because re-downloads are large.
 
 ## Models And Credits
 
@@ -54,56 +114,16 @@ Local-first Windows app for preparing product photos:
 ## License Notes
 
 - Cutout Studio source license is in [LICENSE](LICENSE).
-- Third-party models and tools keep their own licenses.
-- Users are responsible for complying with third-party model and tool licenses.
-- Cutout Studio does not grant extra rights to third-party models or tools.
-- BRIA RMBG-2.0 is optional and is not commercially free by default.
-- BRIA RMBG-2.0 is available for non-commercial use under its upstream license terms.
-- Commercial use of BRIA RMBG-2.0 requires permission or a commercial license from BRIA AI.
-- Cutout Studio does not grant commercial rights to BRIA RMBG-2.0.
+- Third-party models and tools keep their own licenses, and users are responsible for complying with them. Cutout Studio does not grant extra rights to third-party models or tools.
+- BRIA RMBG-2.0 is optional and available for non-commercial use under its upstream license terms. Commercial use requires permission or a commercial license from BRIA AI.
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party project links and license notes.
 
-## Setup And Build
+## Troubleshooting
 
-```powershell
-npm install
-cd editor-ui
-npm install
-cd ..
-npm run backend:build
-npm run electron:dist:win
-```
-
-## Local Data
-
-The packaged app stores writable data under:
-
-```text
-%LOCALAPPDATA%\Cutout Studio\
-```
-
-Expected data areas:
-
-- `config/`
-- `session/`
-- `cache/`
-- `models/`
-- `logs/`
-- `exports/`
-
-## Cache And Models
-
-Cache files can be deleted and regenerated.
-
-Downloaded models are stored separately and are not auto-deleted, because re-downloads can be large and slow.
-
-## Support / Donation
-
-<a href="YOUR_BUY_ME_A_COFFEE_LINK">
-  <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-support-yellow?style=for-the-badge" alt="Buy me a coffee">
-</a>
-
-Donations are optional and do not unlock extra features.
+- API unavailable: confirm `.\venv311\Scripts\python api.py` is running and open `http://127.0.0.1:7421/config` (it should return JSON).
+- Frontend unavailable: run `npm run dev -- --host 127.0.0.1 --port 5173` from `editor-ui`.
+- First run model download: first use may download model weights if they are missing from the local model cache.
+- GPU mode fails: use CPU / Stable or GPU + CPU fallback. CPU mode is slower but safest.
 
 ## Project Status
 
