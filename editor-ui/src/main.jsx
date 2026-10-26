@@ -1,14 +1,12 @@
-import { StrictMode, useState, useEffect, useCallback } from "react";
+import { StrictMode, useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import Editor from "./Editor.jsx";
 import Input from "./Input.jsx";
 import Pipeline from "./Pipeline.jsx";
 import Templates from "./Templates.jsx";
 import Settings from "./Settings.jsx";
-import { apiBase } from "./runtime.js";
+import { getSettings, patchSettings } from "./api.js";
 import "./index.css";
-
-const BASE = apiBase();
 
 const TABS = [
   { id: "input", label: "Input", hint: "Select source folder" },
@@ -47,20 +45,31 @@ function recentFolders(path, current = []) {
   return [value, ...current.filter((item) => item !== value)].slice(0, RECENT_LIMIT);
 }
 
-async function saveOutputSettingsPatch(patch) {
-  const r = await fetch(`${BASE}/settings`);
-  const data = r.ok ? await r.json() : { settings: {} };
-  const current = data?.settings ?? {};
-  await fetch(`${BASE}/settings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      settings: {
-        ...current,
-        output: { ...(current.output ?? {}), ...patch },
-      },
-    }),
-  });
+function sameList(a, b) {
+  return a.length === b.length && a.every((item, i) => item === b[i]);
+}
+
+// Recent-folder list mirrored in a ref so remember() stays stable and the
+// settings save happens outside the (pure) state updater.
+function useRecentFolders(settingsKey) {
+  const [recent, setRecent] = useState([]);
+  const recentRef = useRef(recent);
+
+  const load = useCallback((list) => {
+    recentRef.current = list;
+    setRecent(list);
+  }, []);
+
+  const remember = useCallback((path) => {
+    const prev = recentRef.current;
+    const next = recentFolders(path, prev);
+    if (sameList(prev, next)) return;
+    recentRef.current = next;
+    setRecent(next);
+    patchSettings({ output: { [settingsKey]: next } }).catch(() => {});
+  }, [settingsKey]);
+
+  return [recent, remember, load];
 }
 
 export function Root() {
@@ -69,14 +78,15 @@ export function Root() {
   const [mountedScreens, setMountedScreens] = useState(() => new Set(["input"]));
   const [inputDir, setInputDir] = useState("");
   const [outputDir, setOutputDir] = useState("");
-  const [recentInputDirs, setRecentInputDirs] = useState([]);
-  const [recentOutputDirs, setRecentOutputDirs] = useState([]);
+  // Output folder the Editor follows. Only updated on blur / Browse / Recent pick / run,
+  // so typing in Process › Output folder does not reload (and clear) the Editor session.
+  const [committedOutputDir, setCommittedOutputDir] = useState("");
+  const [recentInputDirs, rememberInputDir, loadRecentInputDirs] = useRecentFolders("recent_input_dirs");
+  const [recentOutputDirs, rememberRecentOutputDir, loadRecentOutputDirs] = useRecentFolders("recent_output_dirs");
 
   useEffect(() => {
-    fetch(`${BASE}/settings`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        const settings = data?.settings;
+    getSettings()
+      .then((settings) => {
         if (!settings) return;
         const savedTheme = normalizeTheme(settings.appearance?.theme);
         if (savedTheme) {
@@ -84,12 +94,15 @@ export function Root() {
           saveStoredTheme(savedTheme);
         }
         if (typeof settings.output?.input_dir === "string") setInputDir(settings.output.input_dir);
-        if (typeof settings.output?.output_dir === "string") setOutputDir(settings.output.output_dir);
-        if (Array.isArray(settings.output?.recent_input_dirs)) setRecentInputDirs(settings.output.recent_input_dirs);
-        if (Array.isArray(settings.output?.recent_output_dirs)) setRecentOutputDirs(settings.output.recent_output_dirs);
+        if (typeof settings.output?.output_dir === "string") {
+          setOutputDir(settings.output.output_dir);
+          setCommittedOutputDir(settings.output.output_dir);
+        }
+        if (Array.isArray(settings.output?.recent_input_dirs)) loadRecentInputDirs(settings.output.recent_input_dirs);
+        if (Array.isArray(settings.output?.recent_output_dirs)) loadRecentOutputDirs(settings.output.recent_output_dirs);
       })
       .catch(() => {});
-  }, []);
+  }, [loadRecentInputDirs, loadRecentOutputDirs]);
 
   const [excludeTags, setExcludeTags] = useState([]);
   const [thumbs, setThumbs] = useState([]);
@@ -109,46 +122,23 @@ export function Root() {
     setScreen(next);
   }, []);
 
-  const rememberInputDir = useCallback((path) => {
-    setRecentInputDirs((prev) => {
-      const next = recentFolders(path, prev);
-      saveOutputSettingsPatch({ recent_input_dirs: next }).catch(() => {});
-      return next;
-    });
-  }, []);
-
   const rememberOutputDir = useCallback((path) => {
-    setRecentOutputDirs((prev) => {
-      const next = recentFolders(path, prev);
-      saveOutputSettingsPatch({ recent_output_dirs: next }).catch(() => {});
-      return next;
-    });
-  }, []);
+    setCommittedOutputDir(String(path ?? ""));
+    rememberRecentOutputDir(path);
+  }, [rememberRecentOutputDir]);
 
   const persistTheme = useCallback(async (newTheme) => {
     const normalized = normalizeTheme(newTheme) || "dark";
     setTheme(normalized);
     saveStoredTheme(normalized);
     try {
-      const r = await fetch(`${BASE}/settings`);
-      const data = r.ok ? await r.json() : { settings: {} };
-      const current = data?.settings ?? {};
-      await fetch(`${BASE}/settings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          settings: {
-            ...current,
-            appearance: { ...(current.appearance ?? {}), theme: normalized },
-          },
-        }),
-      });
+      await patchSettings({ appearance: { theme: normalized } });
     } catch {
       void 0;
     }
   }, []);
 
-  // BUG-11 FIX: theme toggle must read current settings, patch appearance.theme, then save full settings.
+  // BUG-11 FIX: theme toggle only patches appearance.theme; the server merges it into saved settings.
   const handleThemeToggle = useCallback(() => {
     persistTheme(theme === "dark" ? "light" : "dark");
   }, [persistTheme, theme]);
@@ -260,12 +250,12 @@ export function Root() {
               rememberInputDir={rememberInputDir}
               rememberOutputDir={rememberOutputDir}
               onGoToEditor={(s) => {
-                setEditorSettings(s);
+                setEditorSettings((prev) => ({ ...prev, ...s }));
                 setEditorKey((k) => k + 1);
                 openScreen("editor");
               }}
               onPipelineDone={(s) => {
-                setEditorSettings(s);
+                setEditorSettings((prev) => ({ ...prev, ...s }));
               }}
             />
           </div>
@@ -281,8 +271,7 @@ export function Root() {
           <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "editor" ? "flex" : "none", flexDirection: "column" }}>
             <Editor
               key={editorKey}
-              onGoPipeline={() => openScreen("pipeline")}
-              outputDir={outputDir}
+              outputDir={committedOutputDir}
               canvasSize={editorSettings.canvasSize}
               thumbnail={editorSettings.thumbnail}
             />

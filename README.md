@@ -18,10 +18,13 @@ Cutout Studio Terminal Workflow is the local terminal/browser version of Cutout 
 
 ## Setup
 
+Easiest: double-click `setup.bat` (creates `venv311`, installs Python and npm packages).
+
+Manual equivalent:
+
 ```powershell
-python -m venv venv311
-.\venv311\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+py -3.11 -m venv venv311
+.\venv311\Scripts\python -m pip install -r requirements.txt
 
 cd editor-ui
 npm install
@@ -33,7 +36,7 @@ cd ..
 Terminal 1:
 
 ```powershell
-python api.py
+.\venv311\Scripts\python api.py
 ```
 
 Terminal 2:
@@ -91,7 +94,7 @@ Do not commit generated output, cache, local settings, virtual environments, or 
 
 ## Troubleshooting
 
-- API unavailable: confirm `python api.py` is running and check `http://127.0.0.1:7421`.
+- API unavailable: confirm `.\venv311\Scripts\python api.py` is running and open `http://127.0.0.1:7421/config` (it should return JSON).
 - Frontend unavailable: run `npm run dev -- --host 127.0.0.1 --port 5173` from `editor-ui`.
 - First run model download: first use may download model weights if they are missing from the local model cache.
 - GPU mode fails: use CPU / Stable or GPU + CPU fallback.
@@ -99,8 +102,10 @@ Do not commit generated output, cache, local settings, virtual environments, or 
 
 ## Support / Donation
 
-<a href="YOUR_BUY_ME_A_COFFEE_LINK">
+<!-- TODO: add the real Buy Me a Coffee link, then restore the badge:
+<a href="https://buymeacoffee.com/...">
   <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-support-yellow?style=for-the-badge" alt="Buy me a coffee">
 </a>
+-->
 
 Donations are optional and do not unlock extra features.

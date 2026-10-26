@@ -9,15 +9,17 @@ corrupted/
 templates/
 
 # Virtual environments
-venv311/
 venv*/
 
 # Python cache
 __pycache__/
 *.pyc
 
-# Large binaries - users download these themselves
-# realesrgan-ncnn-vulkan/
+# NOTE: realesrgan-ncnn-vulkan/ (upscaler exe + model weights, ~51MB) is
+# intentionally NOT ignored — it's committed to the repo so the app works
+# out of the box with no separate download step. Un-ignoring it here would
+# not remove it from git history; that would need a separate cleanup plus
+# a real download-on-first-run mechanism to replace it.
 # weights/
 
 # Logs / temp
@@ -33,21 +35,17 @@ backend-dist/
 backend-build/
 dist/
 node_modules/
-editor-ui/node_modules/
 .vite/
-editor-ui/node_modules/.vite/
 
 # Editor / OS
 .vscode/
 .idea/
 Thumbs.db
 desktop.ini
-dist/
 *.blockmap
 builder-debug.yml
 builder-effective-config.yaml
 latest.yml
-tatus/
 
 # Local AI/design reference notes
 AI_*.md

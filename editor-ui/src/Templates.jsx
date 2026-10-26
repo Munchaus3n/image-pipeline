@@ -1,9 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ConfirmModal from "./ConfirmModal.jsx";
-import { browseFile } from "./api.js";
-import { apiBase } from "./runtime.js";
-
-const BASE = apiBase();
+import { browseFile, imageUrl, templateRefUrl, getTemplates, saveTemplates } from "./api.js";
 
 const C = {
   bg:      "var(--bg)",      panel:   "var(--panel)",   panel2:  "var(--panel2)",
@@ -18,21 +15,6 @@ const ZONE_COLOR = { none: C.dim, green: C.green, blue: C.blue, magenta: C.magen
 
 const EMPTY_TEMPLATE = { name: "", zone: "green", hint: "", ref_image: "" };
 
-async function apiGet(path) {
-  const r = await fetch(BASE + path);
-  if (!r.ok) throw new Error(`GET ${path} → ${r.status}`);
-  return r.json();
-}
-
-async function apiPost(path, body) {
-  const r = await fetch(BASE + path, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error(`POST ${path} → ${r.status}`);
-  return r.json();
-}
-
 // Pick a file via native dialog, fetch it from the API, return as base64 data URL.
 // This means the image is self-contained in the JSON — no path dependency.
 async function browseFileAsBase64() {
@@ -42,7 +24,7 @@ async function browseFileAsBase64() {
 }
 
 async function fetchPathAsBase64(path) {
-  const r = await fetch(`${BASE}/image?path=${encodeURIComponent(path)}`);
+  const r = await fetch(imageUrl(path));
   if (!r.ok) return "";
   const blob = await r.blob();
   return new Promise(resolve => {
@@ -78,14 +60,22 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
   const handleSave = async () => {
     if (!form.name.trim()) { setError("Name is required."); return; }
     setSaving(true);
-    try { await onSave(form); }
+    setError("");
+    try {
+      // onSave resolves false when the user backs out (e.g. declines an overwrite).
+      if (await onSave(form) === false) setSaving(false);
+    }
     catch (e) { setError(e.message); setSaving(false); }
   };
 
   // Browse native file dialog → convert to base64
   const browseRef = useCallback(async () => {
-    const b64 = await browseFileAsBase64();
-    if (b64) set("ref_image", b64);
+    try {
+      const b64 = await browseFileAsBase64();
+      if (b64) set("ref_image", b64);
+    } catch (e) {
+      setError(`Browse failed: ${e.message}`);
+    }
   }, []);
 
   // Drag & drop handlers
@@ -109,10 +99,8 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
   };
 
   const hasImage = form.ref_image && form.ref_image.length > 0;
-  // data URL or legacy path — display accordingly
-  const imgSrc = hasImage
-    ? (form.ref_image.startsWith("data:") ? form.ref_image : `${BASE}/image?path=${encodeURIComponent(form.ref_image)}`)
-    : null;
+  // data URL, legacy absolute path, or bare file name in templates/
+  const imgSrc = hasImage ? templateRefUrl(form.ref_image) : null;
 
   return (
     <div className="template-form-panel">
@@ -218,17 +206,19 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function Templates({ onBack, hideHeader }) {
+export default function Templates({ onBack }) {
   const [templates, setTemplates] = useState({});
   const [editing, setEditing] = useState(null);   // null | "new" | templateName
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmOverwrite, setConfirmOverwrite] = useState(null);
+  const overwriteResolverRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiGet("/templates/list");
+      const data = await getTemplates();
       setTemplates(data.templates || {});
     } catch (e) {
       setStatus(`Load failed: ${e.message}`);
@@ -243,14 +233,33 @@ export default function Templates({ onBack, hideHeader }) {
     return () => clearTimeout(timeout);
   }, [load]);
 
+  const askOverwrite = (name) => new Promise((resolve) => {
+    overwriteResolverRef.current = resolve;
+    setConfirmOverwrite(name);
+  });
+
+  const closeOverwrite = (confirmed) => {
+    overwriteResolverRef.current?.(confirmed);
+    overwriteResolverRef.current = null;
+    setConfirmOverwrite(null);
+  };
+
   const handleSave = async (form) => {
     const key = form.name.trim();
-    const updated = { ...templates, [key]: { zone: form.zone, hint: form.hint, ref_image: form.ref_image } };
-    await apiPost("/templates/save", { templates: updated });
+    const previousKey = editing && editing !== "new" ? editing : null;
+    // Creating or renaming onto an existing name replaces that template — ask first.
+    if (key !== previousKey && Object.prototype.hasOwnProperty.call(templates, key)) {
+      if (!await askOverwrite(key)) return false;
+    }
+    const updated = { ...templates };
+    if (previousKey && previousKey !== key) delete updated[previousKey];
+    updated[key] = { zone: form.zone, hint: form.hint, ref_image: form.ref_image };
+    await saveTemplates(updated);
     setTemplates(updated);
     setEditing(null);
-    setStatus(`Saved "${key}"`);
+    setStatus(previousKey && previousKey !== key ? `Saved "${key}" (renamed from "${previousKey}")` : `Saved "${key}"`);
     setTimeout(() => setStatus(""), 2000);
+    return true;
   };
 
   const handleDelete = async (name) => {
@@ -261,7 +270,13 @@ export default function Templates({ onBack, hideHeader }) {
     if (!confirmDelete) return;
     const updated = { ...templates };
     delete updated[confirmDelete];
-    await apiPost("/templates/save", { templates: updated });
+    try {
+      await saveTemplates(updated);
+    } catch (e) {
+      setStatus(`Delete failed: ${e.message}`);
+      setConfirmDelete(null);
+      return;
+    }
     setTemplates(updated);
     setEditing(null);
     setStatus(`Deleted "${confirmDelete}"`);
@@ -287,8 +302,6 @@ export default function Templates({ onBack, hideHeader }) {
         [data-theme="light"] select option{background:hsl(220,14%,94%);color:hsl(224,20%,15%)}
       `}</style>
 
-      {/* Header — hidden when nav strip is provided by Root */}
-      {!hideHeader && (
       <div className="templates-header">
         <div className="templates-heading">
           {onBack && (
@@ -310,13 +323,6 @@ export default function Templates({ onBack, hideHeader }) {
           </button>
         </div>
       </div>
-      )}
-      {/* Status feedback when header hidden */}
-      {hideHeader && status && (
-        <div className="template-status-bar">
-          {status}
-        </div>
-      )}
 
       <div className="templates-body">
 
@@ -370,13 +376,7 @@ export default function Templates({ onBack, hideHeader }) {
                     {tpl.ref_image && (
                       <div className="template-card-thumb">
                         <img
-                          src={
-                            !tpl.ref_image ? null
-                            : tpl.ref_image.startsWith("data:") ? tpl.ref_image
-                            : tpl.ref_image.includes("/") || tpl.ref_image.includes("\\")
-                              ? `${BASE}/image?path=${encodeURIComponent(tpl.ref_image)}`
-                              : `${BASE}/templates/image?name=${encodeURIComponent(tpl.ref_image)}`
-                          }
+                          src={templateRefUrl(tpl.ref_image)}
                           alt=""
                           onError={e => { e.target.style.display = "none"; }}
                         />
@@ -423,6 +423,15 @@ export default function Templates({ onBack, hideHeader }) {
         cancelLabel="Cancel"
         onConfirm={confirmDeleteTemplate}
         onCancel={() => setConfirmDelete(null)}
+      />
+      <ConfirmModal
+        open={Boolean(confirmOverwrite)}
+        title="Replace template?"
+        message={confirmOverwrite ? `A template named "${confirmOverwrite}" already exists. Replace it?` : ""}
+        confirmLabel="Replace"
+        cancelLabel="Cancel"
+        onConfirm={() => closeOverwrite(true)}
+        onCancel={() => closeOverwrite(false)}
       />
     </div>
   );

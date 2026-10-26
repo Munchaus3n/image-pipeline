@@ -231,12 +231,14 @@ def run_static_checks(repo_root: Path) -> list[CheckResult]:
         "Found banned broad taskkill /IM invocation." if broad_kill else "No banned broad taskkill /IM invocation found.",
     ))
 
+    # The Electron shell lives in the root package.json; the web UI must stay
+    # runnable in a plain browser, so editor-ui itself may not depend on it.
     electron_refs = "electron" in package_txt or "electron-builder" in package_txt
     checks.append(result(
         "FAIL" if electron_refs else "PASS",
         "Static",
-        "Electron postponed",
-        "Electron dependency/script reference found in package.json." if electron_refs else "No Electron dependency/script reference found.",
+        "Web UI has no Electron dependency",
+        "Electron dependency/script reference found in editor-ui/package.json." if electron_refs else "No Electron reference in editor-ui/package.json.",
     ))
 
     api_exts = parse_supported_exts(api_txt)

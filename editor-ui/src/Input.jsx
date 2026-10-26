@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useMemo } from "react";
-import { apiBase } from "./runtime.js";
-import { browseFolder } from "./api.js";
+import { browseFolder, getJson, previewUrl as apiPreviewUrl } from "./api.js";
+import { relativePathFromRoot as relativePathFromInput, imageIdForPath } from "./paths.js";
 import PageHeader from "./components/PageHeader.jsx";
 
-const BASE = apiBase();
+// Large (recursive) folders can take a while to scan.
+const IMAGE_SCAN_TIMEOUT_MS = 120000;
 
 const C = {
   bg:     "var(--bg)",     panel:   "var(--panel)",  panel2:  "var(--panel2)",
@@ -12,33 +13,6 @@ const C = {
   green:  "var(--green)",  blue:    "var(--accent)",
   yellow: "var(--yellow)", red:     "var(--red)",
 };
-
-function toForwardSlashes(path = "") {
-  return String(path || "").replace(/\\/g, "/");
-}
-
-function trimTrailingSlashes(path = "") {
-  return path.replace(/\/+$/, "");
-}
-
-function normalizeImageId(path = "") {
-  return trimTrailingSlashes(toForwardSlashes(path).trim());
-}
-
-function relativePathFromInput(absPath, inputDir) {
-  const absNorm = normalizeImageId(absPath);
-  const rootNorm = normalizeImageId(inputDir);
-  if (!absNorm || !rootNorm) return "";
-  const absLower = absNorm.toLowerCase();
-  const rootLower = rootNorm.toLowerCase();
-  if (absLower === rootLower) return "";
-  if (absLower.startsWith(`${rootLower}/`)) return absNorm.slice(rootNorm.length + 1);
-  return "";
-}
-
-function imageIdForPath(absPath, inputDir) {
-  return normalizeImageId(relativePathFromInput(absPath, inputDir) || absPath);
-}
 
 function pruneSetToIds(values, validIds) {
   const next = new Set();
@@ -78,8 +52,12 @@ export default function Input({
   const [previewVersion,   setPreviewVersion]   = useState(0);
   const lastSelectedRef = useRef(null);  // for shift-click range
   const loadedDirRef = useRef("");
+  // Bumped on every scan and on clear, so a slow response for an old path is ignored.
+  const loadSeqRef = useRef(0);
 
   const clearLoadedImages = useCallback(() => {
+    loadSeqRef.current += 1;
+    setLoading(false);
     setThumbs([]); setSelected(new Set());
     setExcludeTags([]); setRemovedImages(new Set());
     setLoadError(null);
@@ -98,67 +76,66 @@ export default function Input({
       clearLoadedImages();
       return;
     }
+    const runSeq = ++loadSeqRef.current;
+    const isCurrent = () => runSeq === loadSeqRef.current;
     setLoading(true);
     setLoadError(null);
     setPreviewLoadError(false);
     setThumbLoadErrors(new Set());
     setPreviewVersion(v => v + 1);
     try {
-      const r = await fetch(
-        `${BASE}/images?folder=${encodeURIComponent(folder)}&recursive=${includeSubfolders ? "true" : "false"}&limit=500`
+      // Query kept inline: scripts/safe_smoke_test.py checks these markers (explicit, bounded scan).
+      const data = await getJson(
+        `/images?folder=${encodeURIComponent(folder)}&recursive=${includeSubfolders ? "true" : "false"}&limit=500`,
+        IMAGE_SCAN_TIMEOUT_MS,
       );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        setLoadError(err.detail || `Server error ${r.status}`);
-        setThumbs([]);
+      if (!isCurrent()) return;
+      const nextImages = Array.isArray(data?.images) ? data.images : [];
+      const nextIds = new Set(nextImages.map(absPath => imageIdForPath(absPath, folder)));
+      const shouldResetSession = resetSession || loadedDirRef.current !== folder;
+      if (shouldResetSession) {
+        setSelected(new Set());
+        setExcludeTags([]);
+        setRemovedImages(new Set());
+        setPreviewPath(null);
+        setPreviewLoadError(false);
+        setThumbLoadErrors(new Set());
+        setLoadError(null);
+        lastSelectedRef.current = null;
+        loadedDirRef.current = folder;
       } else {
-        const data = await r.json();
-        const nextImages = Array.isArray(data?.images) ? data.images : [];
-        const nextIds = new Set(nextImages.map(absPath => imageIdForPath(absPath, folder)));
-        const shouldResetSession = resetSession || loadedDirRef.current !== folder;
-        if (shouldResetSession) {
-          setSelected(new Set());
-          setExcludeTags([]);
-          setRemovedImages(new Set());
-          setPreviewPath(null);
-          setPreviewLoadError(false);
-          setThumbLoadErrors(new Set());
-          setLoadError(null);
-          lastSelectedRef.current = null;
-          loadedDirRef.current = folder;
-        } else {
-          setSelected(prev => {
-            const next = pruneSetToIds(prev, nextIds);
-            return sameSet(prev, next) ? prev : next;
-          });
-          setExcludeTags(prev => {
-            const next = [...new Set(prev)].filter(id => nextIds.has(id));
-            return next.length === prev.length && next.every((id, i) => id === prev[i]) ? prev : next;
-          });
-          setRemovedImages(prev => {
-            const next = pruneSetToIds(prev, nextIds);
-            return sameSet(prev, next) ? prev : next;
-          });
-          setPreviewPath(prev => {
-            if (!prev) return prev;
-            const previewId = imageIdForPath(prev, folder);
-            return nextIds.has(previewId) ? prev : null;
-          });
-          lastSelectedRef.current = null;
-        }
-        setTruncated(!!data?.truncated);
-        setThumbs(nextImages);
-        rememberInputDir?.(folder);
+        setSelected(prev => {
+          const next = pruneSetToIds(prev, nextIds);
+          return sameSet(prev, next) ? prev : next;
+        });
+        setExcludeTags(prev => {
+          const next = [...new Set(prev)].filter(id => nextIds.has(id));
+          return next.length === prev.length && next.every((id, i) => id === prev[i]) ? prev : next;
+        });
+        setRemovedImages(prev => {
+          const next = pruneSetToIds(prev, nextIds);
+          return sameSet(prev, next) ? prev : next;
+        });
+        setPreviewPath(prev => {
+          if (!prev) return prev;
+          const previewId = imageIdForPath(prev, folder);
+          return nextIds.has(previewId) ? prev : null;
+        });
+        lastSelectedRef.current = null;
       }
-    } catch {
-      setLoadError("Could not reach the API server.");
+      setTruncated(!!data?.truncated);
+      setThumbs(nextImages);
+      rememberInputDir?.(folder);
+    } catch (e) {
+      if (!isCurrent()) return;
+      setLoadError(e?.status ? (e.detail || `Server error ${e.status}`) : "Could not reach the API server.");
       setThumbs([]);
     }
-    finally { setLoading(false); }
+    finally { if (isCurrent()) setLoading(false); }
   }, [clearLoadedImages, includeSubfolders, inputDir, rememberInputDir, setExcludeTags, setRemovedImages, setThumbs]);
 
   const previewUrl = useCallback((path, size) => (
-    `${BASE}/preview?path=${encodeURIComponent(path)}&size=${size}&v=${previewVersion}`
+    apiPreviewUrl(path, size, previewVersion)
   ), [previewVersion]);
 
   const browse = useCallback(async () => {
@@ -193,12 +170,17 @@ export default function Input({
   }, [imageEntries]);
 
   // Visible images: exclude removed + apply search filter
-  const visible = imageEntries.filter(entry => {
-    if (removedImages.has(entry.imageId)) return false;
-    if (!search) return true;
+  const visible = useMemo(() => {
     const q = search.toLowerCase();
-    return entry.name.toLowerCase().includes(q) || entry.relativePath.toLowerCase().includes(q);
-  });
+    return imageEntries.filter(entry => {
+      if (removedImages.has(entry.imageId)) return false;
+      if (!q) return true;
+      return entry.name.toLowerCase().includes(q) || entry.relativePath.toLowerCase().includes(q);
+    });
+  }, [imageEntries, removedImages, search]);
+  // visible IDs list used for shift-click range
+  const visibleIds = useMemo(() => visible.map(entry => entry.imageId), [visible]);
+  const excludeSet = useMemo(() => new Set(excludeTags), [excludeTags]);
 
   const toggleSelect = useCallback((imageId, absPath, e, visibleIds) => {
     // Selection is now the primary preview driver.
@@ -233,7 +215,7 @@ export default function Input({
 
   const excludeSelected = () => {
     setExcludeTags(prev => {
-      const visibleIdSet = new Set(visible.map(entry => entry.imageId));
+      const visibleIdSet = new Set(visibleIds);
       const next = [...prev];
       selected.forEach(n => {
         if (visibleIdSet.has(n) && !next.includes(n)) next.push(n);
@@ -257,9 +239,7 @@ export default function Input({
   };
 
   const selArr      = [...selected];
-  const allExcl     = selArr.length > 0 && selArr.every(n => excludeTags.includes(n));
-  // visible IDs list used for shift-click range
-  const visibleIds = visible.map(entry => entry.imageId);
+  const allExcl     = selArr.length > 0 && selArr.every(n => excludeSet.has(n));
   // excludeTags that are still in the visible set (not removed)
   const activeExcludeCount = excludeTags.filter(n => !removedImages.has(n)).length;
 
@@ -496,7 +476,7 @@ export default function Input({
                 const ext       = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
                 const isAvif    = ext === ".avif";
                 const isSel     = selected.has(imageId);
-                const isExcl    = excludeTags.includes(imageId);
+                const isExcl    = excludeSet.has(imageId);
                 const isPreview = previewPath === absPath;
                 const thumbFailed = thumbLoadErrors.has(absPath);
                 return (
@@ -625,7 +605,7 @@ export default function Input({
           if (!previewEntry) return null;
           const { name, imageId, relFolder } = previewEntry;
           const previewExt = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
-          const isExcl = excludeTags.includes(imageId);
+          const isExcl = excludeSet.has(imageId);
           return (
             <div className="input-preview" style={{
               width: 220, flexShrink: 0, background: C.panel,
