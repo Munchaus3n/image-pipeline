@@ -4,7 +4,7 @@ KNOWN LIMITATIONS (web build):
 - If pipeline completion happens while already on Editor, use the new reload controls to refresh queue/source.
 - /api/browse uses tkinter; desktop Electron should replace this with native dialog APIs.
 */
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import ConfirmModal from "./ConfirmModal.jsx";
 import {
   getConfig, getSource, getImages,
@@ -25,6 +25,23 @@ let CANVAS_SIZE = 1440;  // mutable module var — kept for non-React drawing fu
 const DS = 720;
 const DISPLAY_ZOOM_MULTIPLIER = 0.74;
 const scaleFactor = () => DS / CANVAS_SIZE;
+// View zoom range. The preview buffer stays at DS (720px) for speed, so high
+// zoom is softer on screen — it never changes the saved image.
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4.0;
+const ZOOM_WHEEL_STEP = 1.1;
+// A product drawn larger than its source pixels (beyond this factor) is
+// upsampled in the saved image and will look soft.
+const ENLARGE_WARN_THRESHOLD = 1.01;
+const clampZoom = (z) => {
+  const rounded = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) * 100) / 100;
+  return Math.abs(rounded - 1) < 0.04 ? 1.0 : rounded;
+};
+
+function isTextEntryTarget(target) {
+  const tagName = target?.tagName?.toLowerCase?.() || "";
+  return tagName === "input" || tagName === "select" || tagName === "textarea" || Boolean(target?.isContentEditable);
+}
 
 const SINGLE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/tiff,image/avif,.png,.jpg,.jpeg,.webp,.tif,.tiff,.avif";
 const SUPPORTED_SINGLE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/tiff", "image/avif"]);
@@ -412,6 +429,11 @@ function Btn({ children, onClick, style={}, className = "" }) {
 export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true }) {
   const canvasRef    = useRef(null);
   const containerRef = useRef(null);
+  const viewportRef  = useRef(null);
+  const zoomAnchorRef = useRef(null);   // { fx, fy, clientX, clientY } kept under the cursor across a zoom
+  const panRef       = useRef(null);    // { x, y, scrollLeft, scrollTop } while panning the viewport
+  const spaceHeldRef = useRef(false);
+  const [panMode, setPanMode] = useState(null); // null | "ready" (Space held) | "panning"
   const dragRef      = useRef(null);
   const undoRef      = useRef(null);
   const prefetchRef  = useRef(null); // holds pre-loaded next htmlImg + metadata
@@ -1164,11 +1186,50 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     ctx.setLineDash([]);
   }, [items, selId, sel, guides, guideOpacity, canvasBgColor, activeSnapZone, showRefOnCanvas, refOpacity, refCanvasImage]);
 
-  // ── Wheel zoom (product scale) ────────────────────────────────────────────
-  useEffect(() => {
+  // ── View zoom ─────────────────────────────────────────────────────────────
+  // Zoom so the canvas point under (clientX, clientY) stays under it; without a
+  // point, zoom around the middle of the viewport.
+  const zoomTo = useCallback((nextZoomOrFn, clientX, clientY) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const viewport = viewportRef.current;
+    if (canvas && viewport) {
+      const vr = viewport.getBoundingClientRect();
+      const cx = clientX ?? vr.left + vr.width / 2;
+      const cy = clientY ?? vr.top + vr.height / 2;
+      const r = canvas.getBoundingClientRect();
+      zoomAnchorRef.current = {
+        fx: r.width  ? Math.max(0, Math.min(1, (cx - r.left) / r.width))  : 0.5,
+        fy: r.height ? Math.max(0, Math.min(1, (cy - r.top)  / r.height)) : 0.5,
+        clientX: cx, clientY: cy,
+      };
+    }
+    setZoom(prev => clampZoom(typeof nextZoomOrFn === "function" ? nextZoomOrFn(prev) : nextZoomOrFn));
+  }, []);
+
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    zoomAnchorRef.current = null;
+    const canvas = canvasRef.current;
+    const viewport = viewportRef.current;
+    if (!anchor || !canvas || !viewport) return;
+    const r = canvas.getBoundingClientRect();
+    viewport.scrollLeft += r.left + anchor.fx * r.width  - anchor.clientX;
+    viewport.scrollTop  += r.top  + anchor.fy * r.height - anchor.clientY;
+  }, [zoom]);
+
+  // ── Wheel: Ctrl+wheel = view zoom, wheel on canvas = product scale ────────
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
     const handler = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (!canvasRef.current) return;
+        const f = e.deltaY < 0 ? ZOOM_WHEEL_STEP : 1 / ZOOM_WHEEL_STEP;
+        zoomTo(z => z * f, e.clientX, e.clientY);
+        return;
+      }
+      if (e.target !== canvasRef.current) return; // let the zoomed viewport scroll normally
       e.preventDefault();
       if (scaleLocked || !selId) return;
       const f = e.deltaY < 0 ? 1.04 : 0.96;
@@ -1176,9 +1237,69 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         it.id===selId ? {...it, scale: Math.max(0.02, Math.min(4.0, it.scale*f))} : it
       ));
     };
-    canvas.addEventListener("wheel", handler, { passive: false });
-    return () => canvas.removeEventListener("wheel", handler);
-  }, [scaleLocked, selId]);
+    viewport.addEventListener("wheel", handler, { passive: false });
+    return () => viewport.removeEventListener("wheel", handler);
+  }, [scaleLocked, selId, zoomTo]);
+
+  // ── Pan: hold Space and drag, or drag with the middle mouse button ────────
+  useEffect(() => {
+    const endPan = () => {
+      if (!panRef.current) return;
+      panRef.current = null;
+      setPanMode(spaceHeldRef.current ? "ready" : null);
+    };
+    // The Editor stays mounted (display:none) on other screens; Space must keep
+    // working normally there and while no image is loaded.
+    const canPan = () => Boolean(canvasRef.current && canvasRef.current.offsetParent !== null);
+    const onKeyDown = (e) => {
+      if (e.code !== "Space" || isTextEntryTarget(e.target) || !canPan()) return;
+      e.preventDefault(); // no page scroll, no "click" on a focused button
+      if (e.repeat || spaceHeldRef.current) return;
+      spaceHeldRef.current = true;
+      if (!panRef.current) setPanMode("ready");
+    };
+    const onKeyUp = (e) => {
+      if (e.code !== "Space" || !spaceHeldRef.current) return;
+      if (!isTextEntryTarget(e.target)) e.preventDefault();
+      spaceHeldRef.current = false;
+      if (!panRef.current) setPanMode(null);
+    };
+    const onMove = (e) => {
+      const pan = panRef.current;
+      const viewport = viewportRef.current;
+      if (!pan || !viewport) return;
+      viewport.scrollLeft = pan.scrollLeft - (e.clientX - pan.x);
+      viewport.scrollTop  = pan.scrollTop  - (e.clientY - pan.y);
+    };
+    const onBlur = () => {
+      spaceHeldRef.current = false;
+      panRef.current = null;
+      setPanMode(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", endPan);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", endPan);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  // Capture phase so a pan never also selects or drags a product.
+  const onViewportMouseDownCapture = useCallback((e) => {
+    const viewport = viewportRef.current;
+    if (!viewport || !canvasRef.current) return;
+    if (!(e.button === 1 || (e.button === 0 && spaceHeldRef.current))) return;
+    e.preventDefault();
+    e.stopPropagation();
+    panRef.current = { x: e.clientX, y: e.clientY, scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop };
+    setPanMode("panning");
+  }, []);
 
   // ── Mouse helpers ─────────────────────────────────────────────────────────
   const toCanvasCoords = (clientX, clientY) => {
@@ -1504,14 +1625,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   }, [clearSavedResetTimer, finishedQueue, historyStatus, isSingleImageMode, queue, queueIdx, restoreSavedPlacement, saveSessionCheckpoint]);
 
   const onKeyDown = useCallback((e) => {
-    const target = e.target;
-    const tagName = target?.tagName?.toLowerCase?.() || "";
-    const isEditingText = (
-      tagName === "input" ||
-      tagName === "select" ||
-      tagName === "textarea" ||
-      target?.isContentEditable
-    );
+    const isEditingText = isTextEntryTarget(e.target);
     if (e.key === "Enter") {
       if (isEditingText || saveInFlightRef.current) return;
       e.preventDefault();
@@ -1606,9 +1720,25 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const zoomPresets = [
     { label:"75%",  value:0.75 },
     { label:"100%", value:1.0  },
-    { label:"125%", value:1.25 },
     { label:"150%", value:1.5  },
+    { label:"200%", value:2.0  },
+    { label:"300%", value:3.0  },
+    { label:"400%", value:4.0  },
   ];
+  const zoomIsPreset = zoomPresets.some(p => p.value === zoom);
+
+  // How much each product is enlarged in the saved image relative to its own
+  // source pixels (both save paths draw at origW * scale * exportSize / CANVAS_SIZE).
+  const exportSizeNow = canvasSizeProp ?? canvasSizeState;
+  const enlargementOf = (it) => it.scale * exportSizeNow / CANVAS_SIZE;
+  const enlargedItems = items.filter(it => enlargementOf(it) > ENLARGE_WARN_THRESHOLD);
+  const selEnlargement = sel ? enlargementOf(sel) : 0;
+  const selIsEnlarged = selEnlargement > ENLARGE_WARN_THRESHOLD;
+  const otherEnlargedCount = enlargedItems.filter(it => it.id !== selId).length;
+  const maxEnlargedPct = enlargedItems.length
+    ? Math.round(Math.max(...enlargedItems.map(enlargementOf)) * 100)
+    : 0;
+  const canvasCursor = panMode === "panning" ? "grabbing" : panMode === "ready" ? "grab" : "crosshair";
   const displayZoom = zoom * DISPLAY_ZOOM_MULTIPLIER;
   const canvasDisplayPixels = Math.round(DS * displayZoom);
   const canvasDisplaySize = zoom === 1.0
@@ -1683,7 +1813,10 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       {/* ── Canvas area ──────────────────────────────────────────── */}
       <div className="editor-canvas-column">
         <div
+          ref={viewportRef}
           className={dropActive && items.length ? "editor-canvas-viewport is-drop-target" : "editor-canvas-viewport"}
+          onMouseDownCapture={onViewportMouseDownCapture}
+          style={panMode ? { cursor: canvasCursor } : undefined}
           onDragOver={onDropDragOver}
           onDragLeave={onDropDragLeave}
           onDrop={onDrop}
@@ -1694,7 +1827,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
                 <canvas
                   ref={canvasRef} width={DS} height={DS}
                   onMouseDown={onMouseDown}
-                  style={{ cursor:"crosshair", display:"block" }}
+                  style={{ cursor: canvasCursor, display:"block" }}
                 />
               </div>
             </div>
@@ -1714,19 +1847,30 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         <div className="editor-file-status" title={currentFileLabel}>
           <span>Current file</span>
           <strong>{currentFileLabel}</strong>
+          {enlargedItems.length > 0 && (
+            <em
+              className="editor-enlarge-chip"
+              title="A product is drawn larger than its source image, so the saved file will look soft there. Reduce its scale or use a larger source image."
+            >
+              ⚠ Enlarged {maxEnlargedPct}% · will look soft
+            </em>
+          )}
         </div>
 
         {/* ── Footer bar ── */}
         <div className="editor-footer">
           <div className="editor-footer-hints">
-            {["Drag=Move","Scroll=Resize","Arrows=Nudge","Ctrl+Z=Undo","P=Previous"].map(h => (
+            {["Drag=Move","Scroll=Resize","Ctrl+Scroll=Zoom","Space+Drag=Pan","Arrows=Nudge","Ctrl+Z=Undo","P=Previous"].map(h => (
               <span key={h}>{h}</span>
             ))}
           </div>
 
           <div className="editor-zoom-controls">
+            {!zoomIsPreset && (
+              <span className="editor-zoom-readout" title="Current zoom (Ctrl+Scroll)">{Math.round(zoom * 100)}%</span>
+            )}
             {zoomPresets.map(({ label, value }) => (
-              <button key={label} className="ed-btn" onClick={() => setZoom(value)} style={{
+              <button key={label} className="ed-btn" onClick={() => zoomTo(value)} style={{
                 padding:"2px 6px", fontSize:9, cursor:"pointer", fontFamily:"inherit", borderRadius:3,
                 border:`1px solid ${zoom===value ? "var(--accent)" : "transparent"}`,
                 background: zoom===value ? "color-mix(in srgb,var(--accent) 12%,transparent)" : "transparent",
@@ -1904,6 +2048,24 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
                 }}>{l}</button>
               ))}
             </div>
+            {sel && selIsEnlarged && (
+              <div className="editor-enlarge-warning" role="status">
+                <strong>⚠ Enlarged to {Math.round(selEnlargement * 100)}% of the original</strong>
+                <span>
+                  The source is only {sel.origW}×{sel.origH}px, so the saved image will look soft.
+                  It stays sharp up to scale {(CANVAS_SIZE / exportSizeNow).toFixed(3)}. Reduce the
+                  scale or use a larger source image.
+                </span>
+              </div>
+            )}
+            {otherEnlargedCount > 0 && (
+              <div className="editor-enlarge-warning" role="status">
+                <span>
+                  ⚠ {otherEnlargedCount} other item{otherEnlargedCount > 1 ? "s are" : " is"} enlarged past
+                  {otherEnlargedCount > 1 ? " their" : " its"} original size.
+                </span>
+              </div>
+            )}
           </CollSection>
 
           {/* ── Canvas Settings ── */}

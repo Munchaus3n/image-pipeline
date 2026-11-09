@@ -130,6 +130,10 @@
 
 .editor-canvas-frame {
   position: relative;
+  /* auto margins centre the canvas while it fits, and anchor it to the start
+     edge once zoom makes it bigger than the viewport, so every side stays
+     reachable by scrolling (place-items:center would clip the top/left). */
+  margin: auto;
   overflow: visible;
   flex-shrink: 0;
   border: 0;
@@ -239,6 +243,44 @@
   font-weight: 400;
   letter-spacing: 0.02em;
   text-overflow: ellipsis;
+}
+
+.editor-enlarge-chip {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
+  color: var(--yellow);
+  font-style: normal;
+  letter-spacing: 0.04em;
+  cursor: help;
+}
+
+.editor-enlarge-warning {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.editor-enlarge-warning strong {
+  color: var(--yellow);
+  font-weight: 700;
+}
+
+.editor-zoom-readout {
+  padding: 2px 6px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .editor-footer {
