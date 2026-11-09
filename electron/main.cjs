@@ -80,7 +80,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
-      additionalArguments: [`--cutout-api-origin=${apiOrigin()}`],
+      additionalArguments: [`--cutout-api-origin=http://127.0.0.1:${apiPort || LEGACY_PORT}`],
     },
   });
 
@@ -140,6 +140,29 @@ function errorHtml(message) {
 </html>`)}`;
 }
 
+// Shown at once while the backend starts, so a slow first launch never looks like nothing happened.
+function startingHtml() {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cutout Studio</title>
+    <style>
+      body { margin: 0; height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #0b0f17; color: #e5edf7; }
+      main { text-align: center; }
+      h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; }
+      p { margin: 0; color: #aab6c8; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Cutout Studio</h1>
+      <p>Starting&hellip; the first launch can take a little longer.</p>
+    </main>
+  </body>
+</html>`)}`;
+}
+
 function requestUrl(url, timeoutMs = 1500) {
   return new Promise((resolve, reject) => {
     const req = http.get(url, { timeout: timeoutMs }, (res) => {
@@ -188,6 +211,11 @@ async function loadStartupError(error) {
 async function openMainWindow() {
   writeMainLog(`openMainWindow start resourceDir=${appRoot()}`);
   if (!apiPort) apiPort = reuseApi ? LEGACY_PORT : await findFreePort();
+
+  // Window first, backend second: the user sees the app respond immediately.
+  const win = createWindow();
+  await win.loadURL(startingHtml());
+
   await startPythonApi({
     packaged: app.isPackaged,
     userDataPath: app.getPath("userData"),
@@ -203,7 +231,6 @@ async function openMainWindow() {
   await waitForRenderer();
   writeMainLog("renderer ready");
 
-  const win = createWindow();
   await win.loadURL(rendererUrl());
   writeMainLog(`window loaded url=${rendererUrl()}`);
   return win;

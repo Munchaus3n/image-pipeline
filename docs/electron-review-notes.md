@@ -13,11 +13,12 @@ Severity: **Bug** = broken behavior today, **Security** = exposure, **Weight** =
 | 1, 2 (partly) | A `spawn` error (missing or blocked executable) is caught and reported instead of crashing the main process, and startup fails at once, with the reason, if the backend dies before it is ready. Stderr is still only in `backend.log`. |
 | 6 | Shutdown always uses `taskkill /T /F` on the backend's process tree (the old `child.killed` fallback never ran), which also stops a running pipeline subprocess. |
 | 10 (CSP) | The production build (`vite build`) injects a Content-Security-Policy: scripts only from the app itself (no inline, no eval), styles from the app plus inline and Google Fonts, API and images only from `http://127.0.0.1:*`, no objects, base or forms. The dev server is left alone because Vite's hot reload needs inline scripts. Checked in a packaged build: no violations on load, images from the API load, pipeline runs. Electron 43 already sandboxes renderers by default. |
+| 5 | The window is created first and shows a "Starting…" page immediately; the app replaces it once the backend and (in dev) Vite are ready. A failed start shows the error page in the same window. This also gives the single-instance lock something to focus during a slow first launch. |
 | new | If the backend dies while the app is open it is restarted on the same port and token (up to 3 times in 2 minutes) and the window shows a banner (`BackendBanner`). A job that was running is interrupted and has to be started again. |
 | 7, 8 | Only `https:` links open externally; the window can only show its own `index.html` (or the Vite origin), so a dropped file no longer replaces the app. |
 | 9 | Per-launch token (`X-Cutout-Token`), generated in `main.cjs`, passed to the backend by environment and added to the app's API requests in `security.cjs`, so the renderer never holds it. `Origin: null` is accepted only while a token is required, and a Host-header check blocks DNS rebinding. The terminal/browser workflow is unchanged apart from those two. Tests: `scripts/test_api_auth.py` and `npm run test:electron`. |
 
-Still open: #5 and #11-#19.
+Still open: #11-#19 (packaging weight and cleanup).
 
 ## Backend process lifecycle (`electron/python-manager.cjs`, `electron/main.cjs`)
 
