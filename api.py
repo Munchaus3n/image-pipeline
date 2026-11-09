@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -36,7 +37,8 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--pipeline":
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sse_starlette.sse import EventSourceResponse
@@ -101,6 +103,11 @@ def _env_path(name: str) -> Path | None:
 BASE_DIR = _env_path("CUTOUT_STUDIO_RESOURCE_DIR") or Path(__file__).parent
 APP_DATA_ROOT = _env_path("CUTOUT_STUDIO_USER_DATA")
 PACKAGED_MODE = bool(APP_DATA_ROOT and os.environ.get("CUTOUT_STUDIO_PACKAGED") == "1")
+# Per-launch secret handed over by the Electron shell. When set, every request must
+# carry it in the X-Cutout-Token header; when empty (terminal/browser workflow) the
+# API stays open to the local Vite proxy as before.
+API_TOKEN = os.environ.get("CUTOUT_STUDIO_API_TOKEN", "").strip()
+API_TOKEN_HEADER = b"x-cutout-token"
 
 CONFIG_DIR = APP_DATA_ROOT / "config" if PACKAGED_MODE else BASE_DIR
 SESSION_DIR = APP_DATA_ROOT / "session" if PACKAGED_MODE else BASE_DIR
@@ -628,15 +635,42 @@ app = FastAPI(title="Image Pipeline API", version="1.2.0", lifespan=lifespan)
 _LOCAL_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:5173",
-    # The packaged Electron renderer loads the built UI via file://, which
-    # sends Origin: null. Needed for the packaged app to work at all; there's
-    # no auth token exchanged between the renderer and the local API, so any
-    # other local file:///sandboxed page can also reach this API while it's
-    # running — closing that gap needs a shared secret between
-    # preload.cjs/python-manager.cjs/api.py, a real follow-up, not something
-    # to silently drop here.
-    "null",
 ]
+if API_TOKEN:
+    # The packaged Electron renderer loads the built UI via file://, which sends
+    # Origin: null. That origin is shared by any sandboxed page, so it is only
+    # accepted when every request must also carry the per-launch token.
+    _LOCAL_ORIGINS.append("null")
+
+
+class ApiTokenMiddleware:
+    """Reject HTTP requests that lack the per-launch token.
+
+    Plain ASGI on purpose: BaseHTTPMiddleware interferes with cancellation of
+    the streaming pipeline response, which is how a closed window stops a run.
+    CORS preflights (OPTIONS) carry no data and are let through.
+    """
+
+    def __init__(self, inner, token: str):
+        self.inner = inner
+        self.token = token.encode("utf-8")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not self.token or scope["method"] == "OPTIONS":
+            await self.inner(scope, receive, send)
+            return
+        supplied = dict(scope["headers"]).get(API_TOKEN_HEADER, b"")
+        if secrets.compare_digest(supplied, self.token):
+            await self.inner(scope, receive, send)
+            return
+        await JSONResponse({"detail": "Missing or invalid API token"}, status_code=401)(scope, receive, send)
+
+
+# Added before CORS so CORS stays outermost and error responses still carry its headers.
+# Host filtering blocks DNS-rebinding pages that resolve their own name to 127.0.0.1.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+if API_TOKEN:
+    app.add_middleware(ApiTokenMiddleware, token=API_TOKEN)
 
 app.add_middleware(
     CORSMiddleware,
@@ -680,6 +714,8 @@ def get_config():
         "templates":   _load_custom_templates(),
         "app_data_root": str(APP_DATA_ROOT) if PACKAGED_MODE else "",
         "default_output_dir": str(OUTPUT_ROOT),
+        # Lets the desktop shell tell its own backend from an older or foreign one on the port.
+        "auth_enforced": bool(API_TOKEN),
     }
 
 

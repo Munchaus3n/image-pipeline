@@ -4,6 +4,18 @@ Findings from the October 2026 code review. They concern the Electron shell and 
 
 Severity: **Bug** = broken behavior today, **Security** = exposure, **Weight** = installer size/startup, **Cleanup** = dead code/config.
 
+## Addressed on `feature/security-hardening`
+
+| # | What changed |
+|---|---|
+| 3 (partly) | The app no longer attaches silently to a backend that is already on the port: `/config` now reports `auth_enforced`, and anything else answering on 7421 stops startup with a clear message. Dev reuse of your own `python api.py` is opt-in via `CUTOUT_STUDIO_REUSE_API=1`. A random port is still open. |
+| 4 | `app.requestSingleInstanceLock()`; a second launch focuses the existing window. |
+| 2 (partly) | Startup fails at once, with the exit code, if the backend dies before it is ready. Stderr is still only in `backend.log`. |
+| 7, 8 | Only `https:` links open externally; the window can only show its own `index.html` (or the Vite origin), so a dropped file no longer replaces the app. |
+| 9 | Per-launch token (`X-Cutout-Token`), generated in `main.cjs`, passed to the backend by environment and added to the app's API requests in `security.cjs`, so the renderer never holds it. `Origin: null` is accepted only while a token is required, and a Host-header check blocks DNS rebinding. The terminal/browser workflow is unchanged apart from those two. Tests: `scripts/test_api_auth.py` and `npm run test:electron`. |
+
+Still open: #1, #5, #6, #10 (CSP) and #11-#19, plus a random port.
+
 ## Backend process lifecycle (`electron/python-manager.cjs`, `electron/main.cjs`)
 
 | # | Severity | Finding | Fix |

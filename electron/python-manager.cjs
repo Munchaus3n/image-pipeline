@@ -3,7 +3,8 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 
-const API_ORIGIN = "http://127.0.0.1:7421";
+const { API_ORIGIN, API_TOKEN_HEADER } = require("./security.cjs");
+
 const API_CONFIG_URL = `${API_ORIGIN}/config`;
 const API_STOP_URL = `${API_ORIGIN}/pipeline/stop`;
 
@@ -11,6 +12,14 @@ let pythonProcess = null;
 let usingExternalApi = false;
 let ownedPackagedBackend = false;
 let backendLogFile = "";
+let apiToken = "";
+let backendExit = null;
+
+const FOREIGN_BACKEND_MESSAGE = [
+  "Another program is already answering on 127.0.0.1:7421, so Cutout Studio cannot start its own backend there.",
+  "This is usually an older or still-running copy of Cutout Studio. Close it (check Task Manager for",
+  "\"Cutout Studio\" and \"image-pipeline-api\") and start the app again.",
+].join(" ");
 
 function appRoot() {
   return path.resolve(__dirname, "..");
@@ -58,6 +67,7 @@ function backendEnvironment({ packaged, userDataPath, resourceDir }) {
     CUTOUT_STUDIO_RESOURCE_DIR: resourceDir,
     CUTOUT_STUDIO_USER_DATA: userDataPath,
     CUTOUT_STUDIO_PACKAGED: packaged ? "1" : "0",
+    CUTOUT_STUDIO_API_TOKEN: apiToken,
   };
 
   if (packaged) {
@@ -94,9 +104,13 @@ function killProcessTree(pid) {
   }
 }
 
+function tokenHeaders() {
+  return apiToken ? { [API_TOKEN_HEADER]: apiToken } : {};
+}
+
 function request(method, url, timeoutMs = 1500) {
   return new Promise((resolve, reject) => {
-    const req = http.request(url, { method, timeout: timeoutMs }, (res) => {
+    const req = http.request(url, { method, headers: tokenHeaders(), timeout: timeoutMs }, (res) => {
       res.resume();
       res.on("end", () => {
         if (res.statusCode >= 200 && res.statusCode < 300) resolve(true);
@@ -111,18 +125,55 @@ function request(method, url, timeoutMs = 1500) {
   });
 }
 
+// One look at /config: the status plus the parsed body when it is JSON.
+function probeApi(timeoutMs = 1500) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(API_CONFIG_URL, { headers: tokenHeaders(), timeout: timeoutMs }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        let json = null;
+        try {
+          json = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch {
+          // Not JSON: some other service.
+        }
+        resolve({ status: res.statusCode, json });
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error(`GET ${API_CONFIG_URL} -> timeout`));
+    });
+    req.on("error", reject);
+  });
+}
+
+// True when a backend other than the one this launch started answers on the port:
+// an older build without auth, or another instance holding a different token.
+function isForeignBackend(probe) {
+  if (probe.status === 401) return true;
+  const ok = probe.status >= 200 && probe.status < 300;
+  return ok && !(probe.json && probe.json.auth_enforced === true);
+}
+
 async function waitForApi({ timeoutMs = 45000, intervalMs = 400 } = {}) {
   const startedAt = Date.now();
   let lastError = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    try {
-      await request("GET", API_CONFIG_URL, Math.min(intervalMs, 1000));
-      return true;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    if (backendExit) {
+      throw new Error(`The backend exited before it was ready (${backendExit}). See backend.log for details.`);
     }
+    try {
+      const probe = await probeApi(Math.min(intervalMs, 1000));
+      if (probe.status === 200 && probe.json && probe.json.auth_enforced === true) return true;
+      if (isForeignBackend(probe)) throw new Error(FOREIGN_BACKEND_MESSAGE);
+      lastError = new Error(`GET ${API_CONFIG_URL} -> ${probe.status}`);
+    } catch (error) {
+      if (error.message === FOREIGN_BACKEND_MESSAGE) throw error;
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 
   throw lastError || new Error("Timed out waiting for Python API");
@@ -139,20 +190,25 @@ function pipeProcessOutput(child) {
   });
 }
 
-async function startPythonApi({ packaged = false, userDataPath = "", resourceDir = appRoot() } = {}) {
+async function startPythonApi({ packaged = false, userDataPath = "", resourceDir = appRoot(), token = "" } = {}) {
   if (pythonProcess || usingExternalApi) {
     return { apiOrigin: API_ORIGIN, external: usingExternalApi };
   }
 
-  if (!packaged) {
-    try {
-      await waitForApi({ timeoutMs: 1000, intervalMs: 250 });
+  apiToken = token;
+  backendExit = null;
+
+  // Never attach silently to whatever already holds the port: it may be an older
+  // build or another instance, and the UI would then run against the wrong code.
+  const existing = await probeApi(1000).catch(() => null);
+  if (existing && isForeignBackend(existing)) {
+    const reuseWanted = !packaged && process.env.CUTOUT_STUDIO_REUSE_API === "1";
+    if (reuseWanted && existing.status === 200) {
       usingExternalApi = true;
-      console.log("[api] Reusing API already available on 127.0.0.1:7421");
+      console.log("[api] Reusing the API you started on 127.0.0.1:7421 (CUTOUT_STUDIO_REUSE_API=1)");
       return { apiOrigin: API_ORIGIN, external: true };
-    } catch {
-      // No existing API responded; Electron will start and own one.
     }
+    throw new Error(FOREIGN_BACKEND_MESSAGE);
   }
 
   const rootDir = appRoot();
@@ -187,6 +243,7 @@ async function startPythonApi({ packaged = false, userDataPath = "", resourceDir
   pythonProcess.once("exit", (code, signal) => {
     console.log(`[api] Python API exited with code=${code} signal=${signal}`);
     writeBackendLog(`Backend exited with code=${code} signal=${signal}`);
+    backendExit = `code=${code} signal=${signal}`;
     pythonProcess = null;
   });
 

@@ -10,6 +10,7 @@
     "electron:dev:app": "set ELECTRON_RUN_AS_NODE=&& wait-on tcp:127.0.0.1:5173 && electron .",
     "electron:build-ui": "npm --prefix editor-ui run build",
     "backend:build": "node scripts/build-backend.cjs",
+    "test:electron": "node --test scripts/electron-security.test.cjs",
     "electron:dist": "npm run electron:build-ui && npm run backend:build && set ELECTRON_RUN_AS_NODE=&& electron-builder",
     "electron:dist:win": "npm run electron:build-ui && npm run backend:build && set ELECTRON_RUN_AS_NODE=&& electron-builder --win"
   },

@@ -1,13 +1,16 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
 const http = require("node:http");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { startPythonApi, stopPythonApi } = require("./python-manager.cjs");
+const { createApiToken, installApiAuthHeader, isAppUrl, isSafeExternalUrl } = require("./security.cjs");
 
 const isDev = !app.isPackaged;
 const DEV_RENDERER_URL = "http://127.0.0.1:5173";
 const APP_NAME = "Cutout Studio";
 let mainWindow = null;
+// Per-launch secret shared with the backend this app starts (see security.cjs).
+const apiToken = createApiToken();
 
 function localCutoutDataPath() {
   const localAppData = process.env.LOCALAPPDATA
@@ -73,17 +76,17 @@ function createWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) shell.openExternal(url);
     return { action: "deny" };
   });
 
+  // The window only ever shows the app. A file dropped outside a drop zone used to
+  // navigate here and replace the whole UI; now it is simply refused.
   mainWindow.webContents.on("will-navigate", (event, url) => {
     const currentUrl = mainWindow?.webContents.getURL();
-    if (!currentUrl || url === currentUrl) return;
-    if (isDev && url.startsWith("http://127.0.0.1:5173")) return;
-    if (!isDev && url.startsWith("file://")) return;
+    if (!currentUrl || url === currentUrl || isAppUrl(url, rendererUrl())) return;
     event.preventDefault();
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) shell.openExternal(url);
   });
 
   return mainWindow;
@@ -174,6 +177,7 @@ async function openMainWindow() {
     packaged: app.isPackaged,
     userDataPath: app.getPath("userData"),
     resourceDir: appRoot(),
+    token: apiToken,
   });
   writeMainLog("backend ready");
   await waitForRenderer();
@@ -213,22 +217,36 @@ ipcMain.on("app:is-packaged", (event) => {
   event.returnValue = app.isPackaged;
 });
 
-app.whenReady().then(async () => {
-  writeMainLog("app ready");
-  try {
-    await openMainWindow();
-  } catch (error) {
-    await loadStartupError(error);
-  }
-});
+// A second copy would attach to the first one's backend and break it when closed.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    openMainWindow().catch((error) => {
-      loadStartupError(error).catch(() => {});
-    });
-  }
-});
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+
+  app.whenReady().then(async () => {
+    writeMainLog("app ready");
+    installApiAuthHeader(session.defaultSession, apiToken);
+    try {
+      await openMainWindow();
+    } catch (error) {
+      await loadStartupError(error);
+    }
+  });
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      openMainWindow().catch((error) => {
+        loadStartupError(error).catch(() => {});
+      });
+    }
+  });
+}
 
 app.on("before-quit", async (event) => {
   if (app.__stoppingPythonApi) return;

@@ -50,6 +50,8 @@ npm run electron:dev
 
 This starts the Vite UI and Electron together; Electron starts `api.py` from `venv311` for you.
 
+Electron protects its backend with a per-launch token. If another Cutout Studio backend (an older build, or a copy that is still running) already answers on port 7421, the app stops with an error instead of silently attaching to it: close that copy and start again. To deliberately reuse a backend you started yourself with `python api.py`, set `CUTOUT_STUDIO_REUSE_API=1` first.
+
 ## Run In Terminal + Browser
 
 Terminal 1:
