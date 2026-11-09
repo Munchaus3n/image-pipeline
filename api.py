@@ -1056,8 +1056,9 @@ def clear_session():
 
 _DEFAULT_SETTINGS = {
     "processing":   {"crop_padding": 0.04, "edge_blur": 1.2,
-                                          "rembg_model": "birefnet-general",
-                     "bg_device_mode": "cpu", "history_keep": 30, "force_cpu": True, "wipe_input_after_run": False,
+                     "edge_mode": "soft", "decontaminate": True, "upscale_model": "fast",
+                     "rembg_model": "birefnet-general",
+                     "bg_device_mode": "cpu", "force_cpu": True, "wipe_input_after_run": False,
                      "reuse_exact_duplicates": True, "upscale_max_px": 3600},
     "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
     "rembg_api":    {"provider": "local", "url": "", "key": ""},
@@ -1149,6 +1150,34 @@ def pipeline_status():
     }
 
 
+def _bounded_float(value: Any, default: float, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number:  # NaN
+        return default
+    return min(high, max(low, number))
+
+
+def _cutout_args(processing: dict) -> list[str]:
+    """CLI flags for the cutout post-processing settings. Values are clamped here
+    so a hand-edited settings.json can't make the pipeline subprocess exit on a bad flag."""
+    edge_mode = processing.get("edge_mode")
+    args = [
+        "--crop-padding", f"{_bounded_float(processing.get('crop_padding'), 0.04, 0.0, 0.5):g}",
+        "--edge-blur",    f"{_bounded_float(processing.get('edge_blur'), 1.2, 0.0, 10.0):g}",
+        "--edge-mode",    edge_mode if edge_mode in ("soft", "hard") else "soft",
+        "--decontaminate" if processing.get("decontaminate", True) else "--no-decontaminate",
+    ]
+    # Advanced knobs: only passed when someone set them in settings.json.
+    if "contrast_boost" in processing:
+        args += ["--contrast-boost", f"{_bounded_float(processing.get('contrast_boost'), 1.4, 0.0, 3.0):g}"]
+    if "mask_stretch" in processing:
+        args.append("--mask-stretch" if processing.get("mask_stretch") else "--no-mask-stretch")
+    return args
+
+
 def _pipeline_command() -> list[str]:
     if getattr(sys, "frozen", False):
         return [sys.executable, "--pipeline"]
@@ -1224,6 +1253,9 @@ def _build_pipeline_command(cfg: PipelineConfig) -> tuple[list[str], Path | None
     if requested_upscale_max_px <= 0:
         requested_upscale_max_px = DEFAULT_UPSCALE_MAX_PX
     cmd += ["--upscale-max-px", str(requested_upscale_max_px)]
+    cmd += _cutout_args(processing_settings)
+    if processing_settings.get("upscale_model") == "quality":
+        cmd += ["--upscale-model", "quality"]
     return cmd, selection_manifest_path
 
 

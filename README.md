@@ -19,7 +19,7 @@ This repository contains the full source: the Python API and pipeline, the React
 | `pipeline.py` | Upscale + background-removal batch pipeline (also runnable on its own) |
 | `editor-ui/` | React + Vite UI (Input, Process, Editor, Templates, Settings) |
 | `electron/` | Desktop shell: window, native dialogs, backend process manager |
-| `scripts/` | Backend build (PyInstaller) and a safe smoke test |
+| `scripts/` | Backend build (PyInstaller), a safe smoke test, and `eval_cutouts.py` (compare cutout settings on your own sample photos) |
 | `realesrgan-ncnn-vulkan/` | Bundled upscaler binary and model weights |
 | `templates/`, `templates_custom.json` | Built-in placement templates |
 | `docs/` | Cache policy, data locations, branding, review notes |

@@ -692,6 +692,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       origW:    width,
       origH:    height,
       htmlImg,
+      loadFailed: !(htmlImg?.naturalWidth > 0),
     };
 
     if (isCombo) {
@@ -1125,11 +1126,20 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     ctx.setLineDash([]);
     for (const item of items) {
       const { x, y, w, h } = itemBounds(item);
-      if (item.htmlImg?.complete) {
+      if (item.htmlImg?.complete && item.htmlImg.naturalWidth > 0) {
         ctx.drawImage(item.htmlImg, x, y, w, h);
       } else {
         ctx.fillStyle = "#3b82f644";
         ctx.fillRect(x, y, w, h);
+        if (item.loadFailed) {
+          ctx.save();
+          ctx.fillStyle = "#ef4444";
+          ctx.font = "bold 28px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("Could not load this image. Press S to skip it.", x + w / 2, y + h / 2);
+          ctx.restore();
+        }
       }
     }
 
@@ -1547,7 +1557,11 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       setSaved(true);
       setStatus(`saved: ${result.saved.split(/[\\/]/).pop()}${generateThumbnail && result.thumb ? " + thumbnail" : ""}${skippedNote}`);
       scheduleSavedReset();
-      await saveSessionCheckpoint(queueIdx + 1);
+      try {
+        await saveSessionCheckpoint(queueIdx + 1);
+      } catch {
+        setStatus(prev => `${prev} · session checkpoint not saved`);
+      }
       // Await the chained load so the in-flight guard stays set until the
       // next item has actually finished loading — otherwise, in combo mode
       // (where `items` isn't cleared by advance()), a fast double-save can
@@ -1629,6 +1643,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     if (e.key === "Enter") {
       if (isEditingText || saveInFlightRef.current) return;
       e.preventDefault();
+      if (e.repeat) return; // holding Enter must not save the following images unseen
       doSave();
       return;
     }

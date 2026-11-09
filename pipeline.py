@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from PIL import Image, ImageFilter, ImageChops, ImageOps, UnidentifiedImageError
 import numpy as np
-from scipy.ndimage import binary_fill_holes, label
+from scipy.ndimage import binary_dilation, binary_fill_holes, grey_erosion, label, uniform_filter
+from scipy.special import expit
 
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 import onnxruntime as ort
@@ -64,6 +65,22 @@ NCNN_MODELS = {
     "4": {"model": "realesrgan-x4plus",        "scale": "4"},
 }
 
+UPSCALE_MODEL_CHOICES = ("fast", "quality")
+
+
+def resolve_upscale(scale: str, upscale_model: str = "fast") -> tuple[str, str, int]:
+    """Return (ncnn model, ncnn scale, final output scale).
+
+    "fast" 2x uses the small anime-video model. "quality" 2x runs the photo
+    model realesrgan-x4plus (4x) and scales the result back down to 2x, which
+    keeps texture and small print on packaging at the cost of speed.
+    """
+    if scale == "2" and upscale_model == "quality":
+        return NCNN_MODELS["4"]["model"], NCNN_MODELS["4"]["scale"], 2
+    entry = NCNN_MODELS[scale]
+    return entry["model"], entry["scale"], int(scale)
+
+
 REMBG_MODEL    = "birefnet-general"
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
@@ -87,11 +104,6 @@ def _ensure_rembg_loaded():
         _rembg_remove_fn = remove_fn
         _new_session_fn = session_fn
     return _rembg_remove_fn, _new_session_fn
-
-
-def rembg_remove(*args, **kwargs):
-    remove_fn, _ = _ensure_rembg_loaded()
-    return remove_fn(*args, **kwargs)
 
 
 def new_session(*args, **kwargs):
@@ -557,7 +569,7 @@ def _remove_invalid_output(path: Path, label: str) -> None:
 _NCNN_TILE_THRESHOLD = 2000  # px on longest side
 _NCNN_TILE_SIZE      = "256"  # tile size passed to -t flag
 
-def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
+def upscale_ncnn(src: Path, dst: Path, model: str, scale: str, out_scale: int = 0) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -608,6 +620,16 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str) -> bool:
         if tmp_png and tmp_png.exists():
             tmp_png.unlink(missing_ok=True)
 
+    if out_scale and out_scale != int(scale):
+        # The model's native scale is larger than requested (quality 2x): scale back down.
+        try:
+            with Image.open(dst) as opened:
+                resized = opened.convert("RGB").resize((w * out_scale, h * out_scale), Image.LANCZOS)
+            resized.save(dst, format="PNG")
+        except Exception as e:
+            err(f"Could not resize {src.name} to {out_scale}x: {e}")
+            return False
+
     if alpha_mask is not None:
         try:
             with Image.open(dst) as opened:
@@ -644,13 +666,48 @@ def tight_crop(img: Image.Image, padding: float = 0.04) -> Image.Image:
     ))
 
 
-def refine_edges(img: Image.Image, blur_radius: float = 1.2) -> Image.Image:
+EDGE_MODES = ("soft", "hard")
+
+
+@dataclass
+class CutoutOptions:
+    """Knobs for the background-removal post-processing."""
+    edge_mode: str = "soft"       # "soft" feathers inward only; "hard" thresholds + 1 px anti-alias
+    edge_blur: float = 1.2        # feather radius in px (soft mode); 0 leaves edges as predicted
+    crop_padding: float = 0.04    # fraction of the longest side kept around the product
+    contrast_boost: float = 1.4   # applied to the model input only; 0 or 1 = off
+    decontaminate: bool = True    # replace edge colour that still contains the old background
+    mask_stretch: bool = True     # min-max stretch of the model output (rembg's behaviour)
+
+    def __post_init__(self):
+        self.edge_mode = self.edge_mode if self.edge_mode in EDGE_MODES else "soft"
+        self.edge_blur = min(10.0, max(0.0, float(self.edge_blur)))
+        self.crop_padding = min(0.5, max(0.0, float(self.crop_padding)))
+        self.contrast_boost = min(3.0, max(0.0, float(self.contrast_boost)))
+
+
+def refine_alpha(alpha: Image.Image, edge_mode: str = "soft", edge_blur: float = 1.2) -> Image.Image:
+    """Clean up the edge of an alpha mask without ever growing it outward.
+
+    The old blur-then-lighten step pushed the edge out by a few pixels, which
+    left a light fringe once the cutout sat on a different background.
+    """
+    if edge_mode == "hard":
+        binary = np.where(np.asarray(alpha) >= 128, 255, 0).astype(np.uint8)
+        return Image.fromarray(binary, mode="L").filter(ImageFilter.GaussianBlur(radius=0.7))
+    if edge_blur <= 0:
+        return alpha
+    eroded = grey_erosion(np.asarray(alpha), size=3)
+    blurred = Image.fromarray(eroded, mode="L").filter(ImageFilter.GaussianBlur(radius=edge_blur))
+    return ImageChops.darker(blurred, alpha)
+
+
+def refine_edges(img: Image.Image, options: CutoutOptions | None = None) -> Image.Image:
     if img.mode != "RGBA":
         return img
+    opts = options or CutoutOptions()
     r, g, b, alpha = img.split()
-    inner   = alpha.point(lambda p: 255 if p >= 240 else 0)
-    blurred = alpha.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-    return Image.merge("RGBA", (r, g, b, ImageChops.lighter(blurred, inner)))
+    return Image.merge("RGBA", (r, g, b, refine_alpha(alpha, opts.edge_mode, opts.edge_blur)))
 
 
 def _normalize_bg_device_mode(value: str) -> str:
@@ -819,66 +876,219 @@ def _prefetch_image(path: Path) -> None:
         pass
 
 
+_IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+_IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+
+def _resize_float(arr: np.ndarray, size: tuple[int, int], resample=Image.BILINEAR) -> np.ndarray:
+    """Resize a 2-D float array to (width, height) without quantising to 8 bit."""
+    return np.asarray(Image.fromarray(arr.astype(np.float32), mode="F").resize(size, resample))
+
+
+def predict_mask(img_rgb: Image.Image, session, model_name: str = "", stretch: bool = True) -> np.ndarray:
+    """Run the segmentation model and return a float32 [0, 1] mask at img_rgb's size.
+
+    Every BiRefNet/BRIA ONNX model rembg ships takes an ImageNet-normalised RGB
+    tensor and returns one mask channel, so this does the model call directly
+    instead of going through rembg.remove(), which quantises the mask to 8 bit
+    and always stretches it to the full 0-255 range. The stretch is kept as an
+    option because it lifts faint subjects (white product on white).
+    """
+    inner = session.inner_session
+    model_input = inner.get_inputs()[0]
+    dims = model_input.shape[2:]
+    height, width = (dims[0], dims[1]) if len(dims) == 2 and all(isinstance(d, int) for d in dims) else (BIREFNET_MAX, BIREFNET_MAX)
+
+    resized = img_rgb.convert("RGB").resize((width, height), Image.LANCZOS)
+    arr = (np.asarray(resized, dtype=np.float32) / 255.0 - _IMAGENET_MEAN) / _IMAGENET_STD
+    tensor = np.ascontiguousarray(arr.transpose(2, 0, 1)[None], dtype=np.float32)
+
+    out = np.squeeze(np.asarray(inner.run(None, {model_input.name: tensor})[0], dtype=np.float32))
+    if out.ndim != 2:
+        raise RuntimeError(f"Unexpected model output shape {out.shape}")
+
+    is_bria = model_name.lower().startswith("bria")
+    if not is_bria:
+        out = expit(out)
+    if stretch or is_bria:
+        lo, hi = float(out.min()), float(out.max())
+        out = (out - lo) / (hi - lo) if hi - lo > 1e-6 else np.zeros_like(out)
+
+    return np.clip(_resize_float(out, img_rgb.size, Image.BICUBIC), 0.0, 1.0)
+
+
+def _gray_float(img: Image.Image) -> np.ndarray:
+    return np.asarray(img.convert("L"), dtype=np.float32) / 255.0
+
+
+def guided_upsample(
+    mask_lr: np.ndarray,
+    guide_lr: np.ndarray,
+    guide_hr: np.ndarray,
+    radius: int = 4,
+    eps: float = 1e-3,
+    tail_clip: float = 0.1,
+) -> np.ndarray:
+    """Upsample a mask to the guide's resolution so its edge follows the image.
+
+    Fast guided filter: the linear model q = a*I + b is fitted at the mask's
+    (low) resolution and evaluated against the full-resolution guide, which
+    keeps cost and memory low on 4000 px photos. Plain bicubic upsampling of a
+    1024 px mask leaves a soft edge several pixels wide at full size.
+
+    The filter also smears the faint tail of the model mask into flat
+    background, so values below `tail_clip` (and above 1 - tail_clip) are
+    snapped to 0 / 1 and the range in between is stretched to fill [0, 1].
+    """
+    def box(a):
+        return uniform_filter(a, size=2 * radius + 1, mode="nearest")
+
+    mean_i, mean_p = box(guide_lr), box(mask_lr)
+    cov_ip = box(guide_lr * mask_lr) - mean_i * mean_p
+    var_i = box(guide_lr * guide_lr) - mean_i * mean_i
+    a = cov_ip / (var_i + eps)
+    b = mean_p - a * mean_i
+    mean_a, mean_b = box(a), box(b)
+
+    height, width = guide_hr.shape
+    if mean_a.shape != (height, width):
+        mean_a = _resize_float(mean_a, (width, height))
+        mean_b = _resize_float(mean_b, (width, height))
+    q = mean_a * guide_hr + mean_b
+    if tail_clip > 0:
+        q = (q - tail_clip) / (1.0 - 2.0 * tail_clip)
+    return np.clip(q, 0.0, 1.0)
+
+
+_DECONTAMINATE_MAX_PX = 2048
+
+
+def decontaminate_edges(img: Image.Image) -> Image.Image:
+    """Replace the colour of semi-transparent edge pixels with estimated foreground colour.
+
+    Edge pixels of a cutout still blend the old background into their colour,
+    which shows as a light or dark fringe on a new background. Only the edge
+    band is rewritten, and the estimate runs at <= 2048 px to bound the cost.
+    """
+    if img.mode != "RGBA":
+        return img
+    rgba = np.asarray(img)
+    alpha = rgba[..., 3]
+    semi = (alpha > 0) & (alpha < 255)
+    if not semi.any():
+        return img
+    band = binary_dilation(semi, iterations=1)
+
+    from pymatting import estimate_foreground_ml
+
+    width, height = img.size
+    scale = min(1.0, _DECONTAMINATE_MAX_PX / max(width, height))
+    if scale < 1.0:
+        small = (max(1, int(width * scale)), max(1, int(height * scale)))
+        rgb_in = np.asarray(img.convert("RGB").resize(small, Image.LANCZOS), dtype=np.float64) / 255.0
+        alpha_in = np.asarray(img.getchannel("A").resize(small, Image.LANCZOS), dtype=np.float64) / 255.0
+    else:
+        rgb_in = rgba[..., :3].astype(np.float64) / 255.0
+        alpha_in = alpha.astype(np.float64) / 255.0
+
+    fg = np.clip(estimate_foreground_ml(rgb_in, alpha_in), 0.0, 1.0)
+    fg_img = Image.fromarray((fg * 255.0 + 0.5).astype(np.uint8), mode="RGB")
+    if scale < 1.0:
+        fg_img = fg_img.resize((width, height), Image.BILINEAR)
+
+    rgb = np.where(band[..., None], np.asarray(fg_img), rgba[..., :3])
+    return Image.fromarray(np.dstack([rgb.astype(np.uint8), alpha]), mode="RGBA")
+
+
+def inference_input(img: Image.Image, opts: CutoutOptions) -> Image.Image:
+    """The RGB image the model sees: capped at BIREFNET_MAX, contrast-boosted."""
+    w, h = img.size
+    if max(w, h) > BIREFNET_MAX:
+        scale = BIREFNET_MAX / max(w, h)
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+    infer_rgb = img.convert("RGB")
+
+    # Contrast boost helps BiRefNet edge quality on some photos; 0 or 1 = off.
+    if opts.contrast_boost not in (0.0, 1.0):
+        from PIL import ImageEnhance
+        infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(opts.contrast_boost)
+    return infer_rgb
+
+
+def cutout_image(
+    img: Image.Image,
+    session,
+    model_name: str,
+    opts: CutoutOptions,
+    crop: bool = True,
+    mask_lr: np.ndarray | None = None,
+) -> Image.Image:
+    """Turn an opaque RGBA image into a finished cutout.
+
+    `mask_lr` lets a caller that already ran the model (the eval script, which
+    compares post-processing variants) skip inference; it must come from
+    predict_mask() on inference_input(img, opts).
+    """
+    infer_rgb = inference_input(img, opts)
+    if mask_lr is None:
+        mask_lr = predict_mask(infer_rgb, session, model_name, stretch=opts.mask_stretch)
+    guide_lr = _gray_float(infer_rgb)
+    guide_hr = guide_lr if infer_rgb.size == img.size else _gray_float(img)
+    alpha = guided_upsample(mask_lr, guide_lr, guide_hr)
+    mask = Image.fromarray((alpha * 255.0 + 0.5).astype(np.uint8), mode="L")
+
+    # Hole-fill only for BiRefNet — Bria masks keep intentional transparent areas.
+    if not model_name.lower().startswith("bria"):
+        mask = _fill_mask_holes(mask)
+
+    mask = refine_alpha(mask, opts.edge_mode, opts.edge_blur)
+    result = img.copy()
+    result.putalpha(mask)
+    if crop:
+        result = tight_crop(result, opts.crop_padding)
+    if opts.decontaminate:
+        result = decontaminate_edges(result)
+    return result
+
+
+def limit_input_size(img: Image.Image, max_input_px: int, label: str = "") -> Image.Image:
+    """Downscale so the longest side is at most max_input_px (0 = default cap)."""
+    original_w, original_h = img.size
+    safe_max = int(max_input_px or DEFAULT_REMBG_MAX_PX)
+    if safe_max > 0 and max(original_w, original_h) > safe_max:
+        scale = safe_max / max(original_w, original_h)
+        next_size = (max(1, int(original_w * scale)), max(1, int(original_h * scale)))
+        if label:
+            warn(f"{label} downscaled for BG safety: {original_w}×{original_h} → {next_size[0]}×{next_size[1]}")
+            print(
+                f"__bg_downscale__:{label}:{original_w}x{original_h}->{next_size[0]}x{next_size[1]}",
+                flush=True,
+            )
+        return img.resize(next_size, Image.LANCZOS)
+    return img
+
+
 def remove_bg(
     src: Path,
     dst: Path,
     session,
     model_name: str = "",
     max_input_px: int = DEFAULT_REMBG_MAX_PX,
+    options: CutoutOptions | None = None,
 ) -> tuple[bool, str | None]:
+    opts = options or CutoutOptions()
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         decoded = _open_image_checked(src)
         already_transparent = has_transparency(decoded)
-        img = decoded.convert("RGBA")
+        img = limit_input_size(decoded.convert("RGBA"), max_input_px, src.name)
         del decoded
-        original_w, original_h = img.size
-        safe_max = int(max_input_px or DEFAULT_REMBG_MAX_PX)
-        if safe_max > 0 and max(original_w, original_h) > safe_max:
-            scale = safe_max / max(original_w, original_h)
-            next_size = (max(1, int(original_w * scale)), max(1, int(original_h * scale)))
-            warn(f"{src.name} downscaled for BG safety: {original_w}×{original_h} → {next_size[0]}×{next_size[1]}")
-            print(
-                f"__bg_downscale__:{src.name}:{original_w}x{original_h}->{next_size[0]}x{next_size[1]}",
-                flush=True,
-            )
-            img = img.resize(next_size, Image.LANCZOS)
 
         # Already transparent — clean up edges and crop, skip inference entirely
         if already_transparent:
-            result = tight_crop(refine_edges(img))
-            result.save(dst, format="PNG")
-            return True, None
-
-        w, h = img.size
-        if max(w, h) > BIREFNET_MAX:
-            scale = BIREFNET_MAX / max(w, h)
-            infer_img = img.resize(
-                (max(1, int(w * scale)), max(1, int(h * scale))),
-                Image.LANCZOS
-            )
+            result = tight_crop(refine_edges(img, opts), opts.crop_padding)
         else:
-            infer_img = img
-
-        infer_rgb = infer_img.convert("RGB")
-
-        # Contrast boost helps BiRefNet edge quality.
-        from PIL import ImageEnhance
-        infer_rgb = ImageEnhance.Contrast(infer_rgb).enhance(1.4)
-
-        mask_small = rembg_remove(infer_rgb, session=session, only_mask=True)
-
-        if mask_small.size != img.size:
-            mask = mask_small.resize(img.size, Image.BICUBIC)
-        else:
-            mask = mask_small
-
-        # Hole-fill only for BiRefNet — Bria masks keep intentional transparent areas.
-        if not model_name.lower().startswith("bria"):
-            mask = _fill_mask_holes(mask)
-
-        img.putalpha(mask)
-        result = tight_crop(refine_edges(img))
+            result = cutout_image(img, session, model_name, opts)
         result.save(dst, format="PNG")
         return True, None
 
@@ -892,7 +1102,8 @@ def remove_bg(
 def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                   model: str, scale: str,
                   upscale_max_px: int = 0,
-                  corrupted_dir: Path | None = None) -> list[Path]:
+                  corrupted_dir: Path | None = None,
+                  out_scale: int = 0) -> list[Path]:
     section("Stage 1 / 2 — Upscaling")
     print("__stage_start__:upscale", flush=True)
     print(f"__total__:{len(images)}", flush=True)
@@ -953,7 +1164,7 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
             print(f"__processing_image__:upscale:{src}", flush=True)
             print(f"__processing__:{src}", flush=True)
             try:
-                upscaled_ok = upscale_ncnn(src, dst, model, scale)
+                upscaled_ok = upscale_ncnn(src, dst, model, scale, out_scale)
             except Exception as e:
                 err(f"Upscale failed on {src.name}: {e}")
                 upscaled_ok = False
@@ -982,7 +1193,9 @@ def batch_remove_bg(
     corrupted_dir: Path | None = None,
     bg_device_mode: str = "cpu",
     max_input_px: int = DEFAULT_REMBG_MAX_PX,
+    options: CutoutOptions | None = None,
 ) -> list[Path]:
+    options = options or CutoutOptions()
     section("Stage 2 / 2 — Background Removal  [dim](BiRefNet)[/dim]")
     print("__stage_start__:rembg", flush=True)
 
@@ -1094,7 +1307,7 @@ def batch_remove_bg(
                 _remove_invalid_output(dst, "processed")
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                tight_crop(_open_image_checked(src).convert("RGBA")).save(dst, format="PNG")
+                tight_crop(_open_image_checked(src).convert("RGBA"), options.crop_padding).save(dst, format="PNG")
                 ok(f"{src.name} → processed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
                 print(f"__processing_image__:rembg:{src}", flush=True)
                 print(f"__skip_rembg__:{src.name}", flush=True)
@@ -1134,7 +1347,7 @@ def batch_remove_bg(
                     progress.advance(task)
                     continue
 
-                success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px)
+                success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px, options=options)
 
                 if (
                     (not success)
@@ -1160,7 +1373,7 @@ def batch_remove_bg(
                             continue
                     session = cpu_session  # permanent switch for all remaining images
                     providers = ["CPUExecutionProvider"]
-                    success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px)
+                    success, error_msg = remove_bg(src, dst, session, model_name=REMBG_MODEL, max_input_px=max_input_px, options=options)
                 elif (
                     (not success)
                     and bg_device_mode == "gpu"
@@ -1193,6 +1406,7 @@ def main():
     parser.add_argument("--folder-mode",      default="bulk", choices=["bulk", "clean"])
     parser.add_argument("--no-upscale",       action="store_true")
     parser.add_argument("--scale",            default="2", choices=["2", "4"])
+    parser.add_argument("--upscale-model",    default="fast", choices=UPSCALE_MODEL_CHOICES)
     parser.add_argument("--no-rembg",         action="store_true")
     parser.add_argument("--rembg-model",      default="")
     parser.add_argument("--force-cpu",        action="store_true")
@@ -1203,10 +1417,24 @@ def main():
     parser.add_argument("--wipe-input-after-run", action="store_true")
     parser.add_argument("--upscale-max-px",   type=int, default=DEFAULT_UPSCALE_MAX_PX)
     parser.add_argument("--rembg-max-px",     type=int, default=DEFAULT_REMBG_MAX_PX)
+    parser.add_argument("--crop-padding",     type=float, default=CutoutOptions.crop_padding)
+    parser.add_argument("--edge-blur",        type=float, default=CutoutOptions.edge_blur)
+    parser.add_argument("--edge-mode",        default=CutoutOptions.edge_mode, choices=EDGE_MODES)
+    parser.add_argument("--contrast-boost",   type=float, default=CutoutOptions.contrast_boost)
+    parser.add_argument("--decontaminate",    action=argparse.BooleanOptionalAction, default=CutoutOptions.decontaminate)
+    parser.add_argument("--mask-stretch",     action=argparse.BooleanOptionalAction, default=CutoutOptions.mask_stretch)
     parser.add_argument("--no-reuse-exact-duplicates", action="store_true")
     parser.add_argument("--resume",           action="store_true")
     args = parser.parse_args()
     args.bg_device_mode = "cpu" if args.force_cpu else _normalize_bg_device_mode(args.bg_device_mode)
+    cutout_options = CutoutOptions(
+        edge_mode=args.edge_mode,
+        edge_blur=args.edge_blur,
+        crop_padding=args.crop_padding,
+        contrast_boost=args.contrast_boost,
+        decontaminate=args.decontaminate,
+        mask_stretch=args.mask_stretch,
+    )
 
     header()
 
@@ -1221,8 +1449,7 @@ def main():
         folder_mode = args.folder_mode
         do_upscale  = not args.no_upscale
         do_rembg    = not args.no_rembg
-        ncnn_model  = NCNN_MODELS[args.scale]["model"]
-        ncnn_scale  = NCNN_MODELS[args.scale]["scale"]
+        ncnn_model, ncnn_scale, out_scale = resolve_upscale(args.scale, args.upscale_model)
     else:
         folder_mode = ask("Folder mode", [
             ("Bulk  — all images in flat input/ folder",         "bulk"),
@@ -1232,15 +1459,13 @@ def main():
             ("Yes — NCNN Vulkan (GPU)", True),
             ("No  — skip",             False),
         ])
-        ncnn_model = NCNN_MODELS["4"]["model"]
-        ncnn_scale = NCNN_MODELS["4"]["scale"]
+        ncnn_model, ncnn_scale, out_scale = resolve_upscale("4")
         if do_upscale:
             choice     = ask("Upscale factor", [
                 ("2x — faster,  realesr-animevideov3-x2", "2"),
                 ("4x — quality, realesrgan-x4plus",        "4"),
             ])
-            ncnn_model = NCNN_MODELS[choice]["model"]
-            ncnn_scale = NCNN_MODELS[choice]["scale"]
+            ncnn_model, ncnn_scale, out_scale = resolve_upscale(choice, args.upscale_model)
         do_rembg = ask("Background removal", [
             ("Yes — BiRefNet", True),
             ("No  — skip",     False),
@@ -1361,12 +1586,23 @@ def main():
         table.add_row("Exclude from BG", f"{len(excluded_paths)} image(s)")
     if skip_tokens:
         table.add_row("Removed", f"{len(skipped_paths)} skipped")
-    table.add_row("Upscale",   f"NCNN {ncnn_model} ×{ncnn_scale}" if do_upscale else "skip")
+    table.add_row(
+        "Upscale",
+        f"NCNN {ncnn_model} ×{out_scale}" + (f" (run at ×{ncnn_scale})" if int(ncnn_scale) != out_scale else "")
+        if do_upscale else "skip",
+    )
     if do_upscale and args.upscale_max_px > 0:
         table.add_row("Upscale skip", f"images already ≥ {args.upscale_max_px}px")
     if do_rembg and args.rembg_max_px > 0:
         table.add_row("BG max input", f"downscale longest edge above {args.rembg_max_px}px")
     table.add_row("Remove BG", REMBG_MODEL if do_rembg else "skip")
+    if do_rembg:
+        table.add_row(
+            "Cutout edges",
+            f"{cutout_options.edge_mode}, blur {cutout_options.edge_blur:g}, "
+            f"padding {cutout_options.crop_padding:.1%}, "
+            f"{'colour cleanup' if cutout_options.decontaminate else 'no colour cleanup'}",
+        )
     table.add_row("Input →",   str(input_dir))
     table.add_row("Output →",  str(rembg_dir))
     if args.resume:
@@ -1420,6 +1656,7 @@ def main():
             current, input_dir, upscale_dir, ncnn_model, ncnn_scale,
             upscale_max_px=args.upscale_max_px,
             corrupted_dir=corrupted_dir,
+            out_scale=out_scale,
         )
     else:
         skip("upscaling")
@@ -1435,6 +1672,7 @@ def main():
             corrupted_dir=corrupted_dir,
             bg_device_mode=args.bg_device_mode,
             max_input_px=args.rembg_max_px,
+            options=cutout_options,
         )
     else:
         skip("background removal")

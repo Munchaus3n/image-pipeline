@@ -92,14 +92,23 @@ function OpacitySlider({ value, onChange }) {
 }
 
 function NumInput({ value, onChange, min, max, width = 80 }) {
+  // While typing, keep the raw text so the field can be cleared and retyped.
+  // Only a real number is committed; an empty field never becomes 0.
+  const [draft, setDraft] = useState(null);
   return (
     <input
       className="settings-number-input"
       type="number"
-      value={value}
+      value={draft ?? value}
       min={min}
       max={max}
-      onChange={event => onChange(Number(event.target.value))}
+      onChange={event => {
+        const text = event.target.value;
+        setDraft(text);
+        const number = Number(text);
+        if (text.trim() !== "" && Number.isFinite(number)) onChange(number);
+      }}
+      onBlur={() => setDraft(null)}
       style={{ width }}
     />
   );
@@ -232,7 +241,7 @@ function changedSettings(current, baseline) {
 }
 
 const DEFAULT = {
-  processing: { crop_padding: 0.04, edge_blur: 1.2, rembg_model: "birefnet-general", bg_device_mode: "cpu", history_keep: 30, force_cpu: true, wipe_input_after_run: false, upscale_max_px: 0 },
+  processing: { crop_padding: 0.04, edge_blur: 1.2, edge_mode: "soft", decontaminate: true, upscale_model: "fast", rembg_model: "birefnet-general", bg_device_mode: "cpu", force_cpu: true, wipe_input_after_run: false, upscale_max_px: 0 },
   rembg_api: { provider: "local", url: "", key: "" },
   upscaler_api: { provider: "local", url: "", key: "", model: "" },
   output: { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, do_rembg: true, upscale_scale: "2" },
@@ -475,6 +484,20 @@ export default function Settings({ onThemeChange }) {
                   />
                 </Row>
               )}
+              {(settings.output.do_upscale ?? true) && (settings.output.upscale_scale || "2") === "2" && (
+                <Row
+                  label="2x upscale quality"
+                  hint={(settings.processing.upscale_model || "fast") === "quality"
+                    ? "Photo-trained model, keeps texture and small print on packaging. Much slower: about 20x on a laptop with integrated graphics."
+                    : "Fast model tuned for video frames. It can smooth fine texture."}
+                >
+                  <Select
+                    value={settings.processing.upscale_model || "fast"}
+                    onChange={value => setSetting("processing", "upscale_model", value)}
+                    options={[["fast", "Fast"], ["quality", "Quality (slow)"]]}
+                  />
+                </Row>
+              )}
               <Row label="Skip upscale if any side >=" hint="Empty means no quality skip rule.">
                 <OptionalNumInput
                   value={settings.processing.upscale_max_px}
@@ -520,23 +543,34 @@ export default function Settings({ onThemeChange }) {
                   format={value => `${(value * 100).toFixed(1)}%`}
                 />
               </Row>
-              <Row label="Edge blur radius" hint="0 = off.">
-                <Slider
-                  value={settings.processing.edge_blur}
-                  min={0}
-                  max={5}
-                  step={0.1}
-                  onChange={value => setSetting("processing", "edge_blur", value)}
-                  format={value => value.toFixed(1)}
+              <Row
+                label="Edge style"
+                hint={(settings.processing.edge_mode || "soft") === "hard"
+                  ? "Crisp edge with 1 px anti-aliasing. Best for packaging; can drop semi-transparent areas such as glass."
+                  : "Soft feathered edge that never grows past the detected outline."}
+              >
+                <Select
+                  value={settings.processing.edge_mode || "soft"}
+                  onChange={value => setSetting("processing", "edge_mode", value)}
+                  options={[["soft", "Soft"], ["hard", "Hard"]]}
                 />
               </Row>
-              <Row label="History folders to keep">
-                <NumInput
-                  value={settings.processing.history_keep}
-                  min={1}
-                  max={200}
-                  width={64}
-                  onChange={value => setSetting("processing", "history_keep", value)}
+              {(settings.processing.edge_mode || "soft") === "soft" && (
+                <Row label="Edge blur radius" hint="Feather width for the soft style. 0 = off.">
+                  <Slider
+                    value={settings.processing.edge_blur}
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    onChange={value => setSetting("processing", "edge_blur", value)}
+                    format={value => value.toFixed(1)}
+                  />
+                </Row>
+              )}
+              <Row label="Remove edge colour fringe" hint="Replaces the old background colour left on edge pixels. About 1 s per image.">
+                <Toggle
+                  value={settings.processing.decontaminate ?? true}
+                  onChange={value => setSetting("processing", "decontaminate", value)}
                 />
               </Row>
             </Section>

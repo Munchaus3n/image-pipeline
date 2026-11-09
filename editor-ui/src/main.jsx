@@ -5,6 +5,7 @@ import Input from "./Input.jsx";
 import Pipeline from "./Pipeline.jsx";
 import Templates from "./Templates.jsx";
 import Settings from "./Settings.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { getSettings, patchSettings } from "./api.js";
 import "./index.css";
 
@@ -219,7 +220,7 @@ export function Root() {
       <main className="app-main">
         {mountedScreens.has("input") && (
           <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "input" ? "flex" : "none", flexDirection: "column" }}>
-            <Input
+            <ErrorBoundary label="Input"><Input
               inputDir={inputDir}
               setInputDir={setInputDir}
               thumbs={thumbs}
@@ -231,13 +232,13 @@ export function Root() {
               onGoToProcess={() => openScreen("pipeline")}
               recentInputDirs={recentInputDirs}
               rememberInputDir={rememberInputDir}
-            />
+            /></ErrorBoundary>
           </div>
         )}
 
         {mountedScreens.has("pipeline") && (
           <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "pipeline" ? "flex" : "none", flexDirection: "column" }}>
-            <Pipeline
+            <ErrorBoundary label="Process"><Pipeline
               inputDir={inputDir}
               setInputDir={setInputDir}
               outputDir={outputDir}
@@ -257,30 +258,30 @@ export function Root() {
               onPipelineDone={(s) => {
                 setEditorSettings((prev) => ({ ...prev, ...s }));
               }}
-            />
+            /></ErrorBoundary>
           </div>
         )}
 
         {mountedScreens.has("templates") && (
           <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "templates" ? "flex" : "none", flexDirection: "column" }}>
-            <Templates onBack={() => openScreen("pipeline")} />
+            <ErrorBoundary label="Templates"><Templates onBack={() => openScreen("pipeline")} /></ErrorBoundary>
           </div>
         )}
 
         {mountedScreens.has("editor") && (
           <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "editor" ? "flex" : "none", flexDirection: "column" }}>
-            <Editor
+            <ErrorBoundary label="Editor"><Editor
               key={editorKey}
               outputDir={committedOutputDir}
               canvasSize={editorSettings.canvasSize}
               thumbnail={editorSettings.thumbnail}
-            />
+            /></ErrorBoundary>
           </div>
         )}
 
         {mountedScreens.has("settings") && (
           <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "settings" ? "flex" : "none", flexDirection: "column" }}>
-            <Settings onThemeChange={handleSettingsThemeChange} />
+            <ErrorBoundary label="Settings"><Settings onThemeChange={handleSettingsThemeChange} /></ErrorBoundary>
           </div>
         )}
       </main>
