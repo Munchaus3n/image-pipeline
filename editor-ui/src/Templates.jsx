@@ -255,6 +255,7 @@ export default function Templates({ onBack }) {
     if (previousKey && previousKey !== key) delete updated[previousKey];
     updated[key] = { zone: form.zone, hint: form.hint, ref_image: form.ref_image };
     await saveTemplates(updated);
+    window.dispatchEvent(new CustomEvent("cutout-templates-saved"));
     setTemplates(updated);
     setEditing(null);
     setStatus(previousKey && previousKey !== key ? `Saved "${key}" (renamed from "${previousKey}")` : `Saved "${key}"`);
@@ -277,6 +278,7 @@ export default function Templates({ onBack }) {
       setConfirmDelete(null);
       return;
     }
+    window.dispatchEvent(new CustomEvent("cutout-templates-saved"));
     setTemplates(updated);
     setEditing(null);
     setStatus(`Deleted "${confirmDelete}"`);

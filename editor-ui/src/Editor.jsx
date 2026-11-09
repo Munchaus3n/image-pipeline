@@ -106,6 +106,18 @@ function imageQueueLabel(path, rootPath) {
 }
 
 // Placement only (no decoded image), so the per-image history of a long batch stays light.
+// Guides from the server config, with the user's custom overrides from Settings applied.
+function resolveGuides(baseGuides, settings) {
+  const next = { ...baseGuides };
+  if (settings?.guides?.use_custom && settings?.guides?.custom) {
+    for (const [zone, vals] of Object.entries(settings.guides.custom)) {
+      if (!next[zone]) continue;
+      next[zone] = { ...next[zone], ...vals };
+    }
+  }
+  return next;
+}
+
 function placementSnapshot({ label, filePath, canvasX, canvasY, scale, origW, origH }) {
   return { label, filePath, canvasX, canvasY, scale, origW, origH };
 }
@@ -801,13 +813,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           resolvedSize = fromSettings;
         }
 
-        const nextGuides = { ...cfg.guides };
-        if (settings?.guides?.use_custom && settings?.guides?.custom) {
-          for (const [zone, vals] of Object.entries(settings.guides.custom)) {
-            if (!nextGuides[zone]) continue;
-            nextGuides[zone] = { ...nextGuides[zone], ...vals };
-          }
-        }
+        const nextGuides = resolveGuides(cfg.guides, settings);
 
         if (cancelled) return;
         CANVAS_SIZE = resolvedSize;
@@ -833,6 +839,43 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
     return () => { cancelled = true; };
   }, [canvasSizeProp]);
+
+  // Settings and Templates are separate screens that stay mounted. Pick up what they
+  // save without reopening the Editor. The canvas size is left alone on purpose: items
+  // on the canvas are positioned in its units, so it still needs a reopen to change.
+  useEffect(() => {
+    if (!bootstrapReady) return undefined;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [cfg, settings] = await Promise.all([getConfig(), getSettings().catch(() => ({}))]);
+        if (cancelled) return;
+        const nextGuides = resolveGuides(cfg.guides, settings ?? {});
+        setGuides(nextGuides);
+        setTemplates(cfg.templates);
+        configRef.current = { guides: nextGuides, templates: cfg.templates };
+
+        const opacity = settings?.appearance?.guide_opacity;
+        if (typeof opacity === "number") setGuideOpacity(Math.max(0, Math.min(1, opacity)));
+        const bg = settings?.appearance?.canvas_bg_color;
+        if (typeof bg === "string" && bg) setCanvasBgColor(bg);
+        if (typeof settings?.output?.thumbnail === "boolean") setGenerateThumbnail(settings.output.thumbnail);
+        const savedThumbnailSize = Number(settings?.output?.thumbnail_size);
+        if (Number.isFinite(savedThumbnailSize) && savedThumbnailSize > 0) {
+          setThumbnailSize(Math.round(savedThumbnailSize));
+        }
+      } catch {
+        // Keep what is on screen; the next save will try again.
+      }
+    };
+    window.addEventListener("cutout-settings-saved", refresh);
+    window.addEventListener("cutout-templates-saved", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("cutout-settings-saved", refresh);
+      window.removeEventListener("cutout-templates-saved", refresh);
+    };
+  }, [bootstrapReady]);
 
   const loadEditorSource = useCallback(async () => {
     if (!bootstrapReady || resumePromptActiveRef.current) return;
