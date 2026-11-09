@@ -8,4 +8,4 @@ Cutout Studio uses one long-term branch: `main`.
 
 Never commit generated output, local settings, cache, virtual environments, `node_modules/`, or build folders.
 
-The earlier `dev/app`, `dev/terminal`, `public/app` and `public/terminal` branches were split copies of the same code. `main` was created from `dev/app` merged with `dev/terminal`; the old branches are kept for reference until they are removed.
+The earlier `dev/app`, `dev/terminal`, `public/app` and `public/terminal` branches were split copies of the same code. `main` was created from `dev/app` merged with `dev/terminal`, and the old branches were removed in November 2026. Everything from `dev/app`, `dev/terminal`, `design/lovable-redesign-clean` and `local/release-candidate-v1` is part of `main`'s history. The July public releases are kept as the tags `archive/public-app` and `archive/public-terminal`.
