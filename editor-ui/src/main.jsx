@@ -5,6 +5,7 @@ import Input from "./Input.jsx";
 import Pipeline from "./Pipeline.jsx";
 import Templates from "./Templates.jsx";
 import Settings from "./Settings.jsx";
+import BackendBanner from "./components/BackendBanner.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { getSettings, patchSettings } from "./api.js";
 import "./index.css";
@@ -152,6 +153,8 @@ export function Root() {
   }, []);
 
   return (
+    <>
+    <BackendBanner />
     <div
       className="app-shell"
       data-theme={theme}
@@ -286,6 +289,7 @@ export function Root() {
         )}
       </main>
     </div>
+    </>
   );
 }
 

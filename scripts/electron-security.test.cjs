@@ -62,8 +62,8 @@ test("auth header is added to API requests and keeps the others", () => {
       },
     },
   };
-  installApiAuthHeader(fakeSession, "secret");
-  assert.deepEqual(registered.filter.urls, ["http://127.0.0.1:7421/*"]);
+  installApiAuthHeader(fakeSession, "secret", "http://127.0.0.1:53124");
+  assert.deepEqual(registered.filter.urls, ["http://127.0.0.1:53124/*"]);
 
   let result = null;
   registered.listener({ requestHeaders: { Accept: "image/*" } }, (value) => {

@@ -81,11 +81,55 @@ def _warmup_worker():
     except Exception:
         pass  # Warm-up is best-effort; never crash the server
 
+# ── Parent watchdog ───────────────────────────────────────────────────────────
+# The desktop shell passes its own PID. If it disappears without stopping us
+# (crash, Task Manager, power loss) this backend would otherwise live on, hold
+# files open and block the next launch, so it shuts itself down.
+
+def _exit_with_parent() -> None:
+    proc = _pipeline_proc
+    if proc is not None and proc.returncode is None:
+        _terminate_process_tree_by_pid(proc.pid)
+    os._exit(0)
+
+
+def _watch_parent(pid: int) -> None:
+    if os.name == "nt":
+        # Wait on a process handle: unlike os.kill(pid, 0), which TERMINATES the
+        # process on Windows, this is a pure query, and it is immune to PID reuse.
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        SYNCHRONIZE, ERROR_INVALID_PARAMETER, INFINITE = 0x00100000, 87, 0xFFFFFFFF
+        handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if not handle:
+            if kernel32.GetLastError() == ERROR_INVALID_PARAMETER:  # no such process: already gone
+                _exit_with_parent()
+            return  # cannot watch it (access denied); stay up rather than guess
+        kernel32.WaitForSingleObject(handle, INFINITE)
+        _exit_with_parent()
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            _exit_with_parent()
+        except PermissionError:
+            pass
+        time.sleep(2)
+
+
 @asynccontextmanager
 async def lifespan(app_instance: "FastAPI"):
     await asyncio.to_thread(_cleanup_app_cache)
     t = threading.Thread(target=_warmup_worker, daemon=True, name="model-warmup")
     t.start()
+    parent_pid = os.environ.get("CUTOUT_STUDIO_PARENT_PID", "").strip()
+    if parent_pid.isdigit() and int(parent_pid) > 0:
+        threading.Thread(target=_watch_parent, args=(int(parent_pid),), daemon=True, name="parent-watch").start()
     yield
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -1465,4 +1509,10 @@ async def stop_pipeline():
 if __name__ == "__main__":
     # `--pipeline` is dispatched at the top of this file.
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=7421, log_level="warning")
+    # The desktop shell picks a free port per launch; the terminal workflow keeps 7421
+    # because the Vite proxy points there.
+    try:
+        _port = int(os.environ.get("CUTOUT_STUDIO_PORT", "7421"))
+    except ValueError:
+        _port = 7421
+    uvicorn.run(app, host="127.0.0.1", port=_port, log_level="warning")

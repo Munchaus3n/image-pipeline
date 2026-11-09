@@ -1,6 +1,5 @@
 const crypto = require("node:crypto");
 
-const API_ORIGIN = "http://127.0.0.1:7421";
 const API_TOKEN_HEADER = "X-Cutout-Token";
 
 // Fresh secret per launch. It goes to the backend we spawn (environment) and to
@@ -36,14 +35,13 @@ function isAppUrl(value, appUrl) {
 
 // Adds the token to every request the app's own pages make to the local API,
 // <img> loads and streaming included, which could not set a header themselves.
-function installApiAuthHeader(electronSession, token) {
-  electronSession.webRequest.onBeforeSendHeaders({ urls: [`${API_ORIGIN}/*`] }, (details, callback) => {
+function installApiAuthHeader(electronSession, token, apiOrigin) {
+  electronSession.webRequest.onBeforeSendHeaders({ urls: [`${apiOrigin}/*`] }, (details, callback) => {
     callback({ requestHeaders: { ...details.requestHeaders, [API_TOKEN_HEADER]: token } });
   });
 }
 
 module.exports = {
-  API_ORIGIN,
   API_TOKEN_HEADER,
   createApiToken,
   installApiAuthHeader,

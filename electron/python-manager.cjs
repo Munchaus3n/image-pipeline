@@ -1,25 +1,42 @@
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
+const net = require("node:net");
 const path = require("node:path");
+const { API_TOKEN_HEADER } = require("./security.cjs");
 
-const { API_ORIGIN, API_TOKEN_HEADER } = require("./security.cjs");
-
-const API_CONFIG_URL = `${API_ORIGIN}/config`;
-const API_STOP_URL = `${API_ORIGIN}/pipeline/stop`;
+// The terminal/browser workflow and CUTOUT_STUDIO_REUSE_API use this port; the
+// desktop app normally picks a free one per launch (see findFreePort).
+const LEGACY_PORT = 7421;
+const MAX_RESTARTS = 3;
+const RESTART_WINDOW_MS = 120000;
 
 let pythonProcess = null;
 let usingExternalApi = false;
-let ownedPackagedBackend = false;
 let backendLogFile = "";
 let apiToken = "";
+let apiPort = LEGACY_PORT;
 let backendExit = null;
+let backendReady = false;
+let stopping = false;
+let recovering = false;
+let restartTimes = [];
+let launch = null;
+let statusListener = null;
 
-const FOREIGN_BACKEND_MESSAGE = [
-  "Another program is already answering on 127.0.0.1:7421, so Cutout Studio cannot start its own backend there.",
-  "This is usually an older or still-running copy of Cutout Studio. Close it (check Task Manager for",
-  "\"Cutout Studio\" and \"image-pipeline-api\") and start the app again.",
-].join(" ");
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function apiOrigin() {
+  return `http://127.0.0.1:${apiPort}`;
+}
+
+function foreignBackendMessage() {
+  return [
+    `Another program is already answering on 127.0.0.1:${apiPort}, so Cutout Studio cannot start its own backend there.`,
+    "This is usually an older or still-running copy of Cutout Studio. Close it (check Task Manager for",
+    "\"Cutout Studio\" and \"image-pipeline-api\") and start the app again.",
+  ].join(" ");
+}
 
 function appRoot() {
   return path.resolve(__dirname, "..");
@@ -60,6 +77,34 @@ function writeBackendLog(message) {
   }
 }
 
+// Lets the main process tell the window what the backend is doing.
+function setBackendListener(listener) {
+  statusListener = listener;
+}
+
+function emitStatus(status) {
+  writeBackendLog(`status: ${JSON.stringify(status)}`);
+  try {
+    if (statusListener) statusListener(status);
+  } catch {
+    // A broken listener must not take the supervisor down with it.
+  }
+}
+
+// Ask the OS for a free loopback port. There is a tiny window before the backend
+// binds it, which the foreign-backend check below turns into a clear error.
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+}
+
 function backendEnvironment({ packaged, userDataPath, resourceDir }) {
   const env = {
     ...process.env,
@@ -68,6 +113,9 @@ function backendEnvironment({ packaged, userDataPath, resourceDir }) {
     CUTOUT_STUDIO_USER_DATA: userDataPath,
     CUTOUT_STUDIO_PACKAGED: packaged ? "1" : "0",
     CUTOUT_STUDIO_API_TOKEN: apiToken,
+    CUTOUT_STUDIO_PORT: String(apiPort),
+    // The backend shuts itself down if this process disappears without stopping it.
+    CUTOUT_STUDIO_PARENT_PID: String(process.pid),
   };
 
   if (packaged) {
@@ -84,6 +132,7 @@ function backendEnvironment({ packaged, userDataPath, resourceDir }) {
   return env;
 }
 
+// Kills the backend and everything it started (the pipeline subprocess), not just the parent.
 function killProcessTree(pid) {
   if (!pid) return;
   if (process.platform === "win32") {
@@ -128,7 +177,8 @@ function request(method, url, timeoutMs = 1500) {
 // One look at /config: the status plus the parsed body when it is JSON.
 function probeApi(timeoutMs = 1500) {
   return new Promise((resolve, reject) => {
-    const req = http.get(API_CONFIG_URL, { headers: tokenHeaders(), timeout: timeoutMs }, (res) => {
+    const url = `${apiOrigin()}/config`;
+    const req = http.get(url, { headers: tokenHeaders(), timeout: timeoutMs }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -142,7 +192,7 @@ function probeApi(timeoutMs = 1500) {
       });
     });
     req.on("timeout", () => {
-      req.destroy(new Error(`GET ${API_CONFIG_URL} -> timeout`));
+      req.destroy(new Error(`GET ${url} -> timeout`));
     });
     req.on("error", reject);
   });
@@ -162,18 +212,18 @@ async function waitForApi({ timeoutMs = 45000, intervalMs = 400 } = {}) {
 
   while (Date.now() - startedAt < timeoutMs) {
     if (backendExit) {
-      throw new Error(`The backend exited before it was ready (${backendExit}). See backend.log for details.`);
+      throw new Error(`The backend stopped before it was ready (${backendExit}). See backend.log for details.`);
     }
     try {
       const probe = await probeApi(Math.min(intervalMs, 1000));
       if (probe.status === 200 && probe.json && probe.json.auth_enforced === true) return true;
-      if (isForeignBackend(probe)) throw new Error(FOREIGN_BACKEND_MESSAGE);
-      lastError = new Error(`GET ${API_CONFIG_URL} -> ${probe.status}`);
+      if (isForeignBackend(probe)) throw new Error(foreignBackendMessage());
+      lastError = new Error(`GET ${apiOrigin()}/config -> ${probe.status}`);
     } catch (error) {
-      if (error.message === FOREIGN_BACKEND_MESSAGE) throw error;
+      if (error.message === foreignBackendMessage()) throw error;
       lastError = error;
     }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    await sleep(intervalMs);
   }
 
   throw lastError || new Error("Timed out waiting for Python API");
@@ -190,13 +240,95 @@ function pipeProcessOutput(child) {
   });
 }
 
-async function startPythonApi({ packaged = false, userDataPath = "", resourceDir = appRoot(), token = "" } = {}) {
+function spawnBackend() {
+  const { executable, args, cwd, env } = launch;
+  backendExit = null;
+
+  const child = spawn(executable, args, {
+    cwd,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  pythonProcess = child;
+  pipeProcessOutput(child);
+
+  // Without this, a missing or blocked executable (ENOENT/EPERM) crashes the main process.
+  child.once("error", (error) => {
+    console.log(`[api] Could not start the backend: ${error.message}`);
+    writeBackendLog(`Could not start backend ${executable}: ${error.message}`);
+    backendExit = `could not start ${path.basename(executable)}: ${error.message}`;
+    if (pythonProcess === child) pythonProcess = null;
+  });
+
+  child.once("exit", (code, signal) => {
+    console.log(`[api] Python API exited with code=${code} signal=${signal}`);
+    writeBackendLog(`Backend exited with code=${code} signal=${signal}`);
+    backendExit = `code=${code} signal=${signal}`;
+    if (pythonProcess === child) pythonProcess = null;
+    if (!stopping && backendReady && !recovering && !usingExternalApi) {
+      recoverBackend().catch(() => {});
+    }
+  });
+}
+
+// The backend died while the app is open: start it again on the same port and token,
+// so the window keeps working, and tell the window what happened.
+async function recoverBackend() {
+  if (recovering) return;
+  recovering = true;
+  try {
+    for (;;) {
+      const now = Date.now();
+      restartTimes = restartTimes.filter((time) => now - time < RESTART_WINDOW_MS);
+      if (stopping) return;
+      if (restartTimes.length >= MAX_RESTARTS) {
+        emitStatus({
+          state: "failed",
+          message: `The backend stopped ${MAX_RESTARTS} times in a row (${backendExit || "unknown reason"}).`,
+        });
+        return;
+      }
+      restartTimes.push(now);
+      emitStatus({ state: "restarting", attempt: restartTimes.length, max: MAX_RESTARTS });
+      await sleep(500 * restartTimes.length);
+      if (stopping) return;
+      spawnBackend();
+      try {
+        await waitForApi({ timeoutMs: launch.packaged ? 120000 : 45000 });
+        emitStatus({ state: "running" });
+        return;
+      } catch (error) {
+        writeBackendLog(`Restart attempt failed: ${error.message}`);
+        if (pythonProcess) {
+          const stuck = pythonProcess;
+          pythonProcess = null;
+          killProcessTree(stuck.pid);
+        }
+      }
+    }
+  } finally {
+    recovering = false;
+  }
+}
+
+async function startPythonApi({
+  packaged = false,
+  userDataPath = "",
+  resourceDir = appRoot(),
+  token = "",
+  port = LEGACY_PORT,
+} = {}) {
   if (pythonProcess || usingExternalApi) {
-    return { apiOrigin: API_ORIGIN, external: usingExternalApi };
+    return { apiOrigin: apiOrigin(), external: usingExternalApi };
   }
 
   apiToken = token;
+  apiPort = port;
   backendExit = null;
+  backendReady = false;
+  stopping = false;
+  restartTimes = [];
 
   // Never attach silently to whatever already holds the port: it may be an older
   // build or another instance, and the UI would then run against the wrong code.
@@ -205,10 +337,10 @@ async function startPythonApi({ packaged = false, userDataPath = "", resourceDir
     const reuseWanted = !packaged && process.env.CUTOUT_STUDIO_REUSE_API === "1";
     if (reuseWanted && existing.status === 200) {
       usingExternalApi = true;
-      console.log("[api] Reusing the API you started on 127.0.0.1:7421 (CUTOUT_STUDIO_REUSE_API=1)");
-      return { apiOrigin: API_ORIGIN, external: true };
+      console.log(`[api] Reusing the API you started on 127.0.0.1:${apiPort} (CUTOUT_STUDIO_REUSE_API=1)`);
+      return { apiOrigin: apiOrigin(), external: true };
     }
-    throw new Error(FOREIGN_BACKEND_MESSAGE);
+    throw new Error(foreignBackendMessage());
   }
 
   const rootDir = appRoot();
@@ -216,7 +348,7 @@ async function startPythonApi({ packaged = false, userDataPath = "", resourceDir
   const args = packaged ? [] : ["-u", path.join(rootDir, "api.py")];
   const cwd = packaged ? resourceDir : rootDir;
   const env = backendEnvironment({ packaged, userDataPath, resourceDir });
-  ownedPackagedBackend = packaged;
+  launch = { executable, args, cwd, env, packaged };
 
   if (packaged) {
     if (!fs.existsSync(executable)) {
@@ -231,87 +363,47 @@ async function startPythonApi({ packaged = false, userDataPath = "", resourceDir
     throw new Error(`api.py was not found at ${args[1]}`);
   }
 
-  pythonProcess = spawn(executable, args, {
-    cwd,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
-
-  pipeProcessOutput(pythonProcess);
-
-  pythonProcess.once("exit", (code, signal) => {
-    console.log(`[api] Python API exited with code=${code} signal=${signal}`);
-    writeBackendLog(`Backend exited with code=${code} signal=${signal}`);
-    backendExit = `code=${code} signal=${signal}`;
-    pythonProcess = null;
-  });
-
+  spawnBackend();
   await waitForApi({ timeoutMs: packaged ? 120000 : 45000 });
-  writeBackendLog("Backend API is ready on 127.0.0.1:7421");
-  return { apiOrigin: API_ORIGIN, external: false, backend: executable };
+  backendReady = true;
+  writeBackendLog(`Backend API is ready on 127.0.0.1:${apiPort}`);
+  return { apiOrigin: apiOrigin(), external: false, backend: executable };
 }
 
 async function stopPythonApi() {
-  if (!pythonProcess || pythonProcess.killed) return;
+  stopping = true;
+  const child = pythonProcess;
+  if (!child) return;
 
   try {
-    await request("POST", API_STOP_URL, 1500);
+    await request("POST", `${apiOrigin()}/pipeline/stop`, 1500);
   } catch {
     // The API may already be down or the pipeline may not be running.
   }
 
-  const child = pythonProcess;
   pythonProcess = null;
-
   await new Promise((resolve) => {
-    const done = () => resolve();
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
     const timer = setTimeout(() => {
-      if (ownedPackagedBackend) {
-        killProcessTree(child.pid);
-      } else {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          // Process is already gone.
-        }
-      }
-      setTimeout(() => {
-        if (child.exitCode === null && !child.killed) {
-          if (ownedPackagedBackend) {
-            killProcessTree(child.pid);
-          } else {
-            try {
-              child.kill("SIGKILL");
-            } catch {
-              // Process is already gone.
-            }
-          }
-        }
-        resolve();
-      }, 1200);
-    }, 300);
-
+      killProcessTree(child.pid);
+      resolve();
+    }, 3000);
     child.once("exit", () => {
       clearTimeout(timer);
-      done();
+      resolve();
     });
-
-    try {
-      if (ownedPackagedBackend) {
-        killProcessTree(child.pid);
-      } else {
-        child.kill("SIGTERM");
-      }
-    } catch {
-      clearTimeout(timer);
-      done();
-    }
+    killProcessTree(child.pid);
   });
 }
 
 module.exports = {
-  API_ORIGIN,
+  LEGACY_PORT,
+  apiOrigin,
+  findFreePort,
+  setBackendListener,
   startPythonApi,
   stopPythonApi,
 };

@@ -8,13 +8,15 @@ Severity: **Bug** = broken behavior today, **Security** = exposure, **Weight** =
 
 | # | What changed |
 |---|---|
-| 3 (partly) | The app no longer attaches silently to a backend that is already on the port: `/config` now reports `auth_enforced`, and anything else answering on 7421 stops startup with a clear message. Dev reuse of your own `python api.py` is opt-in via `CUTOUT_STUDIO_REUSE_API=1`. A random port is still open. |
+| 3 | Each launch picks a free port (passed to the backend as `CUTOUT_STUDIO_PORT` and to the window through the preload), so it cannot collide with an older copy, another checkout or a leftover process. The terminal workflow keeps 7421. `/config` reports `auth_enforced`, and anything else answering on the chosen port stops startup with a clear message. Dev reuse of your own `python api.py` (on 7421) is opt-in via `CUTOUT_STUDIO_REUSE_API=1`. The backend also watches the shell's process (`CUTOUT_STUDIO_PARENT_PID`) and exits when it disappears, so a crashed or killed app no longer leaves an orphan behind. |
 | 4 | `app.requestSingleInstanceLock()`; a second launch focuses the existing window. |
-| 2 (partly) | Startup fails at once, with the exit code, if the backend dies before it is ready. Stderr is still only in `backend.log`. |
+| 1, 2 (partly) | A `spawn` error (missing or blocked executable) is caught and reported instead of crashing the main process, and startup fails at once, with the reason, if the backend dies before it is ready. Stderr is still only in `backend.log`. |
+| 6 | Shutdown always uses `taskkill /T /F` on the backend's process tree (the old `child.killed` fallback never ran), which also stops a running pipeline subprocess. |
+| new | If the backend dies while the app is open it is restarted on the same port and token (up to 3 times in 2 minutes) and the window shows a banner (`BackendBanner`). A job that was running is interrupted and has to be started again. |
 | 7, 8 | Only `https:` links open externally; the window can only show its own `index.html` (or the Vite origin), so a dropped file no longer replaces the app. |
 | 9 | Per-launch token (`X-Cutout-Token`), generated in `main.cjs`, passed to the backend by environment and added to the app's API requests in `security.cjs`, so the renderer never holds it. `Origin: null` is accepted only while a token is required, and a Host-header check blocks DNS rebinding. The terminal/browser workflow is unchanged apart from those two. Tests: `scripts/test_api_auth.py` and `npm run test:electron`. |
 
-Still open: #1, #5, #6, #10 (CSP) and #11-#19, plus a random port.
+Still open: #5, #10 (CSP) and #11-#19.
 
 ## Backend process lifecycle (`electron/python-manager.cjs`, `electron/main.cjs`)
 

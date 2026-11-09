@@ -2,7 +2,14 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("e
 const http = require("node:http");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { startPythonApi, stopPythonApi } = require("./python-manager.cjs");
+const {
+  LEGACY_PORT,
+  apiOrigin,
+  findFreePort,
+  setBackendListener,
+  startPythonApi,
+  stopPythonApi,
+} = require("./python-manager.cjs");
 const { createApiToken, installApiAuthHeader, isAppUrl, isSafeExternalUrl } = require("./security.cjs");
 
 const isDev = !app.isPackaged;
@@ -11,6 +18,12 @@ const APP_NAME = "Cutout Studio";
 let mainWindow = null;
 // Per-launch secret shared with the backend this app starts (see security.cjs).
 const apiToken = createApiToken();
+// CUTOUT_STUDIO_REUSE_API=1 (dev only) attaches to a backend you started yourself on the
+// legacy port; otherwise every launch gets its own free port, so it can never collide
+// with an old copy, another checkout, or a leftover process.
+const reuseApi = isDev && process.env.CUTOUT_STUDIO_REUSE_API === "1";
+let apiPort = 0;
+let authHeaderInstalled = false;
 
 function localCutoutDataPath() {
   const localAppData = process.env.LOCALAPPDATA
@@ -67,6 +80,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
+      additionalArguments: [`--cutout-api-origin=${apiOrigin()}`],
     },
   });
 
@@ -173,12 +187,18 @@ async function loadStartupError(error) {
 
 async function openMainWindow() {
   writeMainLog(`openMainWindow start resourceDir=${appRoot()}`);
+  if (!apiPort) apiPort = reuseApi ? LEGACY_PORT : await findFreePort();
   await startPythonApi({
     packaged: app.isPackaged,
     userDataPath: app.getPath("userData"),
     resourceDir: appRoot(),
     token: apiToken,
+    port: apiPort,
   });
+  if (!authHeaderInstalled) {
+    installApiAuthHeader(session.defaultSession, apiToken, apiOrigin());
+    authHeaderInstalled = true;
+  }
   writeMainLog("backend ready");
   await waitForRenderer();
   writeMainLog("renderer ready");
@@ -231,7 +251,9 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     writeMainLog("app ready");
-    installApiAuthHeader(session.defaultSession, apiToken);
+    setBackendListener((status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("backend:status", status);
+    });
     try {
       await openMainWindow();
     } catch (error) {
