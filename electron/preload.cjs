@@ -7,6 +7,7 @@ const apiBaseUrl = originArg ? originArg.slice("--cutout-api-origin=".length) : 
 contextBridge.exposeInMainWorld("electronAPI", {
   selectFolder: (initial = "") => ipcRenderer.invoke("dialog:select-folder", { initial }),
   selectFile: (initial = "", filter = "image") => ipcRenderer.invoke("dialog:select-file", { initial, filter }),
+  saveFile: (defaultName, kind, data) => ipcRenderer.invoke("dialog:save-file", { defaultName, kind, data }),
   pathForFile: (file) => webUtils.getPathForFile(file),
   apiBaseUrl,
   // Backend lifecycle: { state: "restarting" | "running" | "failed", ... }. Returns an unsubscribe function.

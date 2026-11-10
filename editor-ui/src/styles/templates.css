@@ -330,6 +330,13 @@
   text-transform: uppercase;
 }
 
+.template-field-help {
+  margin-top: 4px;
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .template-zone-row,
 .template-inline-actions,
 .template-upload-actions,

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
 const http = require("node:http");
+const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -258,6 +259,32 @@ ipcMain.handle("dialog:select-file", async (event, { initial = "", filter = "ima
     filters,
   });
   return { path: result.canceled ? "" : result.filePaths[0] || "" };
+});
+
+// Save dialog + write in one step, so the renderer learns whether the user
+// cancelled. Bytes are only ever written to the path the user picked here.
+const SAVE_FILE_MAX_BYTES = 512 * 1024 * 1024;
+const SAVE_FILE_FILTERS = {
+  png: [{ name: "PNG image", extensions: ["png"] }],
+  zip: [{ name: "ZIP archive", extensions: ["zip"] }],
+};
+
+ipcMain.handle("dialog:save-file", async (event, { defaultName = "", kind = "png", data } = {}) => {
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  const filters = SAVE_FILE_FILTERS[kind];
+  if (!filters) throw new Error("unsupported file type");
+  if (!(data instanceof Uint8Array) || data.byteLength === 0 || data.byteLength > SAVE_FILE_MAX_BYTES) {
+    throw new Error("invalid file data");
+  }
+  const safeName = path.basename(String(defaultName || `image.${kind}`));
+  const result = await dialog.showSaveDialog(owner || mainWindow, {
+    title: "Save image",
+    defaultPath: path.join(app.getPath("downloads"), safeName),
+    filters,
+  });
+  if (result.canceled || !result.filePath) return { saved: false, path: "" };
+  await fs.promises.writeFile(result.filePath, data);
+  return { saved: true, path: result.filePath };
 });
 
 ipcMain.on("app:is-packaged", (event) => {
