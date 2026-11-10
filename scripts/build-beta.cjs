@@ -20,7 +20,7 @@ const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
 const ELECTRON_DIR = path.join(ROOT, "electron");
-const CJS = ["main.cjs", "eval-license.cjs", "build-channel.cjs", "python-manager.cjs", "preload.cjs"];
+const CJS = ["main.cjs", "eval-license.cjs", "build-channel.cjs", "python-manager.cjs", "preload.cjs", "security.cjs"];
 
 const grantId = process.argv[2] || "eval-2026-11";
 const appName = process.argv[3] || "Cutout Studio Beta";

@@ -119,6 +119,9 @@ Fixed in `V2` (so also in `beta`):
 - Backend restart cap never tripped when restarts hung.
 - Settings/session writes failed with 500 when Windows briefly locked the file.
 - "Default output" labels said `./output` in the desktop app.
+- First run: a batch started while the warm-up was still downloading the
+  ~970 MB model started a second, parallel download of the same file. Runs
+  now wait for it (found in the packaged beta smoke test).
 
 Fixed in `beta`:
 - Rebased onto `V2` (port/token/lock/CSP from v0.2.0; see Branches).
