@@ -65,13 +65,17 @@ _thumb_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="thumb")
 # Ensures model weights are downloaded before the first pipeline run. pipeline.py runs in a subprocess, so this cannot keep a live
 # model session loaded for the actual processing run.
 
+# Set once the warm-up has finished (or given up). A first run started while it
+# is still downloading would otherwise download the same ~1 GB model a second
+# time in the pipeline process, and the two writers race to move it into place.
+_warmup_done = threading.Event()
+_warmup_model = ""
+
+
 def _warmup_worker():
     try:
         from rembg.sessions import sessions_class
-        # Read model name from settings if already saved, else use default
-        # Merged settings clamp the model to the ones this build offers, so a
-        # stale or hand-edited name can never fetch other weights.
-        model = _merged_settings(_load_saved_settings_file())["processing"]["rembg_model"]
+        model = _warmup_model
         # Only fetch the weights; building an ORT session here would cost
         # seconds of CPU and 1-2 GB RAM for a session that is thrown away.
         # The real pipeline run will pick the right provider (DML/CUDA/CPU).
@@ -81,6 +85,22 @@ def _warmup_worker():
                 break
     except Exception:
         pass  # Warm-up is best-effort; never crash the server
+    finally:
+        _warmup_done.set()
+
+
+async def _wait_for_warmup_download(model: str):
+    """Yield status lines while the warm-up is still fetching `model`."""
+    if _warmup_done.is_set() or model != _warmup_model:
+        return
+    yield {"data": f"Waiting for the {model} model download to finish (first run only)..."}
+    waited = 0
+    while not await asyncio.to_thread(_warmup_done.wait, 15):
+        waited += 15
+        if waited >= 1800:
+            yield {"data": "Model download is taking very long; starting anyway."}
+            return
+        yield {"data": f"Still downloading the {model} model ({waited // 60} min {waited % 60} s)..."}
 
 # ── Parent watchdog ───────────────────────────────────────────────────────────
 # The desktop shell passes its own PID. If it disappears without stopping us
@@ -125,7 +145,17 @@ def _watch_parent(pid: int) -> None:
 
 @asynccontextmanager
 async def lifespan(app_instance: "FastAPI"):
+    global _warmup_model
     await asyncio.to_thread(_cleanup_app_cache)
+    # Decided before the server takes requests, so a run can tell at once
+    # whether it must wait for this download. Merged settings clamp the model to
+    # the ones this build offers, so a stale name can never fetch other weights.
+    try:
+        _warmup_model = _merged_settings(_load_saved_settings_file())["processing"]["rembg_model"]
+    except Exception:
+        _warmup_model = ""
+    if not _warmup_model:
+        _warmup_done.set()
     t = threading.Thread(target=_warmup_worker, daemon=True, name="model-warmup")
     t.start()
     parent_pid = os.environ.get("CUTOUT_STUDIO_PARENT_PID", "").strip()
@@ -1520,6 +1550,9 @@ async def run_pipeline(cfg: PipelineConfig):
                 pass
 
         try:
+            if cfg.do_rembg and "--rembg-model" in cmd:
+                async for status in _wait_for_warmup_download(cmd[cmd.index("--rembg-model") + 1]):
+                    yield status
             try:
                 session_input = Path(session_input_dir)
                 if session_input.is_dir():
