@@ -82,6 +82,15 @@ def resolve_upscale(scale: str, upscale_model: str = "fast") -> tuple[str, str, 
 
 
 REMBG_MODEL    = "birefnet-general"
+# Background-removal models this build ships. The app offers only these; any
+# other name (including from a stale saved setting) is clamped to the default.
+ALLOWED_REMBG_MODELS = (
+    "birefnet-general",
+    "birefnet-general-lite",
+    "birefnet-massive",
+    "birefnet-dis",
+    "birefnet-hrsod",
+)
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."
 _AVIF_DECODE_SUPPORTED = Image.registered_extensions().get(".avif") is not None
@@ -884,11 +893,7 @@ def _is_oom_error(msg: str) -> bool:
 
 
 def _fill_mask_holes(mask: Image.Image, threshold: int = 30, max_hole_ratio: float = 0.003) -> Image.Image:
-    """Fill only small enclosed holes in a BiRefNet alpha mask.
-
-    NOT applied to Bria — Bria masks are already clean and applying hole-fill
-    would corrupt transparent product areas that Bria correctly preserves.
-    """
+    """Fill only small enclosed holes in a BiRefNet alpha mask."""
     mask_np = np.array(mask)
     binary  = mask_np > threshold
     filled  = binary_fill_holes(binary)
@@ -929,7 +934,7 @@ def _resize_float(arr: np.ndarray, size: tuple[int, int], resample=Image.BILINEA
 def predict_mask(img_rgb: Image.Image, session, model_name: str = "", stretch: bool = True) -> np.ndarray:
     """Run the segmentation model and return a float32 [0, 1] mask at img_rgb's size.
 
-    Every BiRefNet/BRIA ONNX model rembg ships takes an ImageNet-normalised RGB
+    Every BiRefNet ONNX model rembg ships takes an ImageNet-normalised RGB
     tensor and returns one mask channel, so this does the model call directly
     instead of going through rembg.remove(), which quantises the mask to 8 bit
     and always stretches it to the full 0-255 range. The stretch is kept as an
@@ -948,10 +953,8 @@ def predict_mask(img_rgb: Image.Image, session, model_name: str = "", stretch: b
     if out.ndim != 2:
         raise RuntimeError(f"Unexpected model output shape {out.shape}")
 
-    is_bria = model_name.lower().startswith("bria")
-    if not is_bria:
-        out = expit(out)
-    if stretch or is_bria:
+    out = expit(out)
+    if stretch:
         lo, hi = float(out.min()), float(out.max())
         out = (out - lo) / (hi - lo) if hi - lo > 1e-6 else np.zeros_like(out)
 
@@ -1078,9 +1081,8 @@ def cutout_image(
     alpha = guided_upsample(mask_lr, guide_lr, guide_hr)
     mask = Image.fromarray((alpha * 255.0 + 0.5).astype(np.uint8), mode="L")
 
-    # Hole-fill only for BiRefNet — Bria masks keep intentional transparent areas.
-    if not model_name.lower().startswith("bria"):
-        mask = _fill_mask_holes(mask)
+    # All shipping models are BiRefNet, whose masks benefit from hole-fill.
+    mask = _fill_mask_holes(mask)
 
     mask = refine_alpha(mask, opts.edge_mode, opts.edge_blur)
     result = img.copy()
@@ -1517,8 +1519,13 @@ def main():
         sys.exit(0)
 
     global REMBG_MODEL
-    if args.rembg_model.strip():
-        REMBG_MODEL = args.rembg_model.strip()
+    requested_model = args.rembg_model.strip()
+    if requested_model:
+        if requested_model in ALLOWED_REMBG_MODELS:
+            REMBG_MODEL = requested_model
+        else:
+            REMBG_MODEL = "birefnet-general"
+            warn(f"Model '{requested_model}' is not available in this build; using {REMBG_MODEL}.")
     info(f"BiRefNet model: {REMBG_MODEL}")
 
     # ── Resolve paths ────────────────────────────────────────────────────────

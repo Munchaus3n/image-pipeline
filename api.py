@@ -1275,7 +1275,6 @@ _REMBG_MODELS = [
     "birefnet-massive",
     "birefnet-dis",
     "birefnet-hrsod",
-    "bria-rmbg",
 ]
 
 def _deep_merge(base: Any, incoming: Any) -> Any:

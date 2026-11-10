@@ -1,0 +1,24 @@
+{
+  "appId": "com.cutoutstudio.app.beta",
+  "productName": "Cutout Studio Beta",
+  "asar": true,
+  "directories": { "output": "beta" },
+  "files": [
+    "electron/**",
+    "editor-ui/dist/**"
+  ],
+  "extraResources": [
+    { "from": "backend-dist/image-pipeline-api", "to": "backend/image-pipeline-api" },
+    { "from": "realesrgan-ncnn-vulkan", "to": "realesrgan-ncnn-vulkan" },
+    { "from": "templates", "to": "templates" },
+    { "from": "templates_custom.json", "to": "templates_custom.json" }
+  ],
+  "electronFuses": {
+    "runAsNode": false,
+    "enableNodeOptionsEnvironmentVariable": false,
+    "enableNodeCliInspectArguments": false,
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "onlyLoadAppFromAsar": true
+  },
+  "win": { "target": ["nsis"] }
+}

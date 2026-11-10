@@ -11,11 +11,17 @@ const {
   stopPythonApi,
 } = require("./python-manager.cjs");
 const { createApiToken, installApiAuthHeader, isAppUrl, isSafeExternalUrl } = require("./security.cjs");
+const buildChannel = require("./build-channel.cjs");
+const { checkEvaluation } = require("./eval-license.cjs");
 
 const isDev = !app.isPackaged;
 const DEV_RENDERER_URL = "http://127.0.0.1:5173";
-const APP_NAME = "Cutout Studio";
+// Runtime identity comes from the build channel so a beta build keeps its own
+// userData folder and registry namespace, fully separate from the full app.
+const APP_NAME = buildChannel.appName || "Cutout Studio";
 let mainWindow = null;
+// Set when an evaluation build's period has ended; the backend is never started.
+let evaluationExpired = false;
 // Per-launch secret shared with the backend this app starts (see security.cjs).
 const apiToken = createApiToken();
 // CUTOUT_STUDIO_REUSE_API=1 (dev only) attaches to a backend you started yourself on the
@@ -64,6 +70,23 @@ configurePackagedUserDataPath();
 
 function appRoot() {
   return path.resolve(__dirname, "..");
+}
+
+// Where the native backend finds its data (Real-ESRGAN, templates). With
+// asar:false these sit under resources/app; with asar:true the app code is in
+// app.asar and the data is shipped as extraResources under resources/. A native
+// process cannot read inside an asar, so probe for the real on-disk location.
+function backendResourceDir() {
+  if (isDev) return appRoot();
+  const fsMod = require("node:fs");
+  for (const dir of [appRoot(), process.resourcesPath]) {
+    try {
+      if (fsMod.existsSync(path.join(dir, "realesrgan-ncnn-vulkan"))) return dir;
+    } catch {
+      // ignore and try the next candidate
+    }
+  }
+  return appRoot();
 }
 
 function createWindow() {
@@ -163,6 +186,35 @@ function startingHtml() {
 </html>`)}`;
 }
 
+// Minimal, generic screen shown when an evaluation build's period has ended.
+// No technical detail: the app simply reports it could not start.
+function stoppedHtml() {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${APP_NAME}</title>
+    <style>
+      body { margin: 0; height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #0b0f17; color: #e5edf7; }
+      main { text-align: center; }
+      h1 { margin: 0; font-size: 22px; font-weight: 500; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${APP_NAME} could not start.</h1>
+    </main>
+  </body>
+</html>`)}`;
+}
+
+async function loadEvaluationStopped() {
+  writeMainLog("evaluation period ended; not starting backend");
+  const win = !mainWindow || mainWindow.isDestroyed() ? createWindow() : mainWindow;
+  await win.loadURL(stoppedHtml());
+  if (!win.isDestroyed() && !win.isVisible()) win.show();
+}
+
 function requestUrl(url, timeoutMs = 1500) {
   return new Promise((resolve, reject) => {
     const req = http.get(url, { timeout: timeoutMs }, (res) => {
@@ -209,7 +261,8 @@ async function loadStartupError(error) {
 }
 
 async function openMainWindow() {
-  writeMainLog(`openMainWindow start resourceDir=${appRoot()}`);
+  const resourceDir = backendResourceDir();
+  writeMainLog(`openMainWindow start resourceDir=${resourceDir}`);
   if (!apiPort) apiPort = reuseApi ? LEGACY_PORT : await findFreePort();
 
   // Window first, backend second: the user sees the app respond immediately.
@@ -219,7 +272,7 @@ async function openMainWindow() {
   await startPythonApi({
     packaged: app.isPackaged,
     userDataPath: app.getPath("userData"),
-    resourceDir: appRoot(),
+    resourceDir,
     token: apiToken,
     port: apiPort,
   });
@@ -278,6 +331,14 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     writeMainLog("app ready");
+    // Evaluation-build gate, before anything starts. No-op for full builds
+    // (channel !== "eval"). Runs after the single-instance lock, so a second
+    // launch never reads or advances the stored state.
+    evaluationExpired = checkEvaluation(buildChannel, writeMainLog).expired;
+    if (evaluationExpired) {
+      await loadEvaluationStopped();
+      return;
+    }
     setBackendListener((status) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("backend:status", status);
     });
@@ -289,6 +350,10 @@ if (!gotSingleInstanceLock) {
   });
 
   app.on("activate", () => {
+    if (evaluationExpired) {
+      if (BrowserWindow.getAllWindows().length === 0) loadEvaluationStopped().catch(() => {});
+      return;
+    }
     if (BrowserWindow.getAllWindows().length === 0) {
       openMainWindow().catch((error) => {
         loadStartupError(error).catch(() => {});

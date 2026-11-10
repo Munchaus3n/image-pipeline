@@ -48,7 +48,6 @@ const optionalHiddenImports = [
   "rembg.sessions.birefnet_massive",
   "rembg.sessions.birefnet_dis",
   "rembg.sessions.birefnet_hrsod",
-  "rembg.sessions.bria_rmbg",
 ];
 
 const pyinstallerArgs = [
