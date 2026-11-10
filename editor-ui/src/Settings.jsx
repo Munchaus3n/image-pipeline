@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { browseFolder, getSettings, patchSettings } from "./api.js";
+import { useDefaultOutputLabel } from "./defaultOutput.js";
 import { BG_MODEL_OPTIONS, BG_DEVICE_OPTIONS, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
 
 function Section({ title, description, children, defaultOpen = false, tone = "default" }) {
@@ -250,6 +251,7 @@ const DEFAULT = {
 };
 
 export default function Settings({ onThemeChange }) {
+  const defaultOutputLabel = useDefaultOutputLabel();
   const [settings, setSettings] = useState(DEFAULT);
   const [status, setStatus] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -352,10 +354,10 @@ export default function Settings({ onThemeChange }) {
                   onChange={value => setSetting("output", "input_dir", value)}
                 />
               </Row>
-              <Row label="Default output folder" hint="Leave blank to use ./output.">
+              <Row label="Default output folder" hint={`Leave blank to use ${defaultOutputLabel}.`}>
                 <FolderPathInput
                   value={settings.output.output_dir || ""}
-                  placeholder="blank = ./output"
+                  placeholder={`blank = ${defaultOutputLabel}`}
                   browseLabel="Browse output folder"
                   onChange={value => setSetting("output", "output_dir", value)}
                 />

@@ -69,8 +69,9 @@ def _warmup_worker():
     try:
         from rembg.sessions import sessions_class
         # Read model name from settings if already saved, else use default
-        processing = _load_saved_settings_file().get("processing")
-        model = (processing.get("rembg_model") if isinstance(processing, dict) else None) or "birefnet-general"
+        # Merged settings clamp the model to the ones this build offers, so a
+        # stale or hand-edited name can never fetch other weights.
+        model = _merged_settings(_load_saved_settings_file())["processing"]["rembg_model"]
         # Only fetch the weights; building an ORT session here would cost
         # seconds of CPU and 1-2 GB RAM for a session that is thrown away.
         # The real pipeline run will pick the right provider (DML/CUDA/CPU).
@@ -449,6 +450,28 @@ def _preview_cache_path(cache_key: str, fmt: str) -> Path:
     return PREVIEW_CACHE_DIR / f"{cache_key}{ext}"
 
 
+_PNG_TRAILER = bytes.fromhex("49454e44ae426082")   # IEND chunk + CRC
+_JPEG_TRAILER = bytes.fromhex("ffd9")             # JPEG end-of-image marker
+
+
+def _preview_cache_file_complete(file_path: Path, size: int) -> bool:
+    """Cheap integrity check: a cached preview must end with its format's trailer.
+
+    Cache writes are atomic, so a short file means outside damage (disk error,
+    a sync tool, a manual edit). Checking the last bytes catches truncation
+    without decoding the image on every hit.
+    """
+    trailer = _PNG_TRAILER if file_path.suffix.lower() == ".png" else _JPEG_TRAILER
+    if size < len(trailer):
+        return False
+    try:
+        with file_path.open("rb") as f:
+            f.seek(-len(trailer), os.SEEK_END)
+            return f.read(len(trailer)) == trailer
+    except OSError:
+        return False
+
+
 def _preview_cached_file(cache_key: str) -> Path | None:
     best_path: Path | None = None
     best_mtime = -1
@@ -458,7 +481,9 @@ def _preview_cached_file(cache_key: str) -> Path | None:
             if not file_path.is_file():
                 continue
             stat = file_path.stat()
-            if stat.st_size <= 0:
+            if stat.st_size <= 0 or not _preview_cache_file_complete(file_path, stat.st_size):
+                # Damaged entry: drop it so the preview is regenerated.
+                file_path.unlink(missing_ok=True)
                 continue
             if stat.st_mtime_ns > best_mtime:
                 best_mtime = stat.st_mtime_ns
@@ -638,6 +663,13 @@ class SessionData(BaseModel):
     run_id:      str = ""
     timestamp:   int = 0
     completed:   bool = False
+    # Who wrote the session. "pipeline" = a processing run (queue_index counts
+    # finished images of that run); "" = the Editor (queue_index is the
+    # position in the editor queue). The two meanings must not be mixed.
+    kind:        str = ""
+    # Pipeline runs only: number of input images, so a stopped run can report
+    # how many are left. 0 = unknown.
+    total:       int = 0
 
 class PipelineConfig(BaseModel):
     folder_mode:    Literal["bulk", "clean"]
@@ -1099,16 +1131,32 @@ def get_session():
         if not isinstance(raw_data, dict):
             return {"exists": False}
         data = SessionData.model_validate(raw_data).model_dump()
+        if not data.get("timestamp"):
+            data["timestamp"] = int(time.time())
+        idx = max(0, int(data.get("queue_index", 0)))
         src_root = Path(data["src_root"])
+
+        if data.get("kind") == "pipeline" and not data.get("completed"):
+            # A stopped or interrupted processing run. queue_index counts the
+            # images that run finished, not files in src_root (the stage folder
+            # may not even exist yet if it stopped during upscaling), so judge
+            # it against the run's input instead.
+            input_dir = Path(data.get("input_dir") or "")
+            if not str(data.get("input_dir") or "").strip() or not input_dir.is_dir():
+                return {"exists": False}
+            total = int(data.get("total") or 0)
+            if total <= 0:
+                total = len(images_in_folder(input_dir)[0])
+            if total <= 0 or idx >= total:
+                return {"exists": False}
+            return {"exists": True, **data, "queue_index": idx, "total": total}
+
         if not src_root.exists():
             return {"exists": False}
         images, _ = images_in_folder(src_root)
-        idx    = int(data.get("queue_index", 0))
         if idx >= len(images):
             return {"exists": False}
-        if not data.get("timestamp"):
-            data["timestamp"] = int(time.time())
-        return {"exists": True, **data, "total": len(images)}
+        return {"exists": True, **data, "queue_index": idx, "total": len(images)}
     except Exception:
         return {"exists": False}
 
@@ -1190,6 +1238,8 @@ def _merged_settings(*layers: dict) -> dict:
     if isinstance(processing, dict):
         processing["bg_device_mode"] = _normalize_bg_device_mode(processing.get("bg_device_mode"), processing)
         processing["force_cpu"] = processing["bg_device_mode"] == "cpu"
+        if processing.get("rembg_model") not in _REMBG_MODELS:
+            processing["rembg_model"] = _DEFAULT_SETTINGS["processing"]["rembg_model"]
     return merged
 
 @app.get("/settings")
@@ -1317,6 +1367,8 @@ def _build_pipeline_command(cfg: PipelineConfig) -> tuple[list[str], Path | None
     if not isinstance(processing_settings, dict):
         processing_settings = {}
     rembg_model = (cfg.rembg_model or "").strip() or processing_settings.get("rembg_model") or "birefnet-general"
+    if rembg_model not in _REMBG_MODELS:
+        rembg_model = "birefnet-general"
     cmd += ["--rembg-model", rembg_model]
     bg_device_mode = _normalize_bg_device_mode(cfg.bg_device_mode, processing_settings)
     cmd += ["--bg-device-mode", bg_device_mode]
@@ -1390,6 +1442,7 @@ async def run_pipeline(cfg: PipelineConfig):
         proc: asyncio.subprocess.Process | None = None
         # _pipeline_running is already set True by the route handler.
         progress_index = 0
+        session_total = 0
         done_prefixes = (
             ("__ok_rembg__:", "__skip_rembg__:", "__err_rembg__:")
             if cfg.do_rembg
@@ -1409,6 +1462,8 @@ async def run_pipeline(cfg: PipelineConfig):
                 run_id=session_run_id,
                 timestamp=session_timestamp,
                 completed=completed,
+                kind="pipeline",
+                total=session_total,
             ).model_dump()
             with _session_file_lock:
                 _write_json_atomic(SESSION_FILE, payload)
@@ -1424,6 +1479,12 @@ async def run_pipeline(cfg: PipelineConfig):
                 pass
 
         try:
+            try:
+                session_input = Path(session_input_dir)
+                if session_input.is_dir():
+                    session_total = len((await asyncio.to_thread(images_in_folder, session_input))[0])
+            except Exception:
+                session_total = 0
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,

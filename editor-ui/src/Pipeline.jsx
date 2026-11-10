@@ -7,6 +7,7 @@ import {
 import { bgModelLabel, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
 import { normalizeImagePath, relativePathFromRoot, imageIdForPath } from "./paths.js";
 import PageHeader from "./components/PageHeader.jsx";
+import { useDefaultOutputLabel } from "./defaultOutput.js";
 /*
 KNOWN LIMITATIONS (web build):
 - Focus-based settings reload is a temporary sync workaround; desktop Electron should use explicit app events.
@@ -1135,6 +1136,7 @@ export default function Pipeline({
   rememberInputDir,
   rememberOutputDir,
 }) {
+  const defaultOutputLabel = useDefaultOutputLabel();
   const [folderMode, setFolderMode] = useState("bulk");
   const [doUpscale, setDoUpscale] = useState(true);
   const [scale, setScale] = useState("2");
@@ -1213,7 +1215,12 @@ export default function Pipeline({
   useEffect(() => {
     getSession()
       .then(data => {
-        if (data?.exists) { setResumeSession(data); setShowResume(true); }
+        // Only an interrupted processing run can be resumed here. A finished run
+        // (completed) or an Editor session is not a pipeline resume.
+        if (data?.exists && data.kind === "pipeline" && !data.completed) {
+          setResumeSession(data);
+          setShowResume(true);
+        }
       })
       .catch(() => {});
   }, []);
@@ -1436,7 +1443,7 @@ export default function Pipeline({
               <FolderInput
                 value={outputDir}
                 onChange={setOutputDir}
-                placeholder="default: ./output"
+                placeholder={`default: ${defaultOutputLabel}`}
                 recent={recentOutputDirs}
                 onRemember={rememberOutputDir}
               />

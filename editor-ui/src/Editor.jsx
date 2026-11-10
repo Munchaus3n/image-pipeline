@@ -15,6 +15,7 @@ import {
 } from "./api.js";
 import { pathForFile } from "./runtime.js";
 import { toForwardSlashes, relativePathFromRoot } from "./paths.js";
+import { useDefaultOutputLabel } from "./defaultOutput.js";
 import PageHeader from "./components/PageHeader.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -439,6 +440,9 @@ function Btn({ children, onClick, style={}, className = "" }) {
 }
 
 export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = null, thumbnail: thumbnailProp = true }) {
+  const defaultOutputLabel = useDefaultOutputLabel();
+  const defaultOutputLabelRef = useRef(defaultOutputLabel);
+  defaultOutputLabelRef.current = defaultOutputLabel;
   const canvasRef    = useRef(null);
   const containerRef = useRef(null);
   const viewportRef  = useRef(null);
@@ -890,13 +894,17 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       const session = await getSession();
       if (!stillCurrent()) return;
 
-      if (session.exists) {
+      // An interrupted processing run is resumed from the Process screen, not
+      // here: its queue_index counts processed images, not an editor position.
+      // Leave it in place and load whatever that output already holds.
+      const interruptedPipelineRun = session.kind === "pipeline" && !session.completed;
+      if (session.exists && !interruptedPipelineRun) {
         const sessionOutputDir = (session.output_dir ?? "").trim();
         const outputMismatch = requestedOutputDir && normalizeOutputIdentity(sessionOutputDir) !== currentOutputIdentity;
-        const currentOutputLabel = currentOutput || "./output";
+        const currentOutputLabel = currentOutput || defaultOutputLabelRef.current;
 
         if (outputMismatch) {
-          setStatus(`Ignored stale session output (${sessionOutputDir || "./output"}); using current output (${currentOutputLabel}).`);
+          setStatus(`Ignored stale session output (${sessionOutputDir || defaultOutputLabelRef.current}); using current output (${currentOutputLabel}).`);
           await clearSession().catch(() => {});
         } else if (session.completed) {
           sessionRunIdRef.current = session.run_id || `pipeline-${Date.now()}`;
@@ -909,7 +917,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           resumePromptActiveRef.current = true;
           const resume = await askConfirm(
             "Resume previous editor session?",
-            `Resume from image ${session.queue_index + 1}/${session.total}?\nsource: ${session.src_root}\noutput: ${sessionOutputDir || "./output"}`,
+            `Resume from image ${session.queue_index + 1}/${session.total}?\nsource: ${session.src_root}\noutput: ${sessionOutputDir || defaultOutputLabelRef.current}`,
             "Resume",
             "Start over",
           );
