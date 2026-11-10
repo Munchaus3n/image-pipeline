@@ -678,6 +678,8 @@ class PlacedItem(BaseModel):
     canvas_x:   int
     canvas_y:   int
     scale:      float
+    # Degrees, clockwise (matches the Editor canvas).
+    rotation:   float = Field(default=0.0, ge=-360.0, le=360.0)
 
 class SaveRequest(BaseModel):
     items:       list[PlacedItem]
@@ -737,6 +739,8 @@ class TemplateEntry(BaseModel):
     zone:      str = ""
     hint:      str = ""
     ref_image: str = ""
+    # Comma-separated file-name keywords for the Editor's template auto-match.
+    match:     str = ""
 
 class TemplatesPayload(BaseModel):
     templates: dict[str, TemplateEntry]
@@ -1124,6 +1128,11 @@ def save_composition(req: SaveRequest):
         w   = max(1, int(img.width  * item.scale))
         h   = max(1, int(img.height * item.scale))
         resized = img.resize((w, h), Image.LANCZOS)
+        angle = item.rotation % 360.0
+        if angle > 1e-6 and abs(angle - 360.0) > 1e-6:
+            # PIL rotates counter-clockwise; the Editor's angle is clockwise.
+            resized = resized.rotate(-angle, resample=Image.BICUBIC, expand=True)
+            w, h = resized.size
         x = item.canvas_x - w // 2
         y = item.canvas_y - h // 2
         canvas.paste(resized, (x, y), resized)
@@ -1267,6 +1276,7 @@ _DEFAULT_SETTINGS = {
                      "do_upscale": True, "do_rembg": True, "upscale_scale": "2"},
     "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#f5f5f1", "theme": "light"},
     "guides":       {"use_custom": False, "custom": {}},
+    "editor":       {"auto_template_match": True},
 }
 
 _REMBG_MODELS = [

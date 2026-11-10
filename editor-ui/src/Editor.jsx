@@ -13,7 +13,7 @@ import {
   browseFolder, openFolder,
   getSettings, patchSettings, templateRefUrl,
 } from "./api.js";
-import { pathForFile } from "./runtime.js";
+import { pathForFile, canSaveWithDialog, saveFileWithDialog } from "./runtime.js";
 import { toForwardSlashes, relativePathFromRoot } from "./paths.js";
 import { useDefaultOutputLabel } from "./defaultOutput.js";
 import PageHeader from "./components/PageHeader.jsx";
@@ -34,6 +34,11 @@ const ZOOM_WHEEL_STEP = 1.1;
 // A product drawn larger than its source pixels (beyond this factor) is
 // upsampled in the saved image and will look soft.
 const ENLARGE_WARN_THRESHOLD = 1.01;
+// Ctrl+wheel rotates the selected product (degrees per notch; Shift = fine).
+const ROTATE_WHEEL_STEP = 1;
+const ROTATE_WHEEL_FINE_STEP = 0.1;
+// Wheel notches closer together than this count as one rotate gesture (one undo step).
+const ROTATE_GESTURE_GAP_MS = 600;
 const clampZoom = (z) => {
   const rounded = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) * 100) / 100;
   return Math.abs(rounded - 1) < 0.04 ? 1.0 : rounded;
@@ -119,8 +124,97 @@ function resolveGuides(baseGuides, settings) {
   return next;
 }
 
-function placementSnapshot({ label, filePath, canvasX, canvasY, scale, origW, origH }) {
-  return { label, filePath, canvasX, canvasY, scale, origW, origH };
+function placementSnapshot({ label, filePath, canvasX, canvasY, scale, rotation = 0, origW, origH }) {
+  return { label, filePath, canvasX, canvasY, scale, rotation, origW, origH };
+}
+
+// Degrees, clockwise, kept in (-180, 180] at 0.1° precision.
+function normalizeRotation(deg) {
+  const r = Math.round(((((Number(deg) || 0) % 360) + 540) % 360 - 180) * 10) / 10;
+  if (r === -180) return 180;
+  return r === 0 ? 0 : r; // no -0
+}
+
+function undoSnapshot(it) {
+  return { id: it.id, canvasX: it.canvasX, canvasY: it.canvasY, scale: it.scale, rotation: it.rotation || 0 };
+}
+
+// Size of the item's axis-aligned box at scale 1 once rotated (canvas units).
+function rotatedExtent(item) {
+  const rad = ((item.rotation || 0) * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  return { w: item.origW * c + item.origH * s, h: item.origW * s + item.origH * c };
+}
+
+// Starting scale for a new image: 1.000 (one source pixel per canvas pixel), shrunk
+// only when the image is taller than the template zone or wider than the canvas.
+function initialScaleFor(guide, width, height) {
+  if (!(width > 0) || !(height > 0)) return 1;
+  const zoneHeight = guide ? guide.bottom - guide.top : CANVAS_SIZE;
+  return Math.min(1, zoneHeight / height, CANVAS_SIZE / width);
+}
+
+// Letters and digits only, lower-case, accents removed; `index` maps each kept
+// character back to its position in `text` so digit boundaries can be checked.
+function compactForMatch(value) {
+  const text = String(value || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
+  let compact = "";
+  const index = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (/[\p{L}\p{N}]/u.test(text[i])) {
+      compact += text[i];
+      index.push(i);
+    }
+  }
+  return { text, compact, index };
+}
+
+function templateKeywords(tpl) {
+  return String(tpl?.match || "")
+    .split(/[,;\n]+/)
+    .map(word => word.trim())
+    .filter(Boolean);
+}
+
+// Template whose keywords appear in the file name; the longest keyword wins.
+// "26 cm", "26cm" and "26_CM" all match each other, but "26cm" never matches "126cm".
+function matchTemplateForName(fileName, templates) {
+  const baseName = String(fileName || "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
+  const target = compactForMatch(baseName);
+  if (!target.compact) return null;
+  let best = null;
+  for (const [name, tpl] of Object.entries(templates || {})) {
+    if (name === "— none —") continue;
+    for (const keyword of templateKeywords(tpl)) {
+      const needle = compactForMatch(keyword).compact;
+      if (!needle || (best && needle.length <= best.length)) continue;
+      const startsWithDigit = /\d/.test(needle[0]);
+      const endsWithDigit = /\d/.test(needle[needle.length - 1]);
+      for (let at = target.compact.indexOf(needle); at !== -1; at = target.compact.indexOf(needle, at + 1)) {
+        const before = target.text[target.index[at] - 1] || "";
+        const after = target.text[target.index[at + needle.length - 1] + 1] || "";
+        if (startsWithDigit && /\d/.test(before)) continue;
+        if (endsWithDigit && /\d/.test(after)) continue;
+        best = { name, keyword, length: needle.length };
+        break;
+      }
+    }
+  }
+  return best ? { name: best.name, keyword: best.keyword } : null;
+}
+
+// Hit test in DS (preview pixel) space, honouring the item's rotation.
+function pointInItem(item, mx, my) {
+  const { x, y, w, h } = itemBounds(item);
+  const dx = mx - (x + w / 2);
+  const dy = my - (y + h / 2);
+  const rad = ((item.rotation || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const lx = dx * cos + dy * sin;
+  const ly = -dx * sin + dy * cos;
+  return Math.abs(lx) <= w / 2 && Math.abs(ly) <= h / 2;
 }
 
 // Returns canvas-pixel-space bounds for an item.
@@ -508,11 +602,17 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const [confirmState, setConfirmState] = useState(null);
   // Queue of the batch that just finished, so Previous still works after the last image.
   const [finishedQueue, setFinishedQueue] = useState([]);
+  // Template auto-match by file name (Settings → Auto-match template).
+  const [autoTemplateMatch, setAutoTemplateMatch] = useState(true);
+  const [templateMatchInfo, setTemplateMatchInfo] = useState(null); // { name, keyword } | null
+  const itemsRef = useRef([]);
+  const rotateGestureRef = useRef({ id: null, at: 0 });
 
   // Phase 4: canvas view zoom (CSS scale, does not affect composition output)
   const [zoom, setZoom] = useState(1.0);
 
   const sel = items.find(it => it.id === selId) ?? null;
+  itemsRef.current = items;
   const templateRefSrc = useMemo(
     () => templateRefUrl(templates[template]?.ref_image),
     [template, templates],
@@ -693,10 +793,14 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     }
 
     const path = q[idx];
-    const activeZone = templates[template]?.zone || "green";
+    const matched    = autoTemplateMatch ? matchTemplateForName(path, templates) : null;
+    const tplName    = matched?.name ?? template;
+    if (matched && matched.name !== template) setTemplate(matched.name);
+    setTemplateMatchInfo(matched);
+    const activeZone = templates[tplName]?.zone || "green";
     const guideSrc   = guidesOverride ?? guides;
     const g          = guideSrc[activeZone] ?? guideSrc["green"] ?? { top:224, bottom:1216, left:224, right:1216 };
-    const initScale  = (g.bottom - g.top) / height;
+    const initScale  = initialScaleFor(g, width, height);
 
     const newItem = {
       id:       nextItemIdRef.current++,
@@ -705,6 +809,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       canvasX:  CANVAS_SIZE / 2,
       canvasY:  Math.round((g.top + g.bottom) / 2),
       scale:    initScale,
+      rotation: 0,
       origW:    width,
       origH:    height,
       htmlImg,
@@ -717,7 +822,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       setItems([newItem]);
     }
     setSelId(newItem.id);
-  }, [template, templates, guides, comboMode, allDone]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [template, templates, guides, comboMode, allDone, autoTemplateMatch]); // eslint-disable-line react-hooks/exhaustive-deps
   // comboMode is unused in loadImage body but kept for correctness (isCombo arg is passed in)
 
   // Keep the ref in sync so initFromFolder/advance always call the latest version
@@ -831,6 +936,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         const bg = settings?.appearance?.canvas_bg_color;
         if (typeof bg === "string" && bg) setCanvasBgColor(bg);
         if (typeof settings?.output?.thumbnail === "boolean") setGenerateThumbnail(settings.output.thumbnail);
+        if (typeof settings?.editor?.auto_template_match === "boolean") setAutoTemplateMatch(settings.editor.auto_template_match);
         const savedThumbnailSize = Number(settings?.output?.thumbnail_size);
         if (Number.isFinite(savedThumbnailSize) && savedThumbnailSize > 0) {
           setThumbnailSize(Math.round(savedThumbnailSize));
@@ -864,6 +970,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         const bg = settings?.appearance?.canvas_bg_color;
         if (typeof bg === "string" && bg) setCanvasBgColor(bg);
         if (typeof settings?.output?.thumbnail === "boolean") setGenerateThumbnail(settings.output.thumbnail);
+        if (typeof settings?.editor?.auto_template_match === "boolean") setAutoTemplateMatch(settings.editor.auto_template_match);
         const savedThumbnailSize = Number(settings?.output?.thumbnail_size);
         if (Number.isFinite(savedThumbnailSize) && savedThumbnailSize > 0) {
           setThumbnailSize(Math.round(savedThumbnailSize));
@@ -991,10 +1098,12 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     const objectUrl = window.URL.createObjectURL(file);
     try {
       const htmlImg = await loadHtmlImage(objectUrl);
-      const activeZone = templates[template]?.zone || "green";
+      const matched = autoTemplateMatch ? matchTemplateForName(file.name, templates) : null;
+      const tplName = matched?.name ?? template;
+      const activeZone = templates[tplName]?.zone || "green";
       const guideSrc = configRef.current.guides || guides;
       const guide = guideSrc[activeZone] ?? guideSrc.green ?? { top:224, bottom:1216, left:224, right:1216 };
-      const initScale = (guide.bottom - guide.top) / htmlImg.naturalHeight;
+      const initScale = initialScaleFor(guide, htmlImg.naturalWidth, htmlImg.naturalHeight);
       const previousUrl = singleObjectUrlRef.current;
 
       clearSavedResetTimer();
@@ -1014,11 +1123,14 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         canvasX: CANVAS_SIZE / 2,
         canvasY: Math.round((guide.top + guide.bottom) / 2),
         scale: initScale,
+        rotation: 0,
         origW: htmlImg.naturalWidth,
         origH: htmlImg.naturalHeight,
         htmlImg,
       };
 
+      if (matched && matched.name !== template) setTemplate(matched.name);
+      setTemplateMatchInfo(matched);
       setSourceMode("single");
       setSingleImageName(file.name);
       setSessionOutputDir("");
@@ -1032,12 +1144,14 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       setSelId(nextItem.id);
       setActiveSnapZone(null);
       setSaved(false);
-      setStatus("Single image loaded. Use Download for a local PNG export.");
+      setStatus(matched
+        ? `Single image loaded · template "${matched.name}" matched from the file name. Save to export a PNG.`
+        : "Single image loaded. Save to export a PNG.");
     } catch (error) {
       window.URL.revokeObjectURL(objectUrl);
       setStatus(`single image load failed: ${error.message}`);
     }
-  }, [bootstrapReady, clearSavedResetTimer, guides, resetQueueHistory, template, templates]);
+  }, [autoTemplateMatch, bootstrapReady, clearSavedResetTimer, guides, resetQueueHistory, template, templates]);
 
   // Any mix of dropped/browsed images and folders. One loose image opens in single
   // image mode (works in the browser too); anything more becomes the Editor queue,
@@ -1176,7 +1290,12 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     // 2. Draw product images
     ctx.setLineDash([]);
     for (const item of items) {
-      const { x, y, w, h } = itemBounds(item);
+      const { x: bx, y: by, w, h } = itemBounds(item);
+      ctx.save();
+      ctx.translate(bx + w / 2, by + h / 2);
+      ctx.rotate(((item.rotation || 0) * Math.PI) / 180);
+      const x = -w / 2;
+      const y = -h / 2;
       if (item.htmlImg?.complete && item.htmlImg.naturalWidth > 0) {
         ctx.drawImage(item.htmlImg, x, y, w, h);
       } else {
@@ -1188,15 +1307,21 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           ctx.font = "bold 28px sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText("Could not load this image. Press S to skip it.", x + w / 2, y + h / 2);
+          ctx.fillText("Could not load this image. Press S to skip it.", 0, 0);
           ctx.restore();
         }
       }
+      ctx.restore();
     }
 
-    // 3. Selection highlight
+    // 3. Selection highlight (drawn in the item's rotated frame)
     if (sel) {
-      const { x, y, w, h } = itemBounds(sel);
+      const { x: bx, y: by, w, h } = itemBounds(sel);
+      ctx.save();
+      ctx.translate(bx + w / 2, by + h / 2);
+      ctx.rotate(((sel.rotation || 0) * Math.PI) / 180);
+      const x = -w / 2;
+      const y = -h / 2;
       ctx.strokeStyle = "rgba(250,204,21,0.85)";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 3]);
@@ -1206,6 +1331,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       [[x-2,y-2],[x+w+2,y-2],[x-2,y+h+2],[x+w+2,y+h+2]].forEach(([hx,hy]) => {
         ctx.fillRect(hx-3, hy-3, 6, 6);
       });
+      ctx.restore();
     }
 
     // 4. All guides — dashed lines
@@ -1278,16 +1404,36 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     viewport.scrollTop  += r.top  + anchor.fy * r.height - anchor.clientY;
   }, [zoom]);
 
-  // ── Wheel: Ctrl+wheel = view zoom, wheel on canvas = product scale ────────
+  // ── Wheel: Alt+wheel = view zoom, Ctrl+wheel = rotate, wheel on canvas = product scale ──
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const handler = (e) => {
-      if (e.ctrlKey || e.metaKey) {
+      // Shift+wheel arrives as horizontal scroll on Windows, so read both axes.
+      const delta = e.deltaY || e.deltaX;
+      if (e.altKey) {
         e.preventDefault();
-        if (!canvasRef.current) return;
-        const f = e.deltaY < 0 ? ZOOM_WHEEL_STEP : 1 / ZOOM_WHEEL_STEP;
+        if (!canvasRef.current || !delta) return;
+        const f = delta < 0 ? ZOOM_WHEEL_STEP : 1 / ZOOM_WHEEL_STEP;
         zoomTo(z => z * f, e.clientX, e.clientY);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault(); // also keeps the window from page-zooming
+        if (!selId || !delta) return;
+        const current = itemsRef.current.find(it => it.id === selId);
+        if (!current) return;
+        // One undo step per continuous rotate gesture.
+        const now = Date.now();
+        const gesture = rotateGestureRef.current;
+        if (gesture.id !== selId || now - gesture.at > ROTATE_GESTURE_GAP_MS) {
+          undoRef.current = undoSnapshot(current);
+        }
+        rotateGestureRef.current = { id: selId, at: now };
+        const step = (e.shiftKey ? ROTATE_WHEEL_FINE_STEP : ROTATE_WHEEL_STEP) * (delta > 0 ? 1 : -1);
+        setItems(prev => prev.map(it =>
+          it.id===selId ? {...it, rotation: normalizeRotation((it.rotation || 0) + step)} : it
+        ));
         return;
       }
       if (e.target !== canvasRef.current) return; // let the zoomed viewport scroll normally
@@ -1295,7 +1441,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       if (scaleLocked || !selId) return;
       const f = e.deltaY < 0 ? 1.04 : 0.96;
       setItems(prev => prev.map(it =>
-        it.id===selId ? {...it, scale: Math.max(0.02, Math.min(4.0, it.scale*f))} : it
+        it.id===selId ? {...it, scale: Math.max(0.02, Math.min(Math.max(4.0, it.scale), it.scale*f))} : it
       ));
     };
     viewport.addEventListener("wheel", handler, { passive: false });
@@ -1377,9 +1523,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     const { mx, my } = toCanvasCoords(e.clientX, e.clientY);
     for (let i = items.length-1; i >= 0; i--) {
       const it = items[i];
-      const { x,y,w,h } = itemBounds(it);
-      if (mx>=x && mx<=x+w && my>=y && my<=y+h) {
-        undoRef.current = { id:it.id, canvasX:it.canvasX, canvasY:it.canvasY, scale:it.scale };
+      if (pointInItem(it, mx, my)) {
+        undoRef.current = undoSnapshot(it);
         setSelId(it.id);
         dragRef.current = {
           itemId: it.id,
@@ -1432,13 +1577,14 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   const doUndo = useCallback(() => {
     if (!undoRef.current) return;
-    const { id,canvasX,canvasY,scale } = undoRef.current;
+    const { id,canvasX,canvasY,scale,rotation = 0 } = undoRef.current;
     undoRef.current = null;
+    rotateGestureRef.current = { id: null, at: 0 };
     if (!items.some(it => it.id === id)) {
       setStatus("nothing to undo.");
       return;
     }
-    setItems(prev => prev.map(it => it.id===id ? {...it,canvasX,canvasY,scale} : it));
+    setItems(prev => prev.map(it => it.id===id ? {...it,canvasX,canvasY,scale,rotation} : it));
     setStatus("undone.");
   }, [items]);
 
@@ -1492,9 +1638,18 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       if (!item.htmlImg?.complete || item.htmlImg.naturalWidth <= 0) continue;
       const width = Math.max(1, Math.round(item.origW * item.scale * renderScale));
       const height = Math.max(1, Math.round(item.origH * item.scale * renderScale));
-      const x = Math.round(item.canvasX * renderScale - width / 2);
-      const y = Math.round(item.canvasY * renderScale - height / 2);
-      ctx.drawImage(item.htmlImg, x, y, width, height);
+      const rotation = item.rotation || 0;
+      if (!rotation) {
+        const x = Math.round(item.canvasX * renderScale - width / 2);
+        const y = Math.round(item.canvasY * renderScale - height / 2);
+        ctx.drawImage(item.htmlImg, x, y, width, height);
+        continue;
+      }
+      ctx.save();
+      ctx.translate(item.canvasX * renderScale, item.canvasY * renderScale);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.drawImage(item.htmlImg, -width / 2, -height / 2, width, height);
+      ctx.restore();
     }
 
     return exportCanvas;
@@ -1540,13 +1695,43 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     }
 
     let packageDownloaded = false;
+    let packageBlob = null;
     if (isSingleImageMode && thumbnailBlob) {
-      const packageBlob = await createStoredZipBlob([
+      packageBlob = await createStoredZipBlob([
         { filename: finalDownloadName(currentName), blob: finalBlob },
         { filename: thumbnailPackagePath(currentName), blob: thumbnailBlob },
       ]);
-      triggerBlobDownload(packageBlob, zipDownloadName(currentName));
       packageDownloaded = true;
+    }
+
+    // Desktop app: native Save dialog, so a cancel is known and the photo stays.
+    if (isSingleImageMode && canSaveWithDialog()) {
+      let result;
+      try {
+        result = packageBlob
+          ? await saveFileWithDialog(packageBlob, zipDownloadName(currentName), "zip")
+          : await saveFileWithDialog(finalBlob, finalDownloadName(currentName), "png");
+      } catch (error) {
+        setStatus(`save failed: ${error.message}. The photo is still open.`);
+        return false;
+      }
+      if (!result?.saved) {
+        setStatus("Save cancelled. The photo is still open.");
+        return false;
+      }
+      const savedName = String(result.path || "").split(/[\\/]/).pop();
+      if (fromSave) setSaved(true);
+      setStatus(`saved ${packageDownloaded ? "ZIP (PNG + thumbnail)" : "PNG"}: ${savedName}`);
+      if (fromSave) {
+        // Let the "Saved!" flash paint before clearing the canvas; the timer is
+        // cancelled if a new image is loaded before it fires.
+        scheduleSavedReset(resetEditorToDefaultState);
+      }
+      return true;
+    }
+
+    if (packageBlob) {
+      triggerBlobDownload(packageBlob, zipDownloadName(currentName));
     } else {
       triggerBlobDownload(finalBlob, finalDownloadName(currentName));
       if (thumbnailBlob) triggerBlobDownload(thumbnailBlob, thumbnailDownloadName(currentName));
@@ -1559,13 +1744,9 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     setStatus(fromSave && isSingleImageMode
       ? `${downloadLabel} Single image mode does not write to batch output.`
       : downloadLabel);
-    if (fromSave) {
-      // Let the "Downloaded!" flash actually paint before resetting state —
-      // resetEditorToDefaultState() itself sets saved back to false, so
-      // calling it synchronously here would batch away the flash entirely.
-      // The timer is cancelled if a new image is loaded before it fires.
-      scheduleSavedReset(isSingleImageMode ? resetEditorToDefaultState : undefined);
-    }
+    // A browser download can't report a cancelled Save dialog, so the photo is
+    // never cleared here; loading another image replaces it.
+    if (fromSave) scheduleSavedReset();
     return true;
   }, [generateThumbnail, isSingleImageMode, items, queue, queueIdx, renderExportCanvas, renderThumbnailCanvas, resetEditorToDefaultState, scheduleSavedReset, singleImageName, srcFolder]);
 
@@ -1585,6 +1766,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         canvas_x:   it.canvasX,
         canvas_y:   it.canvasY,
         scale:      it.scale,
+        rotation:   it.rotation || 0,
       }));
       const result = await saveComposition(
         payload, srcFolder, queueIdx, comboMode,
@@ -1723,7 +1905,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     if (!sel) { setStatus("select an item first."); return; }
     const g = guides[zone];
     if (!g) return;
-    undoRef.current = { id:sel.id, canvasX:sel.canvasX, canvasY:sel.canvasY, scale:sel.scale };
+    undoRef.current = undoSnapshot(sel);
     setItems(prev => prev.map(it =>
       it.id===selId ? {
         ...it,
@@ -1735,10 +1917,14 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     setActiveSnapZone(zone);
   }
 
-  function snapToFull() {
+  // mode "fit": whole photo visible, touching two canvas edges.
+  // mode "fill": photo covers the whole canvas; the overflow is cut off on save.
+  function snapToFull(mode = "fit") {
     if (!sel) { setStatus("select an item first."); return; }
-    undoRef.current = { id:sel.id, canvasX:sel.canvasX, canvasY:sel.canvasY, scale:sel.scale };
-    const snapScale = Math.min(CANVAS_SIZE / sel.origW, CANVAS_SIZE / sel.origH);
+    undoRef.current = undoSnapshot(sel);
+    const extent = rotatedExtent(sel);
+    const pick = mode === "fill" ? Math.max : Math.min;
+    const snapScale = pick(CANVAS_SIZE / extent.w, CANVAS_SIZE / extent.h);
     setItems(prev => prev.map(it =>
       it.id===selId ? {
         ...it,
@@ -1752,7 +1938,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   function doAlign(axis) {
     if (!selId) return;
-    undoRef.current = sel ? { id:sel.id, canvasX:sel.canvasX, canvasY:sel.canvasY, scale:sel.scale } : null;
+    undoRef.current = sel ? undoSnapshot(sel) : null;
     setItems(prev => prev.map(it =>
       it.id===selId
         ? axis==="h" ? {...it,canvasX:CANVAS_SIZE/2} : {...it,canvasY:CANVAS_SIZE/2}
@@ -1762,17 +1948,35 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   function onTemplateChange(name) {
     setTemplate(name);
+    setTemplateMatchInfo(null);
     if (!name || name === "— none —") { setActiveSnapZone(null); return; }
     const tmpl = templates[name];
     if (tmpl?.zone && sel) snapTo(tmpl.zone);
     else if (tmpl?.zone) setActiveSnapZone(tmpl.zone);
   }
 
+  function setRotation(next, { relative = false } = {}) {
+    if (!sel) return;
+    undoRef.current = undoSnapshot(sel);
+    rotateGestureRef.current = { id: null, at: 0 };
+    setItems(prev => prev.map(it =>
+      it.id===selId ? {...it, rotation: normalizeRotation(relative ? (it.rotation || 0) + next : next)} : it
+    ));
+  }
+
+  function toggleAutoTemplateMatch(enabled) {
+    setAutoTemplateMatch(enabled);
+    if (!enabled) setTemplateMatchInfo(null);
+    patchSettings({ editor: { auto_template_match: enabled } }).catch(() => {
+      setStatus("auto-match changed locally, but settings save failed");
+    });
+  }
+
   function nudgeScale(d) {
     if (scaleLocked||!sel) return;
-    undoRef.current = { id:sel.id, canvasX:sel.canvasX, canvasY:sel.canvasY, scale:sel.scale };
+    undoRef.current = undoSnapshot(sel);
     setItems(prev => prev.map(it =>
-      it.id===selId ? {...it, scale:Math.max(0.02,Math.min(4.0,it.scale+d))} : it
+      it.id===selId ? {...it, scale:Math.max(0.02,Math.min(Math.max(4.0,it.scale),it.scale+d))} : it
     ));
   }
 
@@ -1801,9 +2005,6 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const selEnlargement = sel ? enlargementOf(sel) : 0;
   const selIsEnlarged = selEnlargement > ENLARGE_WARN_THRESHOLD;
   const otherEnlargedCount = enlargedItems.filter(it => it.id !== selId).length;
-  const maxEnlargedPct = enlargedItems.length
-    ? Math.round(Math.max(...enlargedItems.map(enlargementOf)) * 100)
-    : 0;
   const canvasCursor = panMode === "panning" ? "grabbing" : panMode === "ready" ? "grab" : "crosshair";
   const displayZoom = zoom * DISPLAY_ZOOM_MULTIPLIER;
   const canvasDisplayPixels = Math.round(DS * displayZoom);
@@ -1817,9 +2018,10 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const currentFileLabel = isSingleImageMode
     ? singleImageName || "Single image"
     : queue[queueIdx] ? imageQueueLabel(queue[queueIdx], srcFolder) : (srcLabel || "No image loaded");
+  const singleSavesWithDialog = canSaveWithDialog();
   const saveButtonLabel = saved
-    ? isSingleImageMode ? "Downloaded!" : "Saved!"
-    : isSingleImageMode ? "Download" : "Save & Next";
+    ? isSingleImageMode && !singleSavesWithDialog ? "Downloaded!" : "Saved!"
+    : isSingleImageMode ? (singleSavesWithDialog ? "Save…" : "Download") : "Save & Next";
 
   return (
     <>
@@ -1913,27 +2115,19 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         <div className="editor-file-status" title={currentFileLabel}>
           <span>Current file</span>
           <strong>{currentFileLabel}</strong>
-          {enlargedItems.length > 0 && (
-            <em
-              className="editor-enlarge-chip"
-              title="A product is drawn larger than its source image, so the saved file will look soft there. Reduce its scale or use a larger source image."
-            >
-              ⚠ Enlarged {maxEnlargedPct}% · will look soft
-            </em>
-          )}
         </div>
 
         {/* ── Footer bar ── */}
         <div className="editor-footer">
           <div className="editor-footer-hints">
-            {["Drag=Move","Scroll=Resize","Ctrl+Scroll=Zoom","Space+Drag=Pan","Arrows=Nudge","Ctrl+Z=Undo","P=Previous"].map(h => (
+            {["Drag=Move","Scroll=Resize","Ctrl+Scroll=Rotate","Alt+Scroll=Zoom","Space+Drag=Pan","Arrows=Nudge","Ctrl+Z=Undo","P=Previous"].map(h => (
               <span key={h}>{h}</span>
             ))}
           </div>
 
           <div className="editor-zoom-controls">
             {!zoomIsPreset && (
-              <span className="editor-zoom-readout" title="Current zoom (Ctrl+Scroll)">{Math.round(zoom * 100)}%</span>
+              <span className="editor-zoom-readout" title="Current zoom (Alt+Scroll)">{Math.round(zoom * 100)}%</span>
             )}
             {zoomPresets.map(({ label, value }) => (
               <button key={label} className="ed-btn" onClick={() => zoomTo(value)} style={{
@@ -1998,6 +2192,16 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
               <option key={k} value={k} style={{ background:"var(--panel2)", color:"var(--text)" }}>{k}</option>
             ))}
           </select>
+          <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer", margin:"2px 0 4px" }}
+            title="Pick the template whose file-name words (Templates screen) appear in the photo's name">
+            <input type="checkbox" checked={autoTemplateMatch} onChange={e => toggleAutoTemplateMatch(e.target.checked)} />
+            Auto-match from file name
+          </label>
+          {templateMatchInfo && templateMatchInfo.name === template && (
+            <div style={{ fontSize:10, color:"var(--accent)", marginBottom:3, paddingLeft:2, lineHeight:1.4 }}>
+              Matched “{templateMatchInfo.keyword}” in the file name
+            </div>
+          )}
           {templates[template]?.hint && (
             <div style={{ fontSize:10, color:C.dim, marginBottom:3, paddingLeft:2, lineHeight:1.4 }}>
               {templates[template].hint}
@@ -2048,8 +2252,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
               ))}
             </div>
             <div style={{ display:"flex", gap:3, marginBottom:6 }}>
-              <button className="ed-btn" onClick={snapToFull} style={{
-                flex:2, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
+              <button className="ed-btn" onClick={() => snapToFull("fit")} title="Whole photo visible, touching two canvas edges" style={{
+                flex:1.4, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
                 borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
                 display:"flex", alignItems:"center", justifyContent:"center", gap:4,
               }}>
@@ -2058,6 +2262,16 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
                   <path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
                 </svg>
                 Fit
+              </button>
+              <button className="ed-btn" onClick={() => snapToFull("fill")} title="Cover the whole canvas; edges that stick out are cut off" style={{
+                flex:1.4, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
+                borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
+                display:"flex", alignItems:"center", justifyContent:"center", gap:4,
+              }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>
+                </svg>
+                Fill
               </button>
               <button className="ed-btn" onClick={()=>doAlign("h")} style={{
                 flex:1, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
@@ -2132,6 +2346,34 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
                 </span>
               </div>
             )}
+          </CollSection>
+
+          {/* ── Rotate ── */}
+          <CollSection label="Rotate" defaultOpen>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
+              <span style={{ fontSize:10, color:C.dim }}>Ctrl+Scroll · Shift for 0.1°</span>
+              {sel && (
+                <span style={{
+                  fontSize:10, fontFamily:"JetBrains Mono", color:C.text,
+                  background:C.panel2, border:`1px solid ${C.border}`, borderRadius:4, padding:"1px 6px",
+                }}>{(sel.rotation || 0).toFixed(1)}°</span>
+              )}
+            </div>
+            <input type="range" min={-180} max={180} step={0.1}
+              value={sel?.rotation ?? 0}
+              onPointerDown={() => { if (sel) undoRef.current = undoSnapshot(sel); }}
+              onChange={e => { if (!selId) return; const v = normalizeRotation(parseFloat(e.target.value)); setItems(prev => prev.map(it => it.id===selId ? {...it,rotation:v} : it)); }}
+              disabled={!sel}
+              style={{ width:"100%", marginBottom:4 }}
+            />
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:3, marginBottom:2 }}>
+              {[["−90°",-90,true],["−1°",-1,true],["0°",0,false],["+1°",1,true],["+90°",90,true]].map(([l,d,relative]) => (
+                <button key={l} className="ed-btn" onClick={()=>setRotation(d, { relative })} disabled={!sel} style={{
+                  background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
+                  borderRadius:4, padding:"4px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit", textAlign:"center",
+                }}>{l}</button>
+              ))}
+            </div>
           </CollSection>
 
           {/* ── Canvas Settings ── */}

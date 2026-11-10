@@ -248,6 +248,7 @@ const DEFAULT = {
   output: { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, do_rembg: true, upscale_scale: "2" },
   appearance: { guide_opacity: 1.0, ref_img_opacity: 0.05, canvas_bg_color: "#ffffff", theme: "dark" },
   guides: { use_custom: false, custom: {} },
+  editor: { auto_template_match: true },
 };
 
 export default function Settings({ onThemeChange }) {
@@ -465,6 +466,15 @@ export default function Settings({ onThemeChange }) {
                   />
                 </Row>
               )}
+              <Row
+                label="Auto-match template"
+                hint="In the Editor, pick the template whose file-name words (set on the Templates screen) appear in the photo's name."
+              >
+                <Toggle
+                  value={settings.editor?.auto_template_match ?? true}
+                  onChange={value => setSetting("editor", "auto_template_match", value)}
+                />
+              </Row>
               <Row label="Default upscale">
                 <Toggle
                   value={settings.output.do_upscale ?? true}

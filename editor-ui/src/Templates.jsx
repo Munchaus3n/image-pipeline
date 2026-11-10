@@ -13,7 +13,7 @@ const C = {
 const ZONES = ["none", "green", "blue", "magenta", "red"];
 const ZONE_COLOR = { none: C.dim, green: C.green, blue: C.blue, magenta: C.magenta, red: C.red };
 
-const EMPTY_TEMPLATE = { name: "", zone: "green", hint: "", ref_image: "" };
+const EMPTY_TEMPLATE = { name: "", zone: "green", hint: "", ref_image: "", match: "" };
 
 // Pick a file via native dialog, fetch it from the API, return as base64 data URL.
 // This means the image is self-contained in the JSON — no path dependency.
@@ -131,6 +131,16 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
       <Field label="Hint">
         <input value={form.hint} onChange={e => set("hint", e.target.value)}
           placeholder="e.g. Top + bottom touch green lines" style={inputStyle} />
+      </Field>
+
+      <Field label="File name match">
+        <input value={form.match || ""} onChange={e => set("match", e.target.value)}
+          placeholder="e.g. 26 cm, 26cm plate" style={inputStyle} />
+        <div className="template-field-help">
+          Comma-separated words. When auto-match is on (Settings), the Editor picks this
+          template for any photo whose file name contains one of them. Spaces, dashes,
+          underscores and letter case are ignored.
+        </div>
       </Field>
 
       <Field label="Reference image">
@@ -253,7 +263,7 @@ export default function Templates({ onBack }) {
     }
     const updated = { ...templates };
     if (previousKey && previousKey !== key) delete updated[previousKey];
-    updated[key] = { zone: form.zone, hint: form.hint, ref_image: form.ref_image };
+    updated[key] = { zone: form.zone, hint: form.hint, ref_image: form.ref_image, match: (form.match || "").trim() };
     await saveTemplates(updated);
     window.dispatchEvent(new CustomEvent("cutout-templates-saved"));
     setTemplates(updated);
@@ -370,6 +380,9 @@ export default function Templates({ onBack }) {
                       <span>{tpl.zone || "none"} zone</span>
                       <span>{tpl.ref_image ? "reference image" : "no reference"}</span>
                     </div>
+                    {tpl.match && (
+                      <div className="template-card-hint">Matches: {tpl.match}</div>
+                    )}
                     {tpl.hint && (
                       <div className="template-card-hint">{tpl.hint}</div>
                     )}
