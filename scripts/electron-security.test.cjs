@@ -33,6 +33,8 @@ test("packaged app: only its own index.html may be shown", () => {
   assert.equal(isAppUrl(`${app}#/editor`, app), true);
   assert.equal(isAppUrl("file:///C:/Users/me/Downloads/page.html", app), false); // dropped file
   assert.equal(isAppUrl("file:///C:/Users/me/Pictures/photo.png", app), false);
+  // Same path on another machine (UNC): must not pass as the app.
+  assert.equal(isAppUrl("file://evil/C:/Program%20Files/Cutout%20Studio/resources/app/editor-ui/dist/index.html", app), false);
   assert.equal(isAppUrl("https://example.com/", app), false);
   assert.equal(isAppUrl("garbage", app), false);
 });

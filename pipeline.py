@@ -174,8 +174,49 @@ def _is_same_or_inside(path: Path, root: Path) -> bool:
         return False
 
 
+# Inputs whose output name would clash with another input in the same folder
+# (IMG_1.jpg and IMG_1.png both becoming IMG_1.png). Filled once per run by
+# plan_output_names(); maps the input path to the stem its outputs use.
+_OUTPUT_STEM_OVERRIDES: dict[Path, str] = {}
+
+
+def plan_output_names(images: list[Path]) -> list[tuple[Path, str]]:
+    """Give same-stem inputs in one folder distinct output names.
+
+    The first file (sorted order) keeps its plain name, so existing outputs and
+    resumes are unaffected; each later one keeps its extension in the stem,
+    e.g. IMG_1.png -> IMG_1__png.png. Returns the renamed (path, new stem) pairs.
+    """
+    _OUTPUT_STEM_OVERRIDES.clear()
+    groups: dict[tuple[str, str], list[Path]] = defaultdict(list)
+    for img in images:
+        groups[(str(img.parent).lower(), img.stem.lower())].append(img)
+    renamed: list[tuple[Path, str]] = []
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        for img in sorted(members, key=lambda p: p.name.lower())[1:]:
+            stem = f"{img.stem}__{img.suffix.lstrip('.').lower()}"
+            _OUTPUT_STEM_OVERRIDES[img] = stem
+            renamed.append((img, stem))
+    return renamed
+
+
+def _safe_rel(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return path.name
+
+
+def output_rel(src: Path, rel: Path, suffix: str = ".png") -> Path:
+    """Relative output path for src: rel with the output suffix, renamed if src clashes."""
+    stem = _OUTPUT_STEM_OVERRIDES.get(src)
+    return rel.with_name(stem + suffix) if stem else rel.with_suffix(suffix)
+
+
 def mirror_path(src: Path, src_root: Path, dst_root: Path, suffix: str = ".png") -> Path:
-    return dst_root / src.relative_to(src_root).with_suffix(suffix)
+    return dst_root / output_rel(src, src.relative_to(src_root), suffix)
 
 
 @dataclass
@@ -1294,7 +1335,7 @@ def batch_remove_bg(
             or _relative_path_from_root(src, src_root)
             or Path(src.name)
         )
-        dst = (dst_root / rel).with_suffix(".png")
+        dst = dst_root / output_rel(src, rel)
         outputs.append(dst)
 
         if dst.exists() and _is_valid_existing_output(dst):
@@ -1543,6 +1584,10 @@ def main():
         f"{len(excluded_paths)} excluded from BG, {normal_count} normal."
     )
 
+    for clashing, stem in plan_output_names(images):
+        warn(f"{_safe_rel(clashing, input_dir)} shares its name with another file in that folder; "
+             f"its output is saved as {stem}.png")
+
     duplicate_plan = build_duplicate_reuse_plan(
         images,
         input_dir,
@@ -1693,12 +1738,25 @@ def main():
     elif args.wipe_input_after_run and _is_same_or_inside(output_base, input_dir):
         warn("Input wipe skipped — the output folder is inside the input folder.")
     elif args.wipe_input_after_run:
-        # Only images this run processed; skipped files and non-images stay.
+        # Only images whose final output exists and is readable; skipped files,
+        # non-images and anything that failed (and may have no backup copy, e.g.
+        # on a full disk) stay in the input so nothing is lost.
+        kept_inputs = 0
         for src in images:
+            try:
+                final_output = _expected_final_output(src, input_dir, final_root)
+            except ValueError:
+                kept_inputs += 1
+                continue
+            if not (final_output.is_file() and _is_valid_existing_output(final_output)):
+                kept_inputs += 1
+                continue
             try:
                 src.unlink(missing_ok=True)
             except Exception:
                 pass
+        if kept_inputs:
+            warn(f"Input wipe kept {kept_inputs} image(s) that have no finished output.")
         for p in sorted(input_dir.rglob("*"), reverse=True):
             if p.is_dir():
                 try:

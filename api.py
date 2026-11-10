@@ -513,7 +513,17 @@ def _write_json_atomic(path: Path, data: Any, *, indent: int | None = None) -> N
     tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_text(json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        # Windows refuses to replace a file another thread or process (a reader,
+        # an antivirus scan) has open at that instant. Those opens are brief, so
+        # retry a few times instead of failing the save with a 500.
+        for attempt in range(8):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(0.025 * (attempt + 1))
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -742,11 +752,42 @@ class ApiTokenMiddleware:
         await JSONResponse({"detail": "Missing or invalid API token"}, status_code=401)(scope, receive, send)
 
 
+class CrossSiteRequestMiddleware:
+    """Without a token, refuse requests a browser marks as coming from another site.
+
+    CORS only hides responses; it does not stop a web page from *sending* simple
+    requests. Without this, any page open in the user's browser could make the
+    terminal-workflow API act: an <img src=".../image?path=\\\\host\\share\\x.png">
+    makes Windows connect to that share and hand over the user's NTLM hash, and
+    GET /open-folder, /browse or a body-less POST /pipeline/stop all work too.
+    Browsers label such requests with Sec-Fetch-Site and a foreign Origin.
+    Requests without those headers (curl, scripts, typing a URL) are unchanged.
+    """
+
+    _BLOCKED_FETCH_SITES = {b"cross-site", b"same-site"}
+
+    def __init__(self, inner, allowed_origins: list[str]):
+        self.inner = inner
+        self.allowed_origins = {o.encode("utf-8") for o in allowed_origins}
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope["headers"])
+            fetch_site = headers.get(b"sec-fetch-site", b"").lower()
+            origin = headers.get(b"origin")
+            if fetch_site in self._BLOCKED_FETCH_SITES or (origin is not None and origin not in self.allowed_origins):
+                await JSONResponse({"detail": "Cross-site request refused"}, status_code=403)(scope, receive, send)
+                return
+        await self.inner(scope, receive, send)
+
+
 # Added before CORS so CORS stays outermost and error responses still carry its headers.
 # Host filtering blocks DNS-rebinding pages that resolve their own name to 127.0.0.1.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 if API_TOKEN:
     app.add_middleware(ApiTokenMiddleware, token=API_TOKEN)
+else:
+    app.add_middleware(CrossSiteRequestMiddleware, allowed_origins=_LOCAL_ORIGINS)
 
 app.add_middleware(
     CORSMiddleware,

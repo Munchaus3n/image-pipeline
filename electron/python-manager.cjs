@@ -277,12 +277,16 @@ function spawnBackend() {
 async function recoverBackend() {
   if (recovering) return;
   recovering = true;
+  // Attempts in this recovery. The time window alone is not enough: a restart
+  // that hangs until waitForApi times out (120 s packaged, as long as the
+  // window) pushes older attempts out of it, so the cap would never trip.
+  let attempts = 0;
   try {
     for (;;) {
       const now = Date.now();
       restartTimes = restartTimes.filter((time) => now - time < RESTART_WINDOW_MS);
       if (stopping) return;
-      if (restartTimes.length >= MAX_RESTARTS) {
+      if (attempts >= MAX_RESTARTS || restartTimes.length >= MAX_RESTARTS) {
         emitStatus({
           state: "failed",
           message: `The backend stopped ${MAX_RESTARTS} times in a row (${backendExit || "unknown reason"}).`,
@@ -290,8 +294,10 @@ async function recoverBackend() {
         return;
       }
       restartTimes.push(now);
-      emitStatus({ state: "restarting", attempt: restartTimes.length, max: MAX_RESTARTS });
-      await sleep(500 * restartTimes.length);
+      attempts += 1;
+      const attempt = Math.max(attempts, restartTimes.length);
+      emitStatus({ state: "restarting", attempt, max: MAX_RESTARTS });
+      await sleep(500 * attempt);
       if (stopping) return;
       spawnBackend();
       try {

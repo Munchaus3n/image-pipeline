@@ -25,7 +25,8 @@ function isAppUrl(value, appUrl) {
     const target = new URL(String(value));
     const app = new URL(String(appUrl));
     if (app.protocol === "file:") {
-      return target.protocol === "file:" && target.pathname === app.pathname;
+      // Host too: file://server/C:/... is a UNC path on another machine.
+      return target.protocol === "file:" && target.host === app.host && target.pathname === app.pathname;
     }
     return target.origin === app.origin;
   } catch {
