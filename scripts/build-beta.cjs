@@ -58,6 +58,42 @@ function obfuscateInPlace() {
 }
 
 const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), "cs-cjs-"));
+let restored = false;
+
+// Put the readable electron/*.cjs back. Idempotent, synchronous, safe to call
+// from a signal handler.
+function restoreSource() {
+  if (restored) return;
+  restored = true;
+  for (const name of CJS) {
+    const bk = path.join(backupDir, name);
+    try {
+      if (fs.existsSync(bk)) fs.copyFileSync(bk, path.join(ELECTRON_DIR, name));
+    } catch (error) {
+      restored = false;
+      console.error(`could not restore electron/${name} (backup kept in ${backupDir}): ${error.message}`);
+    }
+  }
+  if (restored) {
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    console.log("restored readable electron/*.cjs source");
+  }
+}
+
+// Without a listener, Ctrl+C ends Node at once and the finally below never
+// runs, leaving obfuscated source and an eval build-channel in the working tree.
+// With one, the running child stops, run() throws and finally restores.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) {
+  process.on(signal, () => {
+    console.error(`
+${signal}: stopping and restoring source...`);
+    restoreSource();
+    process.exit(130);
+  });
+}
+process.on("exit", restoreSource);
+console.log(`backups of electron/*.cjs: ${backupDir}`);
+
 try {
   // 1. Front-end + backend bundles (reflect current api.py / pipeline.py / UI).
   console.log("[1/5] building UI");
@@ -81,13 +117,9 @@ try {
     { env: { ...process.env, ELECTRON_RUN_AS_NODE: "" } });
 
   console.log(`[5/5] done. grantId=${grantId} appName="${appName}"`);
-  console.log(`Output: beta/${appName} Setup <version>.exe`);
+  const version = require(path.join(ROOT, "package.json")).version;
+  console.log(`Output: beta/v${version}/${appName} Setup ${version}.exe`);
 } finally {
   // ALWAYS restore readable source.
-  for (const name of CJS) {
-    const bk = path.join(backupDir, name);
-    if (fs.existsSync(bk)) fs.copyFileSync(bk, path.join(ELECTRON_DIR, name));
-  }
-  fs.rmSync(backupDir, { recursive: true, force: true });
-  console.log("restored readable electron/*.cjs source");
+  restoreSource();
 }

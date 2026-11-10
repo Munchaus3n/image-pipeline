@@ -2,7 +2,7 @@
   "appId": "com.cutoutstudio.app.beta",
   "productName": "Cutout Studio Beta",
   "asar": true,
-  "directories": { "output": "beta" },
+  "directories": { "output": "beta/v${version}" },
   "files": [
     "electron/**",
     "editor-ui/dist/**"
