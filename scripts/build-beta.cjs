@@ -1,7 +1,8 @@
 // One-command hardened beta build.
 //
-//   node scripts/build-beta.cjs [grantId] [appName]
+//   node scripts/build-beta.cjs [grantId] [appName] [outputDir]
 //   e.g. node scripts/build-beta.cjs eval-2026-11 "Cutout Studio Beta"
+// outputDir defaults to beta/v<version> (from electron-builder-beta.json).
 //
 // Produces beta/<productName> Setup <ver>.exe, a time-limited evaluation build
 // with the Bria/RMBG model removed, asar + integrity fuses, and the Electron
@@ -24,6 +25,7 @@ const CJS = ["main.cjs", "eval-license.cjs", "build-channel.cjs", "python-manage
 
 const grantId = process.argv[2] || "eval-2026-11";
 const appName = process.argv[3] || "Cutout Studio Beta";
+const outputDir = process.argv[4] || "";
 const evalDays = 365;
 
 function run(cmd, args, opts = {}) {
@@ -113,12 +115,14 @@ try {
 
   // 4. Package (asar + fuses + beta identity come from electron-builder-beta.json).
   console.log("[4/5] packaging installer");
-  run("npx", ["electron-builder", "--win", "nsis", "--config", "electron-builder-beta.json"],
+  const builderArgs = ["electron-builder", "--win", "nsis", "--config", "electron-builder-beta.json"];
+  if (outputDir) builderArgs.push(`--config.directories.output=${outputDir}`);
+  run("npx", builderArgs,
     { env: { ...process.env, ELECTRON_RUN_AS_NODE: "" } });
 
   console.log(`[5/5] done. grantId=${grantId} appName="${appName}"`);
   const version = require(path.join(ROOT, "package.json")).version;
-  console.log(`Output: beta/v${version}/${appName} Setup ${version}.exe`);
+  console.log(`Output: ${outputDir || `beta/v${version}`}/${appName} Setup ${version}.exe`);
 } finally {
   // ALWAYS restore readable source.
   restoreSource();
