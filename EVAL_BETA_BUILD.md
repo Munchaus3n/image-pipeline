@@ -1,210 +1,145 @@
 # Evaluation (beta) build — implementation record & audit guide
 
-Written 2026-11-10. Purpose: a time-limited **evaluation build** of Cutout Studio
-to share with colleagues, as a separate "beta" product, with the license-
-restricted Bria/RMBG model removed. This file documents everything changed so it
-can be audited, then built.
+Purpose: a time-limited **evaluation build** of Cutout Studio to share with
+colleagues, as a separate "Cutout Studio Beta" product, with the
+license-restricted Bria/RMBG model removed.
 
-**Nothing in this work is committed.** Branch tip is unchanged (`b6b63b8`). All
-changes sit in the working tree + untracked files. Discard everything with:
-`git checkout -- . && git clean -fd beta electron-builder-beta.json *.md scripts/build-beta.cjs`
-(review `git clean -n` first).
+## Branches
 
----
+| Branch | What it is |
+|---|---|
+| `main` | Unchanged (0.1.x line). |
+| `V2` | Full app: v0.2.0 (`feature/security-hardening`) + audit fixes, version **0.2.1**. |
+| `beta` | `V2` + the evaluation build (this document). Rebuild it by rebasing onto `V2`. |
 
-## 1. What was done (high level)
-
-1. **Removed the Bria / RMBG-2.0 model** from the product (license compliance).
-2. **Added a 1-year evaluation gate** for builds marked `channel: "eval"`.
-   Full builds (`channel: "full"`, the default) run none of this code.
-3. **Separate beta identity** so it installs alongside the full app, with its own
-   data/registry namespace and no crossover.
-4. **Hardening**: asar + Electron integrity fuses (#1) and obfuscated main-process
-   code (#2).
-5. **A one-command build script** (`scripts/build-beta.cjs`).
-
-Verified by launching the actual packaged binary (see §7).
+The first beta (0.1.1) was built on `main` and therefore lacked all of v0.2.0's
+hardening: a fixed port 7421 shared with the full app (whichever started second
+silently used the other's backend and data), no API token, no single-instance
+lock, no CSP. Basing the beta on `V2` fixes that class of problem.
 
 ---
 
-## 2. Changed & new files (audit map)
+## 1. What the beta changes on top of V2
 
-### Model removal
-- **`api.py`** — removed `"bria-rmbg"` from `_REMBG_MODELS` (the list the UI offers).
-- **`editor-ui/src/modelLabels.js`** — removed the two `bria-rmbg` entries
-  (`BG_MODEL_LABELS` map and `BG_MODEL_OPTIONS` list).
-- **`pipeline.py`** —
-  - Added `ALLOWED_REMBG_MODELS` (the five BiRefNet models).
-  - At the `--rembg-model` resolution point, a requested model not in that set is
-    clamped to `birefnet-general` (so a stale saved setting of `bria-rmbg` cannot
-    run it). Search `requested_model`.
-  - Removed the now-dead Bria branch in the hole-fill step and the Bria mentions
-    in `_fill_mask_holes` docstring. Hole-fill now always runs (all shipping
-    models are BiRefNet).
-- **`scripts/build-backend.cjs`** — removed `"rembg.sessions.bria_rmbg"` from the
-  PyInstaller hidden-imports so the Bria session code is not bundled.
+1. **Bria / RMBG-2.0 removed** from the model lists (`api.py` `_REMBG_MODELS`,
+   `editor-ui/src/modelLabels.js`), from the pipeline (`ALLOWED_REMBG_MODELS`
+   clamp in `pipeline.py`, Bria-only mask branches deleted), and from the
+   PyInstaller hidden imports.
+2. **1-year evaluation gate** for builds marked `channel: "eval"`
+   (`electron/build-channel.cjs`, `electron/eval-license.cjs`). Full builds
+   (`channel: "full"`, the committed default) run none of it.
+3. **Separate identity**: `APP_NAME` comes from the build channel, so the beta
+   has its own `%LOCALAPPDATA%\Cutout Studio Beta` data folder, its own
+   single-instance lock (Electron scopes it to userData) and its own
+   `HKCU\Software\CutoutStudioBeta` registry tree. `appId
+   com.cutoutstudio.app.beta` gives a separate install/uninstall entry.
+4. **Hardening**: `asar: true` + Electron fuses (`runAsNode`,
+   `NODE_OPTIONS`, `--inspect` off; embedded asar integrity on;
+   only-load-from-asar on), obfuscated main-process code.
+5. **`backendResourceDir()`** in `main.cjs`: with asar the native data
+   (Real-ESRGAN, templates) ships under `resources\`, so the backend's cwd and
+   `CUTOUT_STUDIO_RESOURCE_DIR` point there instead of into `app.asar`.
 
-Note: the `rembg` library in `venv311` still contains `bria_rmbg.py`; it is simply
-never selected, imported, or bundled. The weights are downloaded on demand only,
-so they are never fetched.
-
-### Evaluation gate (new)
-- **`electron/build-channel.cjs`** (NEW) — the single switch. Committed-style
-  default is `channel:"full"`, `grantId:""`, `evalDays:365`, `appName:"Cutout Studio"`.
-  A full build with this default runs no eval code.
-- **`electron/eval-license.cjs`** (NEW) — the gate. `checkEvaluation(config, log)`
-  returns `{ expired: boolean }`. No-op unless `config.channel === "eval"`.
-- **`electron/main.cjs`** — four changes:
-  1. `require` of the two files above.
-  2. `APP_NAME` now comes from `buildChannel.appName` (beta gets its own identity).
-  3. `backendResourceDir()` — probes for `realesrgan-ncnn-vulkan` under
-     `resources/app` (asar:false) or `resources/` (asar:true) so the native
-     backend always finds its data. Passed to `startPythonApi`.
-  4. In `app.whenReady`, `checkEvaluation(...)` runs first; if `expired`, it shows
-     a minimal generic "could not start" screen (`stoppedHtml`) and does not start
-     the backend.
-
-### Build config / tooling (new, untracked)
-- **`electron-builder-beta.json`** (NEW) — beta packaging: own `appId`
-  (`com.cutoutstudio.app.beta`), `productName` "Cutout Studio Beta", `asar:true`,
-  app files limited to `electron/**` + `editor-ui/dist/**`, native data moved to
-  `extraResources` (backend, realesrgan, templates, templates_custom.json),
-  `electronFuses` (see §5), output to `beta/`.
-- **`scripts/build-beta.cjs`** (NEW) — one-command build (see §6).
-- **`TRIAL_BUILD_PLAN.md`**, **`EVAL_BETA_BUILD.md`** — planning / this doc.
+Note on Bria: rembg's `sessions/__init__.py` imports every session module, so
+`rembg.sessions.bria_rmbg` (code only, no weights) is still inside the
+PyInstaller bundle. Excluding it would break `import rembg`. It can never be
+selected: the API clamps settings, the warm-up and the pipeline command to the
+offered models, and `pipeline.py` clamps again, so Bria weights are never
+downloaded.
 
 ---
 
-## 3. How the evaluation gate works
+## 2. How the evaluation gate works
 
-Stored per **grantId** (an issuance label, NOT per recipient) under two locations:
-- Registry: `HKCU\Software\<AppNameNoSpaces>\Grants\<grantId>`, value `Data`.
-- File: `%LOCALAPPDATA%\<AppName>\.license\<grantId>\state`.
+Stored per **grantId** (an issuance label, not per person) in two places:
+- Registry: `HKCU\Software\CutoutStudioBeta\Grants\<grantId>`, value `Data`.
+- File: `%LOCALAPPDATA%\Cutout Studio Beta\.license\<grantId>\state`.
 
-**Token format**: `base64( "<hexFirstLaunch>.<hexLastSeen>:<tag>" )` where
+Token: `base64("<hexFirstLaunch>.<hexLastSeen>:<tag>")`,
 `tag = HMAC_SHA256(SECRET, "<payload>|<MachineGuid>")[:16]`.
 
-Behavior on launch (`checkEvaluation`):
-- No copy present → first launch; record `now` to both locations; **active**.
-- A present copy fails the HMAC (edited, or made on another machine) → **expired**.
-- Valid copy → `elapsed = max(now, lastSeen) - firstLaunch`; **expired** when
-  `elapsed >= evalDays*86400`; `lastSeen` is advanced and written back.
+On launch (`checkEvaluation`, run in `app.whenReady` inside the
+single-instance lock holder, before any port or backend is set up; `activate`
+honours the result too):
 
-Properties this gives (all **soft** limits, see §8):
-- **Survives reinstall / app-data deletion** — registry copy is outside the app.
-- **Deleting one location** is restored from the other (earliest start / latest seen).
-- **Clock rollback** can't add time (monotonic `lastSeen`).
-- **Casual edits** to the stored value are rejected (HMAC).
-- **Machine-bound** — a token copied to another PC is rejected (MachineGuid in tag).
+| Situation | Result |
+|---|---|
+| No copy stored | First launch: record now in both places; runs. |
+| At least one copy verifies | Use the valid copies (earliest start, latest seen); rewrite both, repairing a damaged one. |
+| Copies present, none verifies (edited, junk, another machine) | Expired. |
+| MachineGuid unreadable | Runs, **nothing stored** (a stamp made without it would be rejected later). |
+| `elapsed = max(now, lastSeen) − firstLaunch ≥ evalDays` | Expired. |
+| Expired only because the clock jumped forward more than half the period since the last launch | Expired this launch, jump **not stored**: fixing the clock undoes it. |
 
-### grantId semantics (important)
-- One build serves **many** colleagues; each machine starts its own year on first
-  launch. You do **not** edit grantId per person.
-- Change grantId **only to grant a fresh period** (e.g. a renewal a year later):
-  a new id → a new registry subkey → a clean year, even on a machine that still
-  holds the old expired stamp. Full builds ignore all of it.
+The state file is written via temp file + rename. On expiry the app shows a
+plain "Cutout Studio Beta could not start." page and never starts the backend.
 
-### On expiry
-Reuses a minimal generic "Cutout Studio could not start." screen. No technical
-detail; the backend is not started. (It is an honest generic failure, not a
-fabricated OS error.)
+**grantId**: one build serves many people; each machine starts its own year on
+first launch. Change grantId only to grant a fresh period (renewal). The 0.2.1
+beta keeps `eval-2026-11`, so machines that ran 0.1.1 continue their year.
 
 ---
 
-## 4. Separate beta identity (no crossover with the full app)
-- `appId com.cutoutstudio.app.beta` → separate install + uninstall entry.
-- `productName "Cutout Studio Beta"` → separate install dir, Start Menu entry.
-- `appName "Cutout Studio Beta"` → own `%LOCALAPPDATA%\Cutout Studio Beta` data
-  and `HKCU\Software\CutoutStudioBeta` registry tree.
-- The full build (`channel:"full"`) executes no eval code at all, so it can never
-  be affected by a beta stamp.
+## 3. How to build
 
----
+Full app (from `V2`):
+```
+npm run electron:build-ui && npm run backend:build && npx electron-builder --win --config.directories.output=dist/v0.2.1
+```
 
-## 5. Hardening
-
-**#1 asar + integrity fuses** (`electron-builder-beta.json`):
-- `asar: true` — app code packed into `app.asar`. Native data lives outside the
-  archive (extraResources), and `backendResourceDir()` retargets the backend to it.
-- `electronFuses`: `enableEmbeddedAsarIntegrityValidation:true` +
-  `onlyLoadAppFromAsar:true` (editing packed code makes the app refuse to start),
-  `runAsNode:false`, `enableNodeOptionsEnvironmentVariable:false`,
-  `enableNodeCliInspectArguments:false` (close the `ELECTRON_RUN_AS_NODE` / node
-  CLI bypasses). Build log confirms "updating asar integrity executable resource"
-  and "executing @electron/fuses".
-
-**#2 obfuscated main-process code** (via `scripts/build-beta.cjs`):
-- `electron/*.cjs` (main, eval-license, build-channel, python-manager, preload)
-  are obfuscated at build time only; the HMAC secret and the check logic are no
-  longer plain strings. Your working-tree source is restored to readable form
-  after the build (the script uses try/finally).
-- `transformObjectKeys:false` is deliberate — it keeps IPC channel names
-  (`dialog:select-folder`, `app:is-packaged`) and the exposed `electronAPI`
-  surface intact.
-
----
-
-## 6. How to build
-
-### Full build (unchanged, no eval)
-`build-channel.cjs` stays at `channel:"full"`. Build as normal
-(`npm run electron:dist:win`). No eval code runs.
-
-### Beta / evaluation build (one command)
+Beta (from `beta`):
 ```
 node scripts/build-beta.cjs eval-2026-11 "Cutout Studio Beta"
 ```
-- Arg 1 = grantId (use a NEW one per issuance/renewal, e.g. `eval-2027-11`).
-- Arg 2 = app name (optional; defaults to "Cutout Studio Beta").
-- It builds UI + backend, bakes the eval channel, obfuscates, packages with
-  `electron-builder-beta.json`, and **restores readable source** afterward.
-- Output: `beta/Cutout Studio Beta Setup <version>.exe`.
-
-Honest limits of in-session verification: I unit-tested the gate thoroughly and
-launched the packaged binary once (§7). Test-install on a clean machine before
-handing it out.
+Builds UI + backend, bakes the eval channel, obfuscates `electron/*.cjs`,
+packages with `electron-builder-beta.json` into `beta/v<version>/`, then
+restores the readable source. Restoring also happens on Ctrl+C / termination
+(signal listeners); the backup folder is printed at the start in case a hard
+kill ever skips it.
 
 ---
 
-## 7. Test results (this session)
+## 4. Audit record (2026-11-10)
 
-Gate unit tests (isolated, with cleanup) — all passed:
-- full-build no-op; first launch; same-day relaunch; expiry at 400d/365d;
-  clock-rollback → expired; tampered value → expired; another-machine token →
-  expired; registry cleared but file restores it; new grantId starts fresh.
+Audited: the 0.1.1 beta binary (`docs/audit-checklist.md` scenarios run against
+the bundled backend in a sandbox), the eval gate in an isolated harness
+(stubbed `reg.exe`), and an independent security/architecture review of v0.2.0.
 
-Packaged smoke test — launched `beta/win-unpacked/Cutout Studio Beta.exe`:
-- `eval: grant=eval-2026-11 first launch recorded`
-- backend resource dir resolved to `...\resources` (outside asar); **backend ready**
-- renderer loaded from `app.asar/editor-ui/dist/index.html`
-- Confirmed Bria absent from the bundled backend.
-- Afterward: process stopped, and the test stamp (registry key + license file)
-  was removed from this machine.
+Fixed in `V2` (so also in `beta`):
+- Resume prompt was inverted: shown after finished runs, never after stopped
+  ones. Sessions now carry `kind: "pipeline"` and the run's input count.
+- Truncated preview-cache files were served as broken images.
+- Unknown `rembg_model` values were accepted (and could trigger downloads).
+- Same-name inputs with different extensions overwrote each other's outputs.
+- Wipe-input-after-run deleted inputs that failed to process.
+- Terminal workflow: any web page could trigger API actions with simple GETs,
+  including an NTLM-hash leak via a UNC `path=`; now cross-site requests are
+  refused.
+- `file:` navigation guard ignored the host (UNC).
+- Backend restart cap never tripped when restarts hung.
+- Settings/session writes failed with 500 when Windows briefly locked the file.
+- "Default output" labels said `./output` in the desktop app.
+
+Fixed in `beta`:
+- Rebased onto `V2` (port/token/lock/CSP from v0.2.0; see Branches).
+- Gate failed closed on infrastructure errors (transient MachineGuid read, one
+  damaged copy, wrong clock) and treated junk in both copies as a fresh start.
+- Build script left obfuscated source behind on Ctrl+C.
+
+Known limits (not fixed):
+- **Not code-signed.** `signtool` runs without a certificate; Windows shows
+  SmartScreen warnings and the asar integrity fuse is weaker unsigned.
+- The bundled backend can be run on its own
+  (`image-pipeline-api.exe --pipeline …`) without the gate. Soft limit by
+  design; only server-side activation would close it.
+- Not reproduced: one run where background removal failed on 2 of 4 images
+  with `ONNXRuntimeError 6` (5 later runs were clean).
 
 ---
 
-## 8. Honest limits (what this is NOT)
-This is a **soft** limit for sharing with colleagues, not security. The app is
-distributable JavaScript: asar can be extracted, obfuscation can be reversed, and
-the integrity fuses are strongest only when the binary is signed with a real
-code-signing certificate (the build is signtool-signed; confirm whether that is a
-real cert or self-signed). A determined reverse-engineer can defeat it. The only
-hard limit is **server-side activation**, which was deliberately **declined** for
-this audience and not implemented.
+## 5. Honest limits
 
-Also deliberately **not** done (would get builds flagged as malware and buy
-little): self-replicating/hidden files, registry run-keys or scheduled "repair"
-tasks, or disguising the stamp as another vendor's data.
-
----
-
-## 9. Audit checklist (suggested)
-- [ ] `pipeline.py` clamp truly prevents `bria-rmbg` from ever reaching `new_session`.
-- [ ] No remaining `bria` references in `api.py`, `pipeline.py`, `editor-ui/src`.
-- [ ] `eval-license.cjs`: token parse is robust to garbage input (returns null/`tampered`, never throws out of `checkEvaluation`); `checkEvaluation` never throws (wrapped) and never blocks launch on infra error.
-- [ ] Fail-open vs fail-closed choices are acceptable (missing grantId / reg errors → launch allowed; present-but-invalid token → expired).
-- [ ] `backendResourceDir()` probe is correct for both asar:true and asar:false.
-- [ ] `electron-builder-beta.json` `files` excludes the native data from the asar; `extraResources` includes all of it.
-- [ ] `build-beta.cjs` always restores readable `electron/*.cjs` (try/finally) even on build failure.
-- [ ] Obfuscation keeps IPC channels / `electronAPI` working (it launched, but re-verify interactions).
-- [ ] Decide on the SECRET in `eval-license.cjs` (currently a baked constant; rotate per batch if desired).
+This is a **soft** limit for colleagues, not security. asar can be extracted
+and obfuscation reversed; a determined person can forge a stamp or clear both
+copies. Not done on purpose: hidden or self-recreating files, run-keys or
+scheduled "repair" tasks, disguising the stamp as another vendor's data.
