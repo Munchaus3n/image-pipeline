@@ -65,6 +65,28 @@ function isTextEntryTarget(target) {
   return tagName === "input" || tagName === "select" || tagName === "textarea" || Boolean(target?.isContentEditable);
 }
 
+// Input types where Enter does nothing by itself, so Enter should still save the image.
+const NON_TEXT_INPUT_TYPES = new Set(["checkbox", "radio", "range", "color", "button", "file"]);
+
+// True when Enter belongs to the focused control (typing, picking from a list).
+// A focused colour picker, checkbox or slider does not use Enter, so it must not block Save.
+function enterBelongsToTarget(target) {
+  const tagName = target?.tagName?.toLowerCase?.() || "";
+  if (tagName === "input") return !NON_TEXT_INPUT_TYPES.has(String(target.type || "").toLowerCase());
+  return tagName === "select" || tagName === "textarea" || Boolean(target?.isContentEditable);
+}
+
+// After a mouse click on a tool button, focus goes back to the editor so Enter saves
+// and the arrow keys nudge. Keyboard activation (detail 0) and popup openers keep focus.
+const CLICK_REFOCUS_SELECTOR = "button, [role='switch'], [role='radio'], input[type='checkbox'], input[type='radio']";
+function shouldRefocusAfterClick(e) {
+  if (!e.detail) return false;
+  const control = e.target?.closest?.(CLICK_REFOCUS_SELECTOR);
+  if (!control || control.disabled) return false;
+  if (control.closest("[aria-haspopup], [role='dialog'], [role='listbox']")) return false;
+  return true;
+}
+
 const SHORTCUTS = [
   ["Move product", "Drag"],
   ["Resize product", "Scroll on canvas"],
@@ -1843,12 +1865,12 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const onKeyDown = useCallback((e) => {
     const isEditingText = isTextEntryTarget(e.target);
     if (e.key === "Enter") {
-      if (isEditingText || saveInFlightRef.current) return;
+      if (enterBelongsToTarget(e.target) || saveInFlightRef.current) return;
       // Enter on a focused button, switch or option activates that control instead.
       if (e.target?.closest?.("button, a, [role='switch'], [role='radio'], [role='option'], [role='separator']")) return;
       e.preventDefault();
       if (e.repeat) return; // holding Enter must not save the following images unseen
-      doSave();
+      Promise.resolve(doSave()).catch((err) => setStatus(`save failed: ${err?.message || err}`));
       return;
     }
     // Arrows, S, Ctrl+Z and Delete belong to the focused field while typing or using a slider/select.
@@ -1863,8 +1885,9 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       return;
     }
     const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat;
-    if ((e.key==="s"||e.key==="S") && plainKey) doSkip();
-    if ((e.key==="p"||e.key==="P") && plainKey) goPrevious();
+    const report = (what) => (err) => setStatus(`${what} failed: ${err?.message || err}`);
+    if ((e.key==="s"||e.key==="S") && plainKey) Promise.resolve(doSkip()).catch(report("skip"));
+    if ((e.key==="p"||e.key==="P") && plainKey) Promise.resolve(goPrevious()).catch(report("previous"));
     if ((e.ctrlKey||e.metaKey) && e.key==="z") doUndo();
     if ((e.key==="Delete"||e.key==="Backspace") && selId) {
       e.preventDefault();
@@ -1998,6 +2021,11 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         ref={containerRef}
         tabIndex={0}
         onKeyDown={onKeyDown}
+        onClickCapture={(e) => {
+          if (!shouldRefocusAfterClick(e)) return;
+          // Deferred so it runs after the button's own click handler and default focus.
+          window.setTimeout(() => containerRef.current?.focus({ preventScroll: true }), 0);
+        }}
         className="editor-root"
       >
       <input
