@@ -45,6 +45,7 @@ from sse_starlette.sse import EventSourceResponse
 from contextlib import asynccontextmanager, contextmanager
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import model_cache
 
 # If pillow-avif-plugin is installed, importing it may register AVIF decoders in Pillow.
 _PILLOW_AVIF_IMPORTED = False
@@ -74,14 +75,19 @@ _warmup_model = ""
 
 def _warmup_worker():
     try:
-        from rembg.sessions import sessions_class
         model = _warmup_model
+        # A model that already passed the check needs nothing here. Skipping also keeps
+        # rembg (and the numba/scipy stack it pulls in) out of this long-lived process.
+        if model_cache.is_verified(model):
+            return
+        from rembg.sessions import sessions_class
         # Only fetch the weights; building an ORT session here would cost
         # seconds of CPU and 1-2 GB RAM for a session that is thrown away.
         # The real pipeline run will pick the right provider (DML/CUDA/CPU).
         for session_class in sessions_class:
             if session_class.name() == model:
                 session_class.download_models()
+                model_cache.mark_verified(model)  # pooch just verified the download
                 break
     except Exception:
         pass  # Warm-up is best-effort; never crash the server
@@ -318,8 +324,10 @@ _PIPELINE_NOISE_PATTERNS = (
     "onnxruntime_providers_tensorrt.dll",
     "loadlibrary failed",
     "available providers:",
-    "ep error",
 )
+# ONNX Runtime prints "EP Error ..." banners. Matched as whole words so ordinary
+# messages such as "step error" or "deep error" are not hidden with them.
+_EP_ERROR_RE = re.compile(r"(?<![a-z])ep error(?![a-z])")
 
 def _clean(raw: bytes) -> list[str]:
     text = raw.decode("utf-8", errors="replace")
@@ -331,7 +339,7 @@ def _clean(raw: bytes) -> list[str]:
         if not line:
             continue
         lower = line.lower()
-        if any(pattern in lower for pattern in _PIPELINE_NOISE_PATTERNS):
+        if any(pattern in lower for pattern in _PIPELINE_NOISE_PATTERNS) or _EP_ERROR_RE.search(lower):
             continue
         cleaned.append(line)
     return cleaned
@@ -675,14 +683,18 @@ _seed_templates()
 
 class PlacedItem(BaseModel):
     image_path: str
-    canvas_x:   int
-    canvas_y:   int
-    scale:      float
+    # Bounded so one request cannot ask Pillow for an enormous image (memory exhaustion).
+    canvas_x:   int = Field(ge=-100_000, le=100_000)
+    canvas_y:   int = Field(ge=-100_000, le=100_000)
+    scale:      float = Field(gt=0.0, le=50.0)
     # Degrees, clockwise (matches the Editor canvas).
     rotation:   float = Field(default=0.0, ge=-360.0, le=360.0)
 
+# A placed item above this many pixels after scaling is refused (about 400 MB as RGBA).
+MAX_PLACED_ITEM_PIXELS = 100_000_000
+
 class SaveRequest(BaseModel):
-    items:       list[PlacedItem]
+    items:       list[PlacedItem] = Field(max_length=64)
     src_root:    str
     queue_index: int
     is_combo:    bool       = False
@@ -797,7 +809,7 @@ class CrossSiteRequestMiddleware:
     requests. Without this, any page open in the user's browser could make the
     terminal-workflow API act: an <img src=".../image?path=\\\\host\\share\\x.png">
     makes Windows connect to that share and hand over the user's NTLM hash, and
-    GET /open-folder, /browse or a body-less POST /pipeline/stop all work too.
+    GET /browse or a body-less POST /open-folder or /pipeline/stop all work too.
     Browsers label such requests with Sec-Fetch-Site and a foreign Origin.
     Requests without those headers (curl, scripts, typing a URL) are unchanged.
     """
@@ -924,7 +936,9 @@ def browse_file(initial: str = "", filter: str = ""):
 
 # ── Open folder in OS explorer ────────────────────────────────────────────────
 
-@app.get("/open-folder")
+# POST, not GET: it has a side effect (opens a window), so a stray link or image tag
+# must not be able to trigger it.
+@app.post("/open-folder")
 def open_folder(path: str = ""):
     """
     Open a folder in the native OS file explorer.
@@ -1094,6 +1108,8 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
         return Response(content=payload, media_type=mime, headers={"Cache-Control": "public, max-age=60"})
     except HTTPException:
         raise
+    except Image.DecompressionBombError as e:
+        raise HTTPException(status_code=413, detail=f"Image is too large to preview safely: {e}") from e
     except (UnidentifiedImageError, OSError) as e:
         raise HTTPException(status_code=400, detail=f"Preview decode failed: {e}") from e
     except Exception as e:
@@ -1128,9 +1144,17 @@ def save_composition(req: SaveRequest):
 
     for item in req.items:
         p = _resolve_safe_path(item.image_path, must_exist=True, allow_dir=False)
-        img = _open_image_checked(p).convert("RGBA")
+        try:
+            img = _open_image_checked(p).convert("RGBA")
+        except Image.DecompressionBombError as e:
+            raise HTTPException(status_code=413, detail=f"{p.name} is too large to open safely: {e}") from e
         w   = max(1, int(img.width  * item.scale))
         h   = max(1, int(img.height * item.scale))
+        if w * h > MAX_PLACED_ITEM_PIXELS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{p.name} would be {w}x{h}px at this scale, which is too large. Lower the scale.",
+            )
         resized = img.resize((w, h), Image.LANCZOS)
         angle = item.rotation % 360.0
         if angle > 1e-6 and abs(angle - 360.0) > 1e-6:
@@ -1197,6 +1221,9 @@ def unskip_image(req: SkipRequest):
 
 def _skip_destination(req: SkipRequest) -> tuple[Path, Path]:
     src = _resolve_safe_path(req.image_path, must_exist=True, allow_dir=False)
+    # Skip copies the file, so it must be an image: this endpoint is not a general file copier.
+    if src.suffix.lower() not in SUPPORTED_EXTS:
+        raise HTTPException(status_code=400, detail=f"Not a supported image file: {src.name}")
     src_root, output_base = _editor_output_base(req.src_root, req.output_dir)
     if src_root:
         return src, mirror_skip_path(src, src_root, output_base=output_base)
@@ -1272,8 +1299,6 @@ _DEFAULT_SETTINGS = {
                      "rembg_model": "birefnet-general",
                      "bg_device_mode": "cpu", "force_cpu": True, "wipe_input_after_run": False,
                      "reuse_exact_duplicates": True, "upscale_max_px": 3600},
-    "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
-    "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
                      "thumbnail_size": 400, "folder_mode": "bulk", "input_dir": "", "output_dir": "",
                      "recent_input_dirs": [], "recent_output_dirs": [],
@@ -1285,15 +1310,36 @@ _DEFAULT_SETTINGS = {
     "ui":           {},
 }
 
+# Background-removal models offered in the UI (same order as BG_MODELS in
+# editor-ui/src/modelLabels.js; keep the guidance below and there in step).
+# All are BiRefNet variants, about 1 GB each, downloaded on first use.
 _REMBG_MODELS = [
+    # DEFAULT. Balanced choice for everyday product photos. Switch only if a cutout
+    # loses part of the product or keeps background. Benchmark (Ryzen 5 7535HS, CPU, four
+    # 1800px photos): ~18 s/photo, 10 s load; Massive ~20-35 s.
+    # Lite, DIS and HRSOD were not downloaded or timed.
     "birefnet-general",
+    # Smaller Swin-Tiny backbone: faster, lighter, slightly less precise edges. Best for
+    # big batches, CPU mode while the PC is in use, weak hardware. Not for hair, thin
+    # handles, wires or glass.
     "birefnet-general-lite",
+    # General's design trained on more data. Best for cluttered or unusual subjects where
+    # General cuts the wrong thing. No gain expected on routine photos.
     "birefnet-massive",
+    # Dichotomous segmentation (DIS5K): crisp outlines. Best for thin, intricate shapes
+    # (grilles, wires, chair legs, holes through the object). Not for soft or
+    # semi-transparent edges.
     "birefnet-dis",
+    # High-resolution salient objects: picks the ONE most prominent object. Best for a single
+    # clear main product. Not for several products in one photo.
     "birefnet-hrsod",
 ]
 
 def _deep_merge(base: Any, incoming: Any) -> Any:
+    # An empty dict means "clear this", so "Reset to defaults" can drop saved custom guides
+    # (merging {} into a dict would otherwise change nothing). No caller sends {} for anything else.
+    if isinstance(incoming, dict) and not incoming:
+        return {}
     if isinstance(base, dict) and isinstance(incoming, dict):
         merged = dict(base)
         for key, value in incoming.items():
@@ -1529,6 +1575,9 @@ async def run_pipeline(cfg: PipelineConfig):
         # _pipeline_running is already set True by the route handler.
         progress_index = 0
         session_total = 0
+        # The last stage that runs decides what "done" means for a resume.
+        final_stage = "rembg" if cfg.do_rembg else "upscale"
+        current_stage = ""
         done_prefixes = (
             ("__ok_rembg__:", "__skip_rembg__:", "__err_rembg__:")
             if cfg.do_rembg
@@ -1554,19 +1603,43 @@ async def run_pipeline(cfg: PipelineConfig):
             with _session_file_lock:
                 _write_json_atomic(SESSION_FILE, payload)
 
-        def _update_session_progress(line: str):
-            nonlocal progress_index
-            if not any(prefix in line for prefix in done_prefixes):
+        def _session_progress_changed(line: str) -> bool:
+            """Updates the resume counters from one pipeline line; True when the file needs rewriting."""
+            nonlocal progress_index, session_total, current_stage
+            if line.startswith("__stage_start__:"):
+                current_stage = line[len("__stage_start__:"):].strip()
+                return False
+            if line.startswith("__total__:") and current_stage == final_stage:
+                # Unique images the final stage will handle (duplicates excluded), the same
+                # unit the done-tokens below count in, so "remaining" is not overstated.
+                try:
+                    session_total = int(line[len("__total__:"):].strip())
+                except ValueError:
+                    return False
+                return True
+            if any(prefix in line for prefix in done_prefixes):
+                progress_index += 1
+                return True
+            return False
+
+        async def _update_session_progress(line: str):
+            if not _session_progress_changed(line):
                 return
-            progress_index += 1
             try:
-                _write_pipeline_session(progress_index)
+                # Off the event loop: the atomic write can retry with sleeps on Windows.
+                await asyncio.to_thread(_write_pipeline_session, progress_index)
             except Exception:
                 pass
 
         try:
+            # Stop clears the run token while no process exists yet (model download wait,
+            # image count). Without these checks the run would still start afterwards,
+            # unstoppable, and a second run could start next to it.
             if cfg.do_rembg and "--rembg-model" in cmd:
                 async for status in _wait_for_warmup_download(cmd[cmd.index("--rembg-model") + 1]):
+                    if _pipeline_run_token is not run_token:
+                        yield {"data": "__error__ Stopped before the run started"}
+                        return
                     yield status
             try:
                 session_input = Path(session_input_dir)
@@ -1574,6 +1647,9 @@ async def run_pipeline(cfg: PipelineConfig):
                     session_total = len((await asyncio.to_thread(images_in_folder, session_input))[0])
             except Exception:
                 session_total = 0
+            if _pipeline_run_token is not run_token:
+                yield {"data": "__error__ Stopped before the run started"}
+                return
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -1597,12 +1673,12 @@ async def run_pipeline(cfg: PipelineConfig):
                 pending = lines.pop() if lines else b""
                 for raw_line in lines:
                     for line in _clean(raw_line):
-                        _update_session_progress(line)
+                        await _update_session_progress(line)
                         yield {"data": line}
 
             if pending:
                 for line in _clean(pending):
-                    _update_session_progress(line)
+                    await _update_session_progress(line)
                     yield {"data": line}
 
             await proc.wait()

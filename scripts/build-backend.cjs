@@ -59,6 +59,7 @@ const pyinstallerArgs = [
   "--workpath", path.join("backend-build", "work"),
   "--specpath", "backend-build",
   "--hidden-import", "pipeline",
+  "--hidden-import", "model_cache",
   "--hidden-import", "sse_starlette.sse",
   "--hidden-import", "uvicorn.logging",
   "--hidden-import", "uvicorn.loops",
@@ -77,6 +78,12 @@ const pyinstallerArgs = [
   "pytest",
   "Cython",
   "matplotlib",
+  // Tcl/Tk (about 9 MB): only the /browse fallback dialogs use it, and the desktop app
+  // picks folders with the native Electron dialog instead.
+  "tkinter",
+  "_tkinter",
+  "setuptools",
+  "pkg_resources",
 ].forEach((moduleName) => {
   pyinstallerArgs.push("--exclude-module", moduleName);
 });

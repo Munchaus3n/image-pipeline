@@ -4,7 +4,7 @@ import {
   browseFolder, openFolder, previewUrl, errorDetailText,
   getSettings, patchSettings, getRembgModels, getSession, clearSession,
 } from "./api.js";
-import { bgModelLabel, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
+import { bgModelInfo, bgModelLabel, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
 import { normalizeImagePath, relativePathFromRoot, imageIdForPath } from "./paths.js";
 import {
   ArrowRight, ChevronDown, ChevronUp, Clock, FolderOpen, Play, Square, X,
@@ -16,15 +16,7 @@ import {
 } from "./components/ui/index.jsx";
 import { useUiPref } from "./hooks/useUiPref.js";
 import { useDefaultOutputLabel } from "./defaultOutput.js";
-/*
-KNOWN LIMITATIONS (web build):
-- Focus-based settings reload is a temporary sync workaround; desktop Electron should use explicit app events.
-- /api/browse relies on tkinter; Electron should use native dialog APIs.
-- Editor refresh still depends on UI state transitions rather than native IPC events.
-*/
-
 const BASE = apiBase();
-const AUTO_OPEN_EDITOR_AFTER_PROCESS = true;
 
 function addToken(tokens, value) {
   const token = String(value || "").trim();
@@ -191,15 +183,15 @@ function isTelemetryNoise(raw) {
 
   return [
     /image pipeline/i,
-    /upscale\s*(?:→|->|â†’)\s*remove bg/i,
+    /upscale\s*(?:→|->)\s*remove bg/i,
     /\bconfiguration\b/i,
     /\bsummary\b/i,
     /^mode\b/i,
     /^images\b/i,
     /^upscale\b/i,
     /^remove bg\b/i,
-    /\binput\s*(?:→|->|â†’)/i,
-    /\boutput\s*(?:→|->|â†’)/i,
+    /\binput\s*(?:→|->)/i,
+    /\boutput\s*(?:→|->)/i,
     /\bwipe policy\b/i,
     /previous output cleared/i,
     /custom paths\s*\+\s*wipe off/i,
@@ -230,7 +222,6 @@ const MACHINE_TOKEN_PREFIXES = [
   "__err_rembg__:",
   "__ok_rembg__:",
   "__err_oom_gpu__:",
-  "__processing__:",
   "__total__:",
   "__done__",
 ];
@@ -293,47 +284,124 @@ function telemetryStatus(raw) {
   };
 }
 
-// ── Per-stage ETA ─────────────────────────────────────────────────────────────
+// ── Per-stage ETA and progress ────────────────────────────────────────────────
 // Upscale and BG removal run one after another at very different speeds, so each
-// stage keeps its own rate from the gaps between its recent completions. The gap
-// before a stage's first completion is not a sample (it includes model loading).
+// stage keeps its own rate. A sample is the time one image really spent between its
+// "processing" and "ok" tokens. Skipped images (already done, excluded, big enough)
+// add to the done count but are never samples, so a resumed run does not look instant.
+// Until a stage has enough live samples, the rate of the last finished run with the
+// same settings (a "prior", kept in the UI prefs) is used, so an ETA shows right away.
+// The bar is measured in estimated seconds of work, so it agrees with the ETA.
 
 const ETA_STAGES = ["upscale", "rembg"];
 const ETA_STAGE_LABEL = { upscale: "upscale", rembg: "BG" };
-const ETA_WINDOW = 6;
-const ETA_MIN_SAMPLES = 2;
+const ETA_WINDOW = 8;            // recent samples that set the live rate (median)
+const ETA_MIN_SAMPLES = 2;       // live samples needed before the live rate replaces the prior
+const ETA_SAMPLE_CAP = 200;
+const ETA_PRIOR_MIN_SAMPLES = 3; // a run teaches a prior only after this many real images
+const ETA_PRIORS_KEY = "process.etaPriors";
+const ETA_PRIORS_MAX = 24;
+const NO_PRIORS = {};
+const DEFAULT_RUN_CONFIG = {
+  upscale: true, rembg: true, scale: "2", upscaleModel: "fast", rembgModel: "birefnet-general", bgDeviceMode: "cpu",
+};
 
 function emptyStageTiming() {
-  return {
-    upscale: { total: 0, count: 0, last: 0, samples: [] },
-    rembg: { total: 0, count: 0, last: 0, samples: [] },
-  };
+  const stage = () => ({
+    total: 0, count: 0,
+    curId: "", curStart: 0, discardNext: false,   // image in progress
+    samples: [],
+    loadStart: 0, loadSec: 0, modelLoaded: false,  // BG model load
+  });
+  return { upscale: stage(), rembg: stage() };
 }
 
-function estimateEta(timing, stages, now) {
-  let seconds = 0;
-  const pending = [];
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function etaPriorKey(stageName, cfg) {
+  return stageName === "upscale"
+    ? `up:${cfg.scale}:${cfg.upscaleModel}`
+    : `bg:${cfg.rembgModel}:${cfg.bgDeviceMode}`;
+}
+
+function stageRate(t, prior) {
+  if (t.samples.length >= ETA_MIN_SAMPLES) return median(t.samples.slice(-ETA_WINDOW));
+  return prior?.perImage > 0 ? prior.perImage : 0;
+}
+
+function formatDuration(totalSeconds) {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (s < 3600) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
+// One pure snapshot of ETA and progress for the stages this run started with.
+function snapshotProgress(timing, cfg, priors, now) {
   // BG removal reports its own total only when it starts; until then assume the upscale total.
   const fallbackTotal = timing.upscale.total || timing.rembg.total;
+  let seconds = 0;
+  const pending = [];
+  const counts = {};
+  let work = 0, workDone = 0;     // estimated seconds (used when every active stage has a rate)
+  let units = 0, unitsDone = 0;   // image counts (fallback when a stage has no rate yet)
+  let allRated = true;
+
   for (const name of ETA_STAGES) {
-    if (!stages[name]) continue;
+    if (!cfg[name]) continue;
     const t = timing[name];
     const total = t.total || fallbackTotal;
-    if (!total) { pending.push(name); continue; }
+    counts[name] = { count: t.count, total };
+    if (!total) { pending.push(name); allRated = false; continue; }
+
     const remaining = Math.max(0, total - t.count);
+    const inProgress = t.curStart > 0 && remaining > 0;
+    units += total;
+    unitsDone += Math.min(total, t.count) + (inProgress ? 0.25 : 0);
+
+    const prior = priors?.[etaPriorKey(name, cfg)];
+    const rate = stageRate(t, prior);
+    if (!rate) {
+      allRated = false;
+      if (remaining) pending.push(name);
+      continue;
+    }
+
+    const spent = inProgress ? (now - t.curStart) / 1000 : 0;
+    const share = inProgress ? Math.min(spent / rate, 0.95) : 0;
+    work += total * rate;
+    workDone += (Math.min(total, t.count) + share) * rate;
+
+    // BG model load (and first-run warm-up) happens before its first image.
+    let loadLeft = 0;
+    if (name === "rembg") {
+      const loadSec = t.modelLoaded ? t.loadSec : (prior?.loadSec || 0);
+      const loadElapsed = t.modelLoaded ? loadSec : Math.min(loadSec, t.loadStart ? (now - t.loadStart) / 1000 : 0);
+      work += loadSec;
+      workDone += loadElapsed;
+      loadLeft = loadSec - loadElapsed;
+    }
     if (!remaining) continue;
-    if (t.samples.length < ETA_MIN_SAMPLES) { pending.push(name); continue; }
-    const perImage = t.samples.reduce((sum, value) => sum + value, 0) / t.samples.length;
-    // Count down within the image in progress, but never below the images still queued after it.
-    const sinceLast = t.last ? (now - t.last) / 1000 : 0;
-    seconds += Math.max(0, remaining * perImage - Math.min(sinceLast, perImage));
+    // The image in progress counts down but never below 15% of a normal image while it runs.
+    seconds += loadLeft
+      + (remaining - (inProgress ? 1 : 0)) * rate
+      + (inProgress ? Math.max(rate * 0.15, rate - spent) : 0);
   }
-  return { seconds: Math.round(seconds), pending };
+
+  const ratio = allRated && work > 0 ? workDone / work : (units > 0 ? unitsDone / units : 0);
+  return { seconds: Math.round(seconds), pending, counts, ratio: Math.min(1, Math.max(0, ratio)) };
 }
 
 function usePipeline() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
+  const [outcome, setOutcome] = useState(null); // "done" | "failed" | "stopped" once a run has ended
   const [log, setLog] = useState([]);
   const [errors, setErrors] = useState([]);
   const [imageDone, setImageDone] = useState(0);
@@ -345,41 +413,93 @@ function usePipeline() {
   const [bgStats, setBgStats] = useState({ done: 0, skip: 0, err: 0 });
   const [oomGpuCount, setOomGpuCount] = useState(0);
   const [eta, setEta] = useState(null);
-  const [imageProgress, setImageProgress] = useState({});
+  const [runConfig, setRunConfig] = useState(DEFAULT_RUN_CONFIG);
   const [previewPath, setPreviewPath] = useState("");
   const [livePreviewStrip, setLivePreviewStrip] = useState([]);
+  const [priors, setPriors] = useUiPref(ETA_PRIORS_KEY, NO_PRIORS);
 
   const abortRef    = useRef(null);
   const logRef      = useRef(null);
   const timerRef    = useRef(null);
   const startRef    = useRef(null);
+  const runningRef  = useRef(false);   // synchronous guard against a double start
   const errSet      = useRef(new Set());
-  const sentinelSet = useRef(new Set());
   const stageRef    = useRef("upscale");
   const recentLog   = useRef([]);
-  const previewPathByFile = useRef(new Map());
+  const previewPathById = useRef(new Map());
   const previewPathRef = useRef("");
   const finalStageRef = useRef("rembg");
   const completedImageSet = useRef(new Set());
   const completionLoggedRef = useRef(false);
   const stageTimingRef = useRef(emptyStageTiming());
-  const etaStagesRef = useRef({ upscale: true, rembg: true });
+  const runCfgRef = useRef(DEFAULT_RUN_CONFIG);
+  const progressMaxRef = useRef(0);    // the bar never moves backward within a run
+  const priorsRef = useRef(priors);
+
+  useEffect(() => { priorsRef.current = priors; }, [priors]);
 
   const refreshEta = useCallback(() => {
-    setEta(estimateEta(stageTimingRef.current, etaStagesRef.current, Date.now()));
+    const snap = snapshotProgress(stageTimingRef.current, runCfgRef.current, priorsRef.current, Date.now());
+    progressMaxRef.current = Math.max(progressMaxRef.current, snap.ratio);
+    setEta({ ...snap, ratio: progressMaxRef.current });
   }, []);
 
-  const recordStageDone = useCallback((stageName) => {
+  const markImageStart = useCallback((stageName, id) => {
     const t = stageTimingRef.current[stageName];
-    const now = Date.now();
-    if (t.last) t.samples = [...t.samples.slice(-(ETA_WINDOW - 1)), (now - t.last) / 1000];
-    t.last = now;
+    t.curId = id;
+    t.curStart = Date.now();
+  }, []);
+
+  const recordStageDone = useCallback((stageName, id, kind) => {
+    const t = stageTimingRef.current[stageName];
+    // Only a finished image that really ran is a sample; skips and quick failures are not.
+    if (kind === "done" && t.curId === id && t.curStart && !t.discardNext) {
+      t.samples = [...t.samples, (Date.now() - t.curStart) / 1000].slice(-ETA_SAMPLE_CAP);
+    }
+    if (t.curId === id) {
+      t.curId = "";
+      t.curStart = 0;
+      t.discardNext = false;
+    }
     t.count += 1;
     refreshEta();
   }, [refreshEta]);
 
+  // Remember this run's speed for the next run with the same settings.
+  const savePriors = useCallback(() => {
+    const cfg = runCfgRef.current;
+    const timing = stageTimingRef.current;
+    const next = { ...priorsRef.current };
+    let changed = false;
+    for (const name of ETA_STAGES) {
+      if (!cfg[name]) continue;
+      const t = timing[name];
+      if (t.samples.length < ETA_PRIOR_MIN_SAMPLES) continue;
+      const key = etaPriorKey(name, cfg);
+      const old = next[key];
+      delete next[key]; // re-added last, so the oldest entries are the ones trimmed
+      const perImage = median(t.samples);
+      const loadSec = name === "rembg" && t.modelLoaded ? t.loadSec : (old?.loadSec || 0);
+      next[key] = {
+        perImage: Math.round((old?.perImage ? (old.perImage + perImage) / 2 : perImage) * 100) / 100,
+        loadSec: Math.round(loadSec * 10) / 10,
+      };
+      changed = true;
+    }
+    if (changed) setPriors(Object.fromEntries(Object.entries(next).slice(-ETA_PRIORS_MAX)));
+  }, [setPriors]);
+
+  const endRun = useCallback((result) => {
+    runningRef.current = false;
+    setRunning(false);
+    setOutcome(result);
+    savePriors();
+  }, [savePriors]);
+
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    // Follow the end of the log only while the user is already at the bottom.
+    const el = logRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 48) el.scrollTop = el.scrollHeight;
   }, [log]);
   useEffect(() => {
     if (running) {
@@ -404,41 +524,55 @@ function usePipeline() {
     return "info";
   }, []);
 
-  const pushLivePreview = useCallback((fname, path = "", status = "processing", label = "") => {
-    if (!fname) return;
+  // Live strip tiles are keyed by image id (relative path), so same-named files stay apart.
+  const pushLivePreview = useCallback((id, path = "", status = "processing", label = "") => {
+    if (!id) return;
     setLivePreviewStrip(prev => {
-      const existing = prev.find(item => item.name === fname);
-      const resolvedPath = path || existing?.path || "";
+      const existing = prev.find(item => item.id === id);
       const next = [{
-        name: fname,
-        path: resolvedPath,
+        id,
+        name: fileNameFromPath(id),
+        path: path || existing?.path || "",
         status: status || existing?.status || "processing",
         label: label || existing?.label || "",
-      }, ...prev.filter(item => item.name !== fname)];
+      }, ...prev.filter(item => item.id !== id)];
       return next.slice(0, 4);
     });
   }, []);
 
-  const resolvePreviewPath = useCallback((fname) => {
-    const mapped = previewPathByFile.current.get(fname);
-    if (mapped) return mapped;
-    return fileNameFromPath(previewPathRef.current) === fname ? previewPathRef.current : "";
-  }, []);
-
-  const revealKnownPreview = useCallback((fname, status = "done", label = "") => {
-    const path = resolvePreviewPath(fname);
+  const revealKnownPreview = useCallback((id, status = "done", label = "") => {
+    const path = previewPathById.current.get(id) || "";
     if (path) {
       previewPathRef.current = path;
       setPreviewPath(path);
     }
-    pushLivePreview(fname, path, status, label);
-  }, [pushLivePreview, resolvePreviewPath]);
+    pushLivePreview(id, path, status, label);
+  }, [pushLivePreview]);
 
-  const markFinalImage = useCallback((stageName, fname) => {
-    if (!fname || stageName !== finalStageRef.current || completedImageSet.current.has(fname)) return;
-    completedImageSet.current.add(fname);
+  const markFinalImage = useCallback((stageName, id) => {
+    if (!id || stageName !== finalStageRef.current || completedImageSet.current.has(id)) return;
+    completedImageSet.current.add(id);
     setImageDone(completedImageSet.current.size);
   }, []);
+
+  // One image finished a stage: kind is "done" | "skip" | "err".
+  const finishImage = useCallback((stageName, kind, id) => {
+    const status = { done: ["done", "DONE", "success"], skip: ["skip", "SKIP", "skip"], err: ["error", "ERROR", "error"] }[kind];
+    revealKnownPreview(id, status[0], status[1]);
+    if (kind === "err") {
+      const key = `${stageName}:${id}`;
+      if (!errSet.current.has(key)) { errSet.current.add(key); setImageError(errSet.current.size); }
+    }
+    markFinalImage(stageName, id);
+    (stageName === "rembg" ? setBgStats : setUpStats)(s => ({ ...s, [kind]: s[kind] + 1 }));
+    recordStageDone(stageName, id, kind);
+    const what = stageName === "rembg" ? "BG removal" : "upscale";
+    appendTelemetryEntry(
+      setLog,
+      telemetryEntry(telemetryLabel(fileNameFromPath(id), `${what} [${status[1]}]`), status[2]),
+      { clearPending: true }
+    );
+  }, [markFinalImage, recordStageDone, revealKnownPreview]);
 
   const appendLine = useCallback((raw) => {
     raw = extractMachineToken(raw) || raw;
@@ -452,74 +586,22 @@ function usePipeline() {
       }
       return;
     }
-    if (raw.startsWith("__ok_upscale__:")) {
-      const fname = raw.slice(15);
-      setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "ok" } }));
-      revealKnownPreview(fname, "done", "DONE");
-      markFinalImage("upscale", fname);
-      setUpStats(s => ({ ...s, done: s.done + 1 }));
-      recordStageDone("upscale");
-      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [DONE]"), "success"), { clearPending: true });
-      return;
-    }
-    if (raw.startsWith("__ok_rembg__:")) {
-      const fname = raw.slice(13);
-      setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "ok" } }));
-      revealKnownPreview(fname, "done", "DONE");
-      markFinalImage("rembg", fname);
-      setBgStats(s => ({ ...s, done: s.done + 1 }));
-      recordStageDone("rembg");
-      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [DONE]"), "success"), { clearPending: true });
-      return;
-    }
-    if (raw.startsWith("__skip_upscale__:")) {
-      const fname = raw.slice(17);
-      setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "skip" } }));
-      revealKnownPreview(fname, "skip", "SKIP");
-      markFinalImage("upscale", fname);
-      setUpStats(s => ({ ...s, skip: s.skip + 1 }));
-      recordStageDone("upscale");
-      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [SKIP]"), "skip"), { clearPending: true });
-      return;
-    }
-    if (raw.startsWith("__skip_rembg__:")) {
-      const fname = raw.slice(15);
-      setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "skip" } }));
-      revealKnownPreview(fname, "skip", "SKIP");
-      markFinalImage("rembg", fname);
-      setBgStats(s => ({ ...s, skip: s.skip + 1 }));
-      recordStageDone("rembg");
-      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [SKIP]"), "skip"), { clearPending: true });
-      return;
-    }
-    if (raw.startsWith("__err_upscale__:")) {
-      const fname = raw.slice(16);
-      setImageProgress(prev => ({ ...prev, [fname]: { stage: "upscale", percent: 50, status: "error" } }));
-      revealKnownPreview(fname, "error", "ERROR");
-      if (!errSet.current.has(`upscale:${fname}`)) { errSet.current.add(`upscale:${fname}`); setImageError(errSet.current.size); }
-      markFinalImage("upscale", fname);
-      setUpStats(s => ({ ...s, err: s.err + 1 }));
-      recordStageDone("upscale");
-      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "upscale [ERROR]"), "error"), { clearPending: true });
-      return;
-    }
-    if (raw.startsWith("__err_rembg__:")) {
-      const fname = raw.slice(14);
-      setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "error" } }));
-      revealKnownPreview(fname, "error", "ERROR");
-      if (!errSet.current.has(`rembg:${fname}`)) { errSet.current.add(`rembg:${fname}`); setImageError(errSet.current.size); }
-      markFinalImage("rembg", fname);
-      setBgStats(s => ({ ...s, err: s.err + 1 }));
-      recordStageDone("rembg");
-      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "BG removal [ERROR]"), "error"), { clearPending: true });
+    const finished = raw.match(/^__(ok|skip|err)_(upscale|rembg)__:(.*)$/);
+    if (finished) {
+      finishImage(finished[2], { ok: "done", skip: "skip", err: "err" }[finished[1]], finished[3]);
       return;
     }
     if (raw.startsWith("__err_oom_gpu__:")) {
-      const fname = raw.slice(16);
-      setImageProgress(prev => ({ ...prev, [fname]: { stage: "rembg", percent: 100, status: "oom" } }));
-      revealKnownPreview(fname, "error", "OOM");
+      const id = raw.slice(16);
+      revealKnownPreview(id, "error", "OOM");
       setOomGpuCount(c => c + 1);
-      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fname, "GPU OOM fallback [WARN]"), "warn"), { clearPending: true });
+      // This image's time includes the failed GPU attempt and the CPU session build, and
+      // earlier samples were GPU speed: start the BG rate again on CPU.
+      const t = stageTimingRef.current.rembg;
+      t.samples = [];
+      t.discardNext = true;
+      refreshEta();
+      appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel(fileNameFromPath(id), "GPU OOM fallback [WARN]"), "warn"), { clearPending: true });
       return;
     }
 
@@ -539,7 +621,7 @@ function usePipeline() {
     }
 
     if (raw.startsWith("__stage_start__:")) {
-      const stageName = raw.slice(16);
+      const stageName = raw.slice(16).trim();
       if (stageName === "upscale" || stageName === "rembg") {
         stageRef.current = stageName;
         setStage(stageName);
@@ -547,18 +629,29 @@ function usePipeline() {
           setLog,
           telemetryEntry(stageName === "upscale" ? "Stage 1 · Upscaling" : "Stage 2 · Background removal", "info")
         );
+      } else if (stageName === "finalize") {
+        stageRef.current = "finalize";
+        setStage("finalize");
+        appendTelemetryEntry(setLog, telemetryEntry("Finishing up", "info"));
+        refreshEta();
       }
       return;
     }
 
     if (raw.startsWith("__model_loading__:")) {
       const [model = "model", device = ""] = raw.slice(18).split(":");
+      stageTimingRef.current.rembg.loadStart = Date.now();
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel("Loading model", [model, device].filter(Boolean).join(" · ")), "info"));
       return;
     }
 
     if (raw.startsWith("__model_loaded__:")) {
       const [model = "model", device = "", seconds = ""] = raw.slice(17).split(":");
+      const t = stageTimingRef.current.rembg;
+      const loadSec = Number.parseFloat(seconds);
+      t.modelLoaded = true;
+      t.loadSec = Number.isFinite(loadSec) ? loadSec : (t.loadStart ? (Date.now() - t.loadStart) / 1000 : 0);
+      refreshEta();
       if (seconds) appendTelemetryEntry(setLog, telemetryEntry(`Model loaded in ${seconds}s`, "success"));
       appendTelemetryEntry(setLog, telemetryEntry(telemetryLabel("Model loaded", [model, device].filter(Boolean).join(" · ")), "success"));
       return;
@@ -567,6 +660,13 @@ function usePipeline() {
     if (raw.startsWith("__bg_device__:")) {
       const device = raw.slice(14).trim();
       const kind = /oom/i.test(device) ? "warn" : "info";
+      if (/switched to cpu/i.test(device)) {
+        // The BG speed on the new device is unknown; samples so far were another device.
+        const t = stageTimingRef.current.rembg;
+        t.samples = [];
+        if (t.curStart > 0) t.discardNext = true;
+        refreshEta();
+      }
       appendTelemetryEntry(setLog, telemetryEntry(`BG device: ${device}`, kind));
       return;
     }
@@ -578,49 +678,26 @@ function usePipeline() {
     }
 
     if (raw.startsWith("__processing_image__:")) {
+      // "<stage>:<id>|<absolute path>"; older builds sent "<stage>:<absolute path>".
       const payload = raw.slice(21);
       const splitAt = payload.indexOf(":");
       const stageName = splitAt >= 0 ? payload.slice(0, splitAt) : stageRef.current;
-      const fullPath = splitAt >= 0 ? payload.slice(splitAt + 1) : payload;
-      const fileName = fullPath.replace(/.*[/\\]/, "");
+      const rest = splitAt >= 0 ? payload.slice(splitAt + 1) : payload;
+      const barAt = rest.indexOf("|");
+      const fullPath = barAt >= 0 ? rest.slice(barAt + 1) : rest;
+      const id = barAt >= 0 ? rest.slice(0, barAt) : fileNameFromPath(fullPath);
       const normalizedStage = stageName === "rembg" ? "rembg" : "upscale";
       stageRef.current = normalizedStage;
       setStage(normalizedStage);
       setPreviewPath(fullPath);
       previewPathRef.current = fullPath;
-      previewPathByFile.current.set(fileName, fullPath);
-      pushLivePreview(fileName, fullPath, "processing", normalizedStage === "rembg" ? "BG running..." : "processing...");
-      setImageProgress(prev => ({
-        ...prev,
-        [fileName]: {
-          stage: normalizedStage,
-          percent: normalizedStage === "rembg" ? 50 : 0,
-          status: "running",
-        },
-      }));
+      previewPathById.current.set(id, fullPath);
+      markImageStart(normalizedStage, id);
+      pushLivePreview(id, fullPath, "processing", normalizedStage === "rembg" ? "BG running..." : "processing...");
       appendTelemetryEntry(
         setLog,
-        telemetryEntry(telemetryLabel(fileName, normalizedStage === "rembg" ? "BG removal started" : "upscale started"), "pending")
+        telemetryEntry(telemetryLabel(fileNameFromPath(id), normalizedStage === "rembg" ? "BG removal started" : "upscale started"), "pending")
       );
-      sentinelSet.current.add(fileName);
-      return;
-    }
-
-    if (raw.startsWith("__processing__:")) {
-      const fullPath = raw.slice(15);
-      const fileName = fullPath.replace(/.*[/\\]/, "");
-      setPreviewPath(fullPath);
-      previewPathRef.current = fullPath;
-      previewPathByFile.current.set(fileName, fullPath);
-      pushLivePreview(fileName, fullPath, "processing", stageRef.current === "rembg" ? "BG running..." : "processing...");
-      if (!sentinelSet.current.has(fileName)) {
-        sentinelSet.current.add(fileName);
-        const startedEntry = telemetryEntry(telemetryLabel(fileName, stageRef.current === "rembg" ? "BG removal started" : "upscale started"), "pending");
-        setLog(prev => (prev.length === 0 ? [startedEntry] : prev));
-        setImageProgress(prev => ({ ...prev, [fileName]: { stage: "upscale", percent: 0, status: "running" } }));
-      } else {
-        setImageProgress(prev => ({ ...prev, [fileName]: { ...prev[fileName], status: "running" } }));
-      }
       return;
     }
 
@@ -636,8 +713,8 @@ function usePipeline() {
         { clearPending: true }
       );
       if (startRef.current) {
-        const elapsedSeconds = Math.max(0, Math.round((Date.now() - startRef.current) / 1000));
-        appendTelemetryEntry(setLog, telemetryEntry(`Batch completed in ${elapsedSeconds}s`, ok ? "success" : "error"));
+        const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startRef.current) / 1000));
+        appendTelemetryEntry(setLog, telemetryEntry(`Batch completed in ${formatDuration(elapsedSeconds)}`, ok ? "success" : "error"));
       }
       if (!ok) {
         setErrors(prev => [...prev.slice(-200), { raw: entry.raw, kind: entry.kind, context: [...recentLog.current] }]);
@@ -674,34 +751,42 @@ function usePipeline() {
         return [...prev.slice(-200), { raw, kind, context: [...recentLog.current.slice(0, -1)] }];
       });
     }
-  }, [classify, markFinalImage, pushLivePreview, recordStageDone, refreshEta, revealKnownPreview]);
+  }, [classify, finishImage, markImageStart, pushLivePreview, refreshEta, revealKnownPreview]);
 
-  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", bgDeviceMode = "cpu", resume = false, upscaleMaxPx = 0, reuseExactDuplicates = true }) => {
-    if (running) return;
+  const start = useCallback(async ({ folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeList = [], skipList = [], rembgModel = "", bgDeviceMode = "cpu", upscaleModel = "fast", resume = false, upscaleMaxPx = 0, reuseExactDuplicates = true }) => {
+    if (runningRef.current) return;
+    runningRef.current = true;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    const cfg = {
+      upscale: Boolean(doUpscale), rembg: Boolean(doRembg), scale: String(scale), upscaleModel,
+      rembgModel: rembgModel || "birefnet-general", bgDeviceMode: normalizeBgDeviceMode(bgDeviceMode),
+    };
+    // What this run started with. The bar and labels read this, not the live toggles,
+    // so editing settings mid-run cannot make the bar jump.
+    runCfgRef.current = cfg;
+    setRunConfig(cfg);
+    progressMaxRef.current = 0;
     setLog([]); setErrors([]);
     setImageDone(0); setImageError(0);
     setTotalImages(0);
-    setElapsed(0); setDone(false); setRunning(true);
+    setElapsed(0); setDone(false); setOutcome(null); setRunning(true);
     setStage(null);
     setUpStats({ done: 0, skip: 0, err: 0 });
     setBgStats({ done: 0, skip: 0, err: 0 });
     setOomGpuCount(0);
     setEta(null);
     stageTimingRef.current = emptyStageTiming();
-    etaStagesRef.current = { upscale: Boolean(doUpscale), rembg: Boolean(doRembg) };
-    setImageProgress({});
     setPreviewPath("");
     setLivePreviewStrip([]);
     stageRef.current = "upscale";
     recentLog.current = [];
-    errSet.current = new Set(); sentinelSet.current = new Set();
+    errSet.current = new Set();
     completedImageSet.current = new Set();
     completionLoggedRef.current = false;
     previewPathRef.current = "";
     finalStageRef.current = doRembg ? "rembg" : "upscale";
-    previewPathByFile.current = new Map();
+    previewPathById.current = new Map();
 
     try {
       const r = await fetch(`${BASE}/pipeline/run`, {
@@ -719,11 +804,11 @@ function usePipeline() {
       if (!r.ok) {
         const e = await r.json().catch(() => ({ detail: r.statusText }));
         appendLine(`Error: ${errorDetailText(e?.detail) || r.statusText || r.status}`);
-        setRunning(false); return;
+        endRun("failed"); return;
       }
       if (!r.body) {
         appendLine("Error: Pipeline response stream was empty.");
-        setRunning(false);
+        endRun("failed");
         return;
       }
       const reader = r.body.getReader(), dec = new TextDecoder();
@@ -741,11 +826,12 @@ function usePipeline() {
           if (token.startsWith("__done__")) {
             finished = true;
             appendLine(msg);
-            setStage("done"); setDone(true); setRunning(false);
+            setStage("done"); setDone(true);
+            endRun(/exit=0\b/.test(msg) ? "done" : "failed");
           } else if (msg.startsWith("__error__")) {
             finished = true;
             appendLine(`Error: ${msg.replace("__error__ ", "")}`);
-            setRunning(false);
+            endRun("failed");
           } else {
             appendLine(msg);
           }
@@ -753,26 +839,27 @@ function usePipeline() {
       }
       if (!finished) {
         appendLine("Error: Pipeline stream ended before completion.");
-        setRunning(false);
+        endRun("failed");
       }
     } catch (e) {
-      if (e.name === "AbortError") return;
+      if (e.name === "AbortError") return; // stop() ends the run itself
       appendLine(`Connection error: ${e.message}`);
-      setRunning(false);
+      endRun("failed");
     }
-  }, [running, appendLine]);
+  }, [appendLine, endRun]);
 
   const stop = useCallback(async () => {
     abortRef.current?.abort();
+    // Wait for the backend to confirm, so an immediate re-run does not hit "already running".
     try { await fetch(`${BASE}/pipeline/stop`, { method: "POST" }); } catch { void 0; }
-    appendLine("Stopped by user.");
-    setRunning(false); setStage(null);
-  }, [appendLine]);
+    appendTelemetryEntry(setLog, telemetryEntry("Stopped by user. [WARN]", "warn"), { clearPending: true });
+    endRun("stopped");
+  }, [endRun]);
 
   return {
-    running, done, log, errors, imageDone, imageError,
+    running, done, outcome, runConfig, log, errors, imageDone, imageError,
     totalImages, elapsed, stage,
-    upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip, eta,
+    upStats, bgStats, oomGpuCount, previewPath, livePreviewStrip, eta,
     logRef, start, stop
   };
 }
@@ -862,55 +949,60 @@ function SmStat({ label, value, tone }) {
 
 // Zone 2: Per-stage stats bar
 
-function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale, doRembg, oomGpuCount = 0, imageProgress = {}, eta = null }) {
-  const fmt = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+function Zone2({ upStats, bgStats, totalImages, elapsed, running, outcome, stage, doUpscale, doRembg, oomGpuCount = 0, eta = null }) {
   const n = Math.max(0, totalImages || 0);
 
   const upProcessed = upStats.done + upStats.skip + upStats.err;
   const bgProcessed = bgStats.done + bgStats.skip + bgStats.err;
   const hasBothStages = doUpscale && doRembg;
-  const totalUnits = (doUpscale ? n : 0) + (doRembg ? n : 0);
-  const processedUnits = (doUpscale ? upProcessed : 0) + (doRembg ? bgProcessed : 0);
   const processedImages = doRembg ? bgProcessed : upProcessed;
-  const activeUnits = Object.values(imageProgress).filter(meta => meta?.status === "running").length;
-  const inFlightUnits = !done && totalUnits > 0 && activeUnits > 0
-    ? Math.min(activeUnits * 0.25, Math.max(0, totalUnits - processedUnits))
-    : 0;
-  const visibleUnits = Math.min(totalUnits, processedUnits + inFlightUnits);
   const totalErrors = upStats.err + bgStats.err;
 
-  const progressRatio = totalUnits === 0 ? 0 : visibleUnits / totalUnits;
-  const progressPct = done ? 100 : Math.min(100, Math.max(0, Math.round(progressRatio * 100)));
-  const pendingEtaLabel = (eta?.pending ?? []).map(name => ETA_STAGE_LABEL[name]).join(" + ");
-  const etaLabel = done
-    ? "ETA done"
-    : !eta || (eta.pending.length && !eta.seconds)
-      ? "ETA estimating…"
-      : eta.pending.length
-        ? `ETA ${fmt(eta.seconds)} + ${pendingEtaLabel} estimating…`
-        : `ETA ${fmt(eta.seconds)}`;
-  const countLabel = `${processedImages}/${n} images processed`;
+  // Only a run that really finished shows 100%. Everything else stops short of it.
+  const succeeded = outcome === "done";
+  const progressPct = succeeded ? 100 : Math.min(99, Math.floor((eta?.ratio ?? 0) * 100));
 
-  const stagePill = done
-    ? "Completed"
-    : stage === "rembg"
-      ? "Stage 2/2 · Remove BG"
-      : hasBothStages
-        ? "Stage 1/2 · Upscaling"
-        : doUpscale
-          ? "Upscaling"
-          : "Remove BG";
+  const pendingEtaLabel = (eta?.pending ?? []).map(name => ETA_STAGE_LABEL[name]).join(" + ");
+  let etaLabel;
+  if (succeeded) etaLabel = "Finished";
+  else if (outcome === "failed") etaLabel = "Run failed";
+  else if (outcome === "stopped") etaLabel = "Stopped";
+  else if (stage === "finalize") etaLabel = "Finishing…";
+  else if (!eta || (eta.pending.length && !eta.seconds)) etaLabel = "ETA estimating…";
+  else if (eta.pending.length) etaLabel = `ETA ${formatDuration(eta.seconds)} + ${pendingEtaLabel} estimating…`;
+  else if (eta.seconds <= 0) etaLabel = "Finishing…";
+  else etaLabel = `ETA ${formatDuration(eta.seconds)}`;
+
+  const stageWord = { upscale: "Upscaling", rembg: "Removing background" }[stage];
+  const stageCount = eta?.counts?.[stage];
+  let countLabel;
+  if (n === 0) countLabel = "count pending";
+  else if (running && stage === "finalize") countLabel = "Finishing…";
+  else if (running && stageWord && stageCount?.total) countLabel = `${stageWord} ${stageCount.count}/${stageCount.total}`;
+  else countLabel = `${processedImages}/${n} images processed`;
+
+  let stagePill;
+  if (outcome === "done") stagePill = "Completed";
+  else if (outcome === "failed") stagePill = "Failed";
+  else if (outcome === "stopped") stagePill = "Stopped";
+  else if (stage === "finalize") stagePill = "Finishing";
+  else if (stage === "rembg") stagePill = hasBothStages ? "Stage 2/2 · Remove BG" : "Remove BG";
+  else stagePill = hasBothStages ? "Stage 1/2 · Upscaling" : doUpscale ? "Upscaling" : "Remove BG";
+
+  const title = succeeded
+    ? "Batch complete"
+    : outcome === "failed" ? "Batch failed"
+      : outcome === "stopped" ? "Batch stopped"
+        : "Processing batch…";
 
   return (
     <section className="pipeline-card pipeline-progress-card">
       <header className="pipeline-card-head">
-        <span className={`pipeline-progress-stage-pill ${done ? "is-done" : "is-active"}`}>{stagePill}</span>
+        <span className={`pipeline-progress-stage-pill ${succeeded ? "is-done" : "is-active"}`}>{stagePill}</span>
         <span className="pipeline-progress-percent">{progressPct}%</span>
       </header>
 
-      <h2 className="pipeline-progress-title">
-        {done ? "Batch complete" : "Processing batch…"}
-      </h2>
+      <h2 className="pipeline-progress-title">{title}</h2>
 
       <div
         className="pipeline-progress-bar"
@@ -924,11 +1016,11 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale,
       </div>
 
       <div className="pipeline-progress-meta">
-        <span>{totalUnits > 0 ? countLabel : "count pending"}</span>
+        <span>{countLabel}</span>
         <span>{etaLabel}</span>
-        <span>elapsed {fmt(elapsed)}</span>
+        <span>elapsed {formatDuration(elapsed)}</span>
         {oomGpuCount > 0 && <span>OOM fallback {oomGpuCount}</span>}
-        {done && totalErrors > 0 && <span className="is-bad">{totalErrors} error{totalErrors > 1 ? "s" : ""}</span>}
+        {totalErrors > 0 && <span className="is-bad">{totalErrors} error{totalErrors > 1 ? "s" : ""}</span>}
       </div>
 
       <div className="pipeline-progress-stats">
@@ -1042,6 +1134,7 @@ export default function Pipeline({
   const [canvasSize, setCanvasSize] = useState("1440");
   const [rembgModel, setRembgModel] = useState("birefnet-general");
   const [bgDeviceMode, setBgDeviceMode] = useState("cpu");
+  const [upscaleModel, setUpscaleModel] = useState("fast"); // Settings owns it; the ETA needs it to pick its speed history
   const [upscaleMaxPx, setUpscaleMaxPx] = useState("3600");
   const [reuseExactDuplicates, setReuseExactDuplicates] = useState(true);
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
@@ -1062,6 +1155,7 @@ export default function Pipeline({
     if (s.output?.upscale_scale === "2" || s.output?.upscale_scale === "4") setScale(s.output.upscale_scale);
     if (s.output?.canvas_size) setCanvasSize(String(s.output.canvas_size));
     if (s.processing?.rembg_model) setRembgModel(s.processing.rembg_model);
+    if (s.processing?.upscale_model) setUpscaleModel(s.processing.upscale_model);
     if (s.processing?.bg_device_mode) {
       setBgDeviceMode(normalizeBgDeviceMode(s.processing.bg_device_mode));
     } else if (typeof s.processing?.force_cpu === "boolean") {
@@ -1124,9 +1218,9 @@ export default function Pipeline({
   }, []);
 
   const {
-    running, done, log, errors, imageDone, imageError,
+    running, done, outcome, runConfig, log, errors, imageDone, imageError,
     totalImages, elapsed, stage,
-    upStats, bgStats, imageProgress, oomGpuCount, previewPath, livePreviewStrip, eta,
+    upStats, bgStats, oomGpuCount, previewPath, livePreviewStrip, eta,
     logRef, start, stop,
   } = usePipeline();
 
@@ -1168,7 +1262,7 @@ export default function Pipeline({
         canvasSize: parseInt(canvasSize, 10) || 1440,
         session,
       });
-      if (AUTO_OPEN_EDITOR_AFTER_PROCESS && imageError === 0 && errors.length === 0) {
+      if (imageError === 0 && errors.length === 0) {
         onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440 });
       }
     })();
@@ -1183,14 +1277,14 @@ export default function Pipeline({
     start({
       folderMode, doUpscale, scale, doRembg, inputDir, outputDir,
       excludeList: activeExclude, skipList, rembgModel, resume: false,
-      bgDeviceMode,
+      bgDeviceMode, upscaleModel,
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
       reuseExactDuplicates,
     });
     rememberInputDir?.(inputDir);
     rememberOutputDir?.(outputDir);
     setShowResume(false);
-  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, thumbs, rembgModel, bgDeviceMode, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
+  }, [start, folderMode, doUpscale, scale, doRembg, inputDir, outputDir, excludeTags, removedImages, thumbs, rembgModel, bgDeviceMode, upscaleModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleResume = useCallback(() => {
     if (!resumeSession?.src_root) return;
@@ -1198,23 +1292,27 @@ export default function Pipeline({
     const resumeOutputDir = resumeSession.output_dir ?? outputDir;
     setInputDir(resumeInputDir);
     setOutputDir(resumeOutputDir);
-    const removedIds = removedImages ? [...removedImages] : [];
+    // Removed/excluded images and their thumbnails belong to the folder loaded on the Input
+    // screen. When the interrupted run used another folder they say nothing about it, so
+    // they are left out instead of being matched against the wrong files.
+    const sameFolder = normalizeImagePath(resumeInputDir) === normalizeImagePath(inputDir);
+    const removedIds = sameFolder && removedImages ? [...removedImages] : [];
     const skipList = expandedImageTokens(removedIds, thumbs, resumeInputDir);
-    const activeExcludeIds = excludeTags.filter(n => !removedImages?.has(n));
+    const activeExcludeIds = sameFolder ? excludeTags.filter(n => !removedImages?.has(n)) : [];
     const activeExclude = expandedImageTokens(activeExcludeIds, thumbs, resumeInputDir);
     const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
     start({
       folderMode, doUpscale, scale, doRembg,
       inputDir: resumeInputDir,
       outputDir: resumeOutputDir, excludeList: activeExclude, skipList, rembgModel, resume: true,
-      bgDeviceMode,
+      bgDeviceMode, upscaleModel,
       upscaleMaxPx: Number.isFinite(parsedUpscaleMaxPx) && parsedUpscaleMaxPx > 0 ? parsedUpscaleMaxPx : 0,
       reuseExactDuplicates,
     });
     rememberInputDir?.(resumeInputDir);
     rememberOutputDir?.(resumeOutputDir);
     setShowResume(false);
-  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, thumbs, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, bgDeviceMode, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
+  }, [resumeSession, inputDir, setInputDir, setOutputDir, removedImages, excludeTags, thumbs, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, bgDeviceMode, upscaleModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleStartFresh = useCallback(async () => {
     try { await clearSession(); } catch { void 0; }
@@ -1359,7 +1457,7 @@ export default function Pipeline({
               <Field
                 label="BG model"
                 htmlFor="process-bg-model"
-                hint={`Using ${bgModelLabel(rembgModel)} · ${bgDeviceLabel}. Device mode is set in Settings.`}
+                hint={`${bgModelInfo(rembgModel).bestFor} Device: ${bgDeviceLabel} (set in Settings).`}
               >
                 <Select id="process-bg-model" value={rembgModel} onChange={e => setRembgModel(e.target.value)}>
                   {rembgModels.map(m => <option key={m} value={m}>{bgModelLabel(m)}</option>)}
@@ -1372,7 +1470,7 @@ export default function Pipeline({
             <Field
               label="Skip upscale if any side is at least (px)"
               htmlFor="process-max-px"
-              hint="Empty uses the safe default."
+              hint="Photos already this large are not upscaled. Empty uses the default (3600 px)."
             >
               <TextField
                 id="process-max-px"
@@ -1419,18 +1517,17 @@ export default function Pipeline({
         {/* Workspace */}
         <div className="pipeline-workspace">
           <div className="pipeline-status-card-slot">
-            {(running || done) && (
+            {(running || done || outcome) && (
               <Zone2
                 upStats={upStats} bgStats={bgStats}
                 totalImages={totalImages} elapsed={elapsed}
-                done={done} stage={stage}
-                doUpscale={doUpscale} doRembg={doRembg}
+                running={running} outcome={outcome} stage={stage}
+                doUpscale={runConfig.upscale} doRembg={runConfig.rembg}
                 oomGpuCount={oomGpuCount}
-                imageProgress={imageProgress}
                 eta={eta}
               />
             )}
-            {!running && !done && (
+            {!running && !done && !outcome && (
               <ReadyCard
                 nothingSelected={nothingSelected}
                 doUpscale={doUpscale}

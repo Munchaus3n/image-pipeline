@@ -4,6 +4,7 @@ import { apiBase, selectFile, selectFolder } from "./runtime.js";
 
 const BASE = apiBase();
 const DEFAULT_TIMEOUT_MS = 15000;
+const LONG_TIMEOUT_MS = 120000;
 
 function withTimeout(timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -29,9 +30,12 @@ export function errorDetailText(detail) {
 async function parseJsonResponse(r, method, path) {
   if (!r.ok) {
     const body = await r.json().catch(() => null);
-    const error = new Error(`${method} ${path} → ${r.status}`);
+    const detail = errorDetailText(body?.detail);
+    // Show the server's reason when it gave one. The fallback leaves out the query string,
+    // which would otherwise put a full file path in the message.
+    const error = new Error(detail || `${method} ${path.split("?")[0]} → ${r.status}`);
     error.status = r.status;
-    error.detail = errorDetailText(body?.detail);
+    error.detail = detail;
     throw error;
   }
   try {
@@ -89,8 +93,9 @@ export const browseFile = async (initial = "", filter = "image") => {
 };
 
 // Returns { images: [...abs paths], count, truncated }
+// Big folders take a while to scan, so this waits longer than the 15 s default.
 export const getImages  = (folder, { recursive = true, limit = 0 } = {}) =>
-  get(`/images?folder=${encodeURIComponent(folder)}&recursive=${recursive ? "true" : "false"}&limit=${encodeURIComponent(limit)}`);
+  get(`/images?folder=${encodeURIComponent(folder)}&recursive=${recursive ? "true" : "false"}&limit=${encodeURIComponent(limit)}`, LONG_TIMEOUT_MS);
 
 // URL to use directly in <img src="...">
 export const imageUrl   = (absPath)    => `${BASE}/image?path=${encodeURIComponent(absPath)}`;
@@ -99,17 +104,20 @@ export const imageUrl   = (absPath)    => `${BASE}/image?path=${encodeURICompone
 export const previewUrl = (absPath, size, version) =>
   `${BASE}/preview?path=${encodeURIComponent(absPath)}&size=${size}${version !== undefined ? `&v=${version}` : ""}`;
 
-// Template ref_image may be a data URL, an absolute path, or a bare file name in templates/.
+// Template ref_image is a data URL (what the Templates screen saves) or a bare file name
+// in templates/. A path is refused: a templates file someone shares must not be able to
+// make the app read an arbitrary file on this PC, or a network share, through /image.
 export const templateRefUrl = (ref) => {
   if (!ref) return null;
-  if (ref.startsWith("data:")) return ref;
-  if (ref.includes("/") || ref.includes("\\")) return imageUrl(ref);
+  if (ref.startsWith("data:image/")) return ref;
+  if (ref.includes("/") || ref.includes("\\") || ref.includes(":")) return null;
   return `${BASE}/templates/image?name=${encodeURIComponent(ref)}`;
 };
 
 // items: [{ image_path, canvas_x, canvas_y, scale }]
 export const saveComposition = (items, srcRoot, queueIndex, isCombo, thumbnail = true, canvasSize = null, outputDir = "") =>
-  post("/save", { items, src_root: srcRoot, queue_index: queueIndex, is_combo: isCombo, thumbnail, canvas_size: canvasSize, output_dir: outputDir });
+  // Large photos at high scale take a while; a timeout here would report a failure for a save that finishes.
+  post("/save", { items, src_root: srcRoot, queue_index: queueIndex, is_combo: isCombo, thumbnail, canvas_size: canvasSize, output_dir: outputDir }, LONG_TIMEOUT_MS);
 
 export const skipImage  = (imagePath, srcRoot = "", outputDir = "")  => post("/skip", { image_path: imagePath, src_root: srcRoot, output_dir: outputDir });
 
@@ -136,4 +144,4 @@ export const saveTemplates = (templates) => post("/templates/save", { templates 
 // Opens a folder in the native OS file explorer.
 // path="" → server defaults to OUTPUT_ROOT.
 export const openFolder = (absPath = "") =>
-  get(`/open-folder?path=${encodeURIComponent(absPath)}`);
+  post(`/open-folder?path=${encodeURIComponent(absPath)}`);

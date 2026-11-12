@@ -329,6 +329,11 @@ const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:n
 export function Modal({ open, title, onClose, children, footer, width = 420 }) {
   const ref = useRef(null);
   const titleId = useId();
+  // Callers pass a new onClose on every render. Reading it through a ref keeps the
+  // effect below from re-running (and pulling focus back to the autofocus button)
+  // each time the parent re-renders while the dialog is open.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
 
   useEffect(() => {
     if (!open) return undefined;
@@ -338,7 +343,7 @@ export function Modal({ open, title, onClose, children, footer, width = 420 }) {
     const onKey = (e) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose?.();
+        onCloseRef.current?.();
         return;
       }
       if (e.key !== "Tab" || !node) return;
@@ -354,7 +359,7 @@ export function Modal({ open, title, onClose, children, footer, width = 420 }) {
       document.removeEventListener("keydown", onKey, true);
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return createPortal(

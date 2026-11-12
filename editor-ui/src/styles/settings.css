@@ -84,6 +84,28 @@
 .settings-guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
 .settings-guide-field { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--text-secondary); font-size: 12px; text-transform: capitalize; }
 
+/* ---- How it works (prose; the Group body has no vertical rhythm of its own) ---- */
+.settings-info { padding-bottom: var(--space-3); border-top: 1px solid var(--border-subtle); }
+.settings-info .ui-section:last-child { border-bottom: 0; }
+.settings-info .ui-section-body { padding-left: var(--space-3); padding-right: var(--space-3); color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+.settings-info p { margin: 0; }
+.settings-info strong { color: var(--text-primary); font-weight: 600; }
+.settings-info code { font-family: var(--font-mono); font-size: 12px; padding: 1px 4px; border-radius: var(--radius-s); background: var(--surface-muted); color: var(--text-primary); }
+.settings-info-steps, .settings-info-bullets { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: var(--space-2); }
+.settings-info-list { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-2) var(--space-4); }
+.settings-info-list > div { display: contents; }
+.settings-info-list dt { color: var(--text-primary); font-weight: 600; }
+.settings-info-list dd { margin: 0; }
+.settings-info-models { margin: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.settings-info-model { padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-m); background: var(--surface-app); }
+.settings-info-model dt { margin-bottom: var(--space-1); color: var(--text-primary); font-weight: 600; }
+.settings-info-model dd { margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.settings-info-note { color: var(--text-muted); font-size: 12px; }
+.settings-info-shortcuts { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-4); }
+.settings-info-shortcuts > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.settings-info-shortcuts dt { color: var(--text-primary); }
+.settings-info-shortcuts dd { margin: 0; }
+
 /* Narrow windows: drop the section list, stack label above control. */
 @media (max-width: 1100px) {
   .settings-nav { display: none; }
@@ -92,4 +114,7 @@
   .settings-select.is-wide select { min-width: 0; width: 100%; }
   .settings-select.is-wide { width: 100%; }
   .settings-guides { grid-template-columns: minmax(0, 1fr); }
+  .settings-info-list { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .settings-info-list dd { margin-bottom: var(--space-2); }
+  .settings-info-shortcuts { grid-template-columns: minmax(0, 1fr); }
 }

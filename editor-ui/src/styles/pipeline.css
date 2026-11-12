@@ -63,6 +63,8 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4);
+  /* The right side fits the window: no scrolling. Only the Activity list scrolls.
+     The auto fallback shows a scrollbar only if the window is too small for the minimums. */
   overflow-y: auto;
 }
 .pipeline-status-card-slot { flex: 0 0 auto; }
@@ -112,14 +114,20 @@
 .pipeline-stat-value.is-bad { color: var(--status-negative-text); }
 .pipeline-stat-label { color: var(--text-secondary); font-size: 11px; }
 
-/* Live preview */
+/* Live preview: always one row of four tiles. The card takes whatever height the status
+   card and the Activity panel leave, so expanding Activity makes it shorter. */
+.pipeline-preview-strip { flex: 1 1 0; min-height: 150px; display: flex; flex-direction: column; }
 .pipeline-preview-grid {
+  flex: 1 1 auto; min-height: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(112px, 168px));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--space-2);
 }
 .pipeline-preview-slot {
-  position: relative; aspect-ratio: 1; overflow: hidden;
+  position: relative; overflow: hidden;
+  /* Square when there is room, otherwise as tall as the row allows. */
+  height: 100%; max-height: 200px; aspect-ratio: 1; max-width: 100%; justify-self: start;
   border: 1px solid var(--border-subtle); border-radius: var(--radius-m);
   background: var(--surface-canvas);
 }
@@ -144,7 +152,8 @@
 }
 
 /* Activity: fills the remaining height; the list is its only scroll area */
-.pipeline-activity-panel { flex: 1 1 220px; min-height: 160px; display: flex; flex-direction: column; padding: var(--space-3) var(--space-4) var(--space-4); }
+.pipeline-activity-panel { flex: 1 1 180px; min-height: 140px; display: flex; flex-direction: column; padding: var(--space-3) var(--space-4) var(--space-4); }
+/* Closed: just its header, pinned to the bottom; the live stream above takes the space. */
 .pipeline-activity-panel.is-collapsed { flex: 0 0 auto; min-height: 0; }
 .pipeline-activity-panel.is-collapsed .pipeline-card-head { margin-bottom: 0; }
 .pipeline-log-list {

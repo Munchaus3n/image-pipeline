@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
+const { StringDecoder } = require("node:string_decoder");
 const { API_TOKEN_HEADER } = require("./security.cjs");
 
 // The terminal/browser workflow and CUTOUT_STUDIO_REUSE_API use this port; the
@@ -109,6 +110,10 @@ function backendEnvironment({ packaged, userDataPath, resourceDir }) {
   const env = {
     ...process.env,
     PYTHONUNBUFFERED: "1",
+    // Print UTF-8 whatever the Windows code page is, so file names with accents or other
+    // scripts neither crash a print() nor come out garbled in the log and progress lines.
+    PYTHONUTF8: "1",
+    PYTHONIOENCODING: "utf-8",
     CUTOUT_STUDIO_RESOURCE_DIR: resourceDir,
     CUTOUT_STUDIO_USER_DATA: userDataPath,
     CUTOUT_STUDIO_PACKAGED: packaged ? "1" : "0",
@@ -206,11 +211,23 @@ function isForeignBackend(probe) {
   return ok && !(probe.json && probe.json.auth_enforced === true);
 }
 
+// Thrown when the app is being closed while the backend is still starting.
+class StartupAbortedError extends Error {
+  constructor() {
+    super("Startup cancelled because the app is closing.");
+    this.name = "StartupAbortedError";
+    this.startupAborted = true;
+  }
+}
+
 async function waitForApi({ timeoutMs = 45000, intervalMs = 400 } = {}) {
   const startedAt = Date.now();
   let lastError = null;
 
   while (Date.now() - startedAt < timeoutMs) {
+    // The user closed the window while it was still starting: the backend was stopped on
+    // purpose, so this is not a startup failure and must not raise an error dialog.
+    if (stopping) throw new StartupAbortedError();
     if (backendExit) {
       throw new Error(`The backend stopped before it was ready (${backendExit}). See backend.log for details.`);
     }
@@ -230,13 +247,18 @@ async function waitForApi({ timeoutMs = 45000, intervalMs = 400 } = {}) {
 }
 
 function pipeProcessOutput(child) {
+  // StringDecoder keeps a multi-byte character that is split across two chunks in one piece.
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
   child.stdout?.on("data", (chunk) => {
-    process.stdout.write(`[api] ${chunk}`);
-    writeBackendLog(`[stdout] ${String(chunk).trimEnd()}`);
+    const text = stdoutDecoder.write(chunk);
+    process.stdout.write(`[api] ${text}`);
+    writeBackendLog(`[stdout] ${text.trimEnd()}`);
   });
   child.stderr?.on("data", (chunk) => {
-    process.stderr.write(`[api] ${chunk}`);
-    writeBackendLog(`[stderr] ${String(chunk).trimEnd()}`);
+    const text = stderrDecoder.write(chunk);
+    process.stderr.write(`[api] ${text}`);
+    writeBackendLog(`[stderr] ${text.trimEnd()}`);
   });
 }
 

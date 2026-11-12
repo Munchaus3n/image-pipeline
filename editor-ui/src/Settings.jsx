@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FolderOpen } from "lucide-react";
-import { browseFolder, getSettings, patchSettings } from "./api.js";
+import { browseFolder, getRembgModels, getSettings, patchSettings } from "./api.js";
 import { useDefaultOutputLabel } from "./defaultOutput.js";
-import { BG_MODEL_OPTIONS, BG_DEVICE_OPTIONS, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
+import {
+  BG_MODEL_OPTIONS, BG_DEVICE_OPTIONS, bgDeviceOption, bgModelInfo, bgModelLabel,
+  normalizeBgDeviceMode, upscaleModelInfo,
+} from "./modelLabels.js";
 import PageHeader from "./components/PageHeader.jsx";
+import HowItWorks from "./components/HowItWorks.jsx";
 import {
   Button, IconButton, Select as UiSelect, Slider as UiSlider, Switch, TextField,
 } from "./components/ui/index.jsx";
@@ -188,6 +192,7 @@ function Select({ value, onChange, options, wide, label }) {
 const BG_DEVICE_SELECT_OPTIONS = BG_DEVICE_OPTIONS.map(option => [option.value, option.label]);
 
 const SECTIONS = [
+  ["settings-info", "How it works"],
   ["settings-paths", "Workspace paths"],
   ["settings-appearance", "Appearance"],
   ["settings-safety", "Safety"],
@@ -231,8 +236,6 @@ function changedSettings(current, baseline) {
 
 const DEFAULT = {
   processing: { crop_padding: 0.04, edge_blur: 1.2, edge_mode: "soft", decontaminate: true, upscale_model: "fast", rembg_model: "birefnet-general", bg_device_mode: "cpu", force_cpu: true, wipe_input_after_run: false, upscale_max_px: 0 },
-  rembg_api: { provider: "local", url: "", key: "" },
-  upscaler_api: { provider: "local", url: "", key: "", model: "" },
   output: { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, do_rembg: true, upscale_scale: "2" },
   appearance: { guide_opacity: 1.0, ref_img_opacity: 0.05, canvas_bg_color: "#ffffff", theme: "dark" },
   guides: { use_custom: false, custom: {} },
@@ -246,6 +249,20 @@ export default function Settings({ onThemeChange }) {
   const [dirty, setDirty] = useState(false);
   // Last settings loaded from / saved to the server; save() sends only the difference.
   const baselineRef = useRef(DEFAULT);
+  const statusTimerRef = useRef(null);
+  useEffect(() => () => window.clearTimeout(statusTimerRef.current), []);
+  // The backend decides which models exist; the built-in list is shown until it answers.
+  const [bgModelOptions, setBgModelOptions] = useState(BG_MODEL_OPTIONS);
+
+  useEffect(() => {
+    getRembgModels()
+      .then(data => {
+        if (Array.isArray(data?.models) && data.models.length) {
+          setBgModelOptions(data.models.map(id => [id, bgModelLabel(id)]));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     getSettings()
@@ -280,7 +297,9 @@ export default function Settings({ onThemeChange }) {
       window.dispatchEvent(new CustomEvent("cutout-settings-saved", { detail: { settings } }));
       setStatus("Saved");
       setDirty(false);
-      setTimeout(() => setStatus(""), 2000);
+      // One timer, so an older "clear" cannot wipe a newer message.
+      window.clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = window.setTimeout(() => setStatus(""), 2000);
     } catch {
       setStatus("Save failed");
     }
@@ -289,7 +308,9 @@ export default function Settings({ onThemeChange }) {
   const reset = useCallback(() => {
     setSettings(normalizeSettings(DEFAULT));
     setDirty(true);
-  }, []);
+    // The theme is applied live elsewhere, so the screen has to follow the reset too.
+    if (onThemeChange) onThemeChange(DEFAULT.appearance.theme);
+  }, [onThemeChange]);
 
   const goToSection = (id) => {
     document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -330,6 +351,14 @@ export default function Settings({ onThemeChange }) {
 
         <main className="settings-body">
           <div className="settings-content">
+            <Group
+              id="settings-info"
+              title="How it works"
+              description="A short guide to the screens and models, for anyone new to the app."
+            >
+              <HowItWorks />
+            </Group>
+
             <Group
               id="settings-paths"
               title="Workspace paths"
@@ -500,9 +529,10 @@ export default function Settings({ onThemeChange }) {
               {(settings.output.do_upscale ?? true) && (settings.output.upscale_scale || "2") === "2" && (
                 <Row
                   label="2x upscale quality"
-                  hint={(settings.processing.upscale_model || "fast") === "quality"
-                    ? "Photo-trained model, keeps texture and small print on packaging. Much slower: about 20x on a laptop with integrated graphics."
-                    : "Fast model tuned for video frames. It can smooth fine texture."}
+                  hint={(() => {
+                    const info = upscaleModelInfo(settings.processing.upscale_model || "fast");
+                    return `${info.bestFor} Avoid when: ${info.avoidWhen}`;
+                  })()}
                 >
                   <Select
                     label="2x upscale quality"
@@ -512,14 +542,14 @@ export default function Settings({ onThemeChange }) {
                   />
                 </Row>
               )}
-              <Row label="Skip upscale if any side is at least" hint="Empty means no quality skip rule.">
+              <Row label="Skip upscale if any side is at least" hint="Photos already this large are not upscaled. Empty uses the default (3600 px).">
                 <div className="settings-inline">
                   <OptionalNumInput
                     label="Skip upscale threshold"
                     value={settings.processing.upscale_max_px}
-                    min={512}
+                    min={256}
                     max={8192}
-                    placeholder="no skip"
+                    placeholder="3600"
                     onChange={value => setSetting("processing", "upscale_max_px", value)}
                   />
                   <span className="settings-unit">px</span>
@@ -532,13 +562,16 @@ export default function Settings({ onThemeChange }) {
               title="Background removal"
               description="Model and mask cleanup preferences."
             >
-              <Row label="Model">
+              <Row
+                label="Model"
+                hint={`${bgModelInfo(settings.processing.rembg_model).bestFor} Avoid when: ${bgModelInfo(settings.processing.rembg_model).avoidWhen}`}
+              >
                 <Select
                   label="Background removal model"
                   value={settings.processing.rembg_model}
                   onChange={value => setSetting("processing", "rembg_model", value)}
                   wide
-                  options={BG_MODEL_OPTIONS}
+                  options={bgModelOptions}
                 />
               </Row>
               <Row

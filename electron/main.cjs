@@ -11,7 +11,9 @@ const {
   startPythonApi,
   stopPythonApi,
 } = require("./python-manager.cjs");
-const { createApiToken, installApiAuthHeader, isAppUrl, isSafeExternalUrl } = require("./security.cjs");
+const {
+  createApiToken, denyAllPermissions, installApiAuthHeader, isAppUrl, isSafeExternalUrl,
+} = require("./security.cjs");
 const buildChannel = require("./build-channel.cjs");
 const { checkEvaluation } = require("./eval-license.cjs");
 
@@ -44,8 +46,8 @@ function writeMainLog(message) {
   if (!userDataPath) return;
   try {
     const logDir = path.join(userDataPath, "logs");
-    require("node:fs").mkdirSync(logDir, { recursive: true });
-    require("node:fs").appendFileSync(
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(
       path.join(logDir, "main.log"),
       `[${new Date().toISOString()}] ${message}\n`,
       "utf8",
@@ -79,10 +81,9 @@ function appRoot() {
 // process cannot read inside an asar, so probe for the real on-disk location.
 function backendResourceDir() {
   if (isDev) return appRoot();
-  const fsMod = require("node:fs");
   for (const dir of [appRoot(), process.resourcesPath]) {
     try {
-      if (fsMod.existsSync(path.join(dir, "realesrgan-ncnn-vulkan"))) return dir;
+      if (fs.existsSync(path.join(dir, "realesrgan-ncnn-vulkan"))) return dir;
     } catch {
       // ignore and try the next candidate
     }
@@ -103,6 +104,9 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      // Stated on purpose (it is also Electron's default): the page runs in the Chromium
+      // sandbox, and the preload only uses APIs that work inside it.
+      sandbox: true,
       preload: path.join(__dirname, "preload.cjs"),
       additionalArguments: [`--cutout-api-origin=http://127.0.0.1:${apiPort || LEGACY_PORT}`],
     },
@@ -120,12 +124,15 @@ function createWindow() {
 
   // The window only ever shows the app. A file dropped outside a drop zone used to
   // navigate here and replace the whole UI; now it is simply refused.
-  mainWindow.webContents.on("will-navigate", (event, url) => {
+  const keepOnApp = (event, url) => {
     const currentUrl = mainWindow?.webContents.getURL();
     if (!currentUrl || url === currentUrl || isAppUrl(url, rendererUrl())) return;
     event.preventDefault();
     if (isSafeExternalUrl(url)) shell.openExternal(url);
-  });
+  };
+  mainWindow.webContents.on("will-navigate", keepOnApp);
+  // A redirect after an allowed navigation must not lead the window somewhere else either.
+  mainWindow.webContents.on("will-redirect", keepOnApp);
 
   return mainWindow;
 }
@@ -254,6 +261,8 @@ async function waitForRenderer({ timeoutMs = 20000, intervalMs = 300 } = {}) {
 async function loadStartupError(error) {
   console.error("[electron] startup failed", error);
   writeMainLog(`startup failed: ${error?.stack || error?.message || error}`);
+  // Closing the window while the backend was still starting is not an error to report.
+  if (error?.startupAborted || app.__stoppingPythonApi) return;
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
   }
@@ -340,10 +349,6 @@ ipcMain.handle("dialog:save-file", async (event, { defaultName = "", kind = "png
   return { saved: true, path: result.filePath };
 });
 
-ipcMain.on("app:is-packaged", (event) => {
-  event.returnValue = app.isPackaged;
-});
-
 // A second copy would attach to the first one's backend and break it when closed.
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -358,6 +363,7 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     writeMainLog("app ready");
+    denyAllPermissions(session.defaultSession);
     // Evaluation-build gate, before anything starts. No-op for full builds
     // (channel !== "eval"). Runs after the single-instance lock, so a second
     // launch never reads or advances the stored state.
@@ -372,7 +378,10 @@ if (!gotSingleInstanceLock) {
     try {
       await openMainWindow();
     } catch (error) {
-      await loadStartupError(error);
+      // Showing the error page can itself fail (for example the window is already gone).
+      await loadStartupError(error).catch((shownError) => {
+        writeMainLog(`could not show the startup error: ${shownError?.message || shownError}`);
+      });
     }
   });
 

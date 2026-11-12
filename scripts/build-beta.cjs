@@ -102,6 +102,7 @@ try {
   run("npm", ["run", "electron:build-ui"]);
   console.log("[2/5] building backend (PyInstaller)");
   run("npm", ["run", "backend:build"]);
+  run("npm", ["run", "prepare:seed"]);
 
   // 2. Back up readable source, then bake the eval channel.
   console.log("[3/5] staging eval config + obfuscation");
