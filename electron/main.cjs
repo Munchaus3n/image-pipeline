@@ -40,8 +40,8 @@ function writeMainLog(message) {
   if (!userDataPath) return;
   try {
     const logDir = path.join(userDataPath, "logs");
-    require("node:fs").mkdirSync(logDir, { recursive: true });
-    require("node:fs").appendFileSync(
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(
       path.join(logDir, "main.log"),
       `[${new Date().toISOString()}] ${message}\n`,
       "utf8",
@@ -75,10 +75,9 @@ function appRoot() {
 // process cannot read inside an asar, so probe for the real on-disk location.
 function backendResourceDir() {
   if (isDev) return appRoot();
-  const fsMod = require("node:fs");
   for (const dir of [appRoot(), process.resourcesPath]) {
     try {
-      if (fsMod.existsSync(path.join(dir, "realesrgan-ncnn-vulkan"))) return dir;
+      if (fs.existsSync(path.join(dir, "realesrgan-ncnn-vulkan"))) return dir;
     } catch {
       // ignore and try the next candidate
     }
@@ -313,10 +312,6 @@ ipcMain.handle("dialog:save-file", async (event, { defaultName = "", kind = "png
   if (result.canceled || !result.filePath) return { saved: false, path: "" };
   await fs.promises.writeFile(result.filePath, data);
   return { saved: true, path: result.filePath };
-});
-
-ipcMain.on("app:is-packaged", (event) => {
-  event.returnValue = app.isPackaged;
 });
 
 // A second copy would attach to the first one's backend and break it when closed.

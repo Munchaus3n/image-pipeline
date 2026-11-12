@@ -236,8 +236,6 @@ function changedSettings(current, baseline) {
 
 const DEFAULT = {
   processing: { crop_padding: 0.04, edge_blur: 1.2, edge_mode: "soft", decontaminate: true, upscale_model: "fast", rembg_model: "birefnet-general", bg_device_mode: "cpu", force_cpu: true, wipe_input_after_run: false, upscale_max_px: 0 },
-  rembg_api: { provider: "local", url: "", key: "" },
-  upscaler_api: { provider: "local", url: "", key: "", model: "" },
   output: { canvas_size: 1440, thumbnail: true, thumbnail_size: 400, folder_mode: "bulk", input_dir: "", output_dir: "", do_upscale: true, do_rembg: true, upscale_scale: "2" },
   appearance: { guide_opacity: 1.0, ref_img_opacity: 0.05, canvas_bg_color: "#ffffff", theme: "dark" },
   guides: { use_custom: false, custom: {} },

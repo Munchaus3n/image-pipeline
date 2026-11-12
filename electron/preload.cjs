@@ -16,6 +16,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("backend:status", handler);
     return () => ipcRenderer.removeListener("backend:status", handler);
   },
-  platform: process.platform,
-  isPackaged: ipcRenderer.sendSync("app:is-packaged"),
 });

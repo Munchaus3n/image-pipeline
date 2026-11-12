@@ -16,15 +16,7 @@ import {
 } from "./components/ui/index.jsx";
 import { useUiPref } from "./hooks/useUiPref.js";
 import { useDefaultOutputLabel } from "./defaultOutput.js";
-/*
-KNOWN LIMITATIONS (web build):
-- Focus-based settings reload is a temporary sync workaround; desktop Electron should use explicit app events.
-- /api/browse relies on tkinter; Electron should use native dialog APIs.
-- Editor refresh still depends on UI state transitions rather than native IPC events.
-*/
-
 const BASE = apiBase();
-const AUTO_OPEN_EDITOR_AFTER_PROCESS = true;
 
 function addToken(tokens, value) {
   const token = String(value || "").trim();
@@ -191,15 +183,15 @@ function isTelemetryNoise(raw) {
 
   return [
     /image pipeline/i,
-    /upscale\s*(?:→|->|â†’)\s*remove bg/i,
+    /upscale\s*(?:→|->)\s*remove bg/i,
     /\bconfiguration\b/i,
     /\bsummary\b/i,
     /^mode\b/i,
     /^images\b/i,
     /^upscale\b/i,
     /^remove bg\b/i,
-    /\binput\s*(?:→|->|â†’)/i,
-    /\boutput\s*(?:→|->|â†’)/i,
+    /\binput\s*(?:→|->)/i,
+    /\boutput\s*(?:→|->)/i,
     /\bwipe policy\b/i,
     /previous output cleared/i,
     /custom paths\s*\+\s*wipe off/i,
@@ -1270,7 +1262,7 @@ export default function Pipeline({
         canvasSize: parseInt(canvasSize, 10) || 1440,
         session,
       });
-      if (AUTO_OPEN_EDITOR_AFTER_PROCESS && imageError === 0 && errors.length === 0) {
+      if (imageError === 0 && errors.length === 0) {
         onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440 });
       }
     })();

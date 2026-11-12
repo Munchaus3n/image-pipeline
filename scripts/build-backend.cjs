@@ -60,6 +60,7 @@ const pyinstallerArgs = [
   "--workpath", path.join("backend-build", "work"),
   "--specpath", "backend-build",
   "--hidden-import", "pipeline",
+  "--hidden-import", "model_cache",
   "--hidden-import", "sse_starlette.sse",
   "--hidden-import", "uvicorn.logging",
   "--hidden-import", "uvicorn.loops",

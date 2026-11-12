@@ -28,6 +28,7 @@ from PIL import Image, ImageFilter, ImageChops, ImageOps, UnidentifiedImageError
 import numpy as np
 from scipy.ndimage import binary_dilation, binary_fill_holes, grey_erosion, label, uniform_filter
 from scipy.special import expit
+import model_cache
 
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 import onnxruntime as ort
@@ -102,22 +103,28 @@ DEFAULT_REMBG_MAX_PX = 4096
 
 console = Console()
 
-_rembg_remove_fn = None
 _new_session_fn = None
 
 
-def _ensure_rembg_loaded():
-    global _rembg_remove_fn, _new_session_fn
-    if _rembg_remove_fn is None or _new_session_fn is None:
-        from rembg import remove as remove_fn, new_session as session_fn
-        _rembg_remove_fn = remove_fn
-        _new_session_fn = session_fn
-    return _rembg_remove_fn, _new_session_fn
-
-
 def new_session(*args, **kwargs):
-    _, session_fn = _ensure_rembg_loaded()
-    return session_fn(*args, **kwargs)
+    """rembg.new_session, imported on first use, without re-hashing a model file that
+    already passed the check (see model_cache.py)."""
+    global _new_session_fn
+    if _new_session_fn is None:
+        from rembg import new_session as session_fn
+        _new_session_fn = session_fn
+    name = args[0] if args else kwargs.get("model_name", "")
+    skip_check = model_cache.is_verified(name) and "MODEL_CHECKSUM_DISABLED" not in os.environ
+    if skip_check:
+        os.environ["MODEL_CHECKSUM_DISABLED"] = "1"
+    try:
+        session = _new_session_fn(*args, **kwargs)
+    finally:
+        if skip_check:
+            os.environ.pop("MODEL_CHECKSUM_DISABLED", None)
+    if not skip_check:
+        model_cache.mark_verified(name)
+    return session
 
 # ── UI helpers ─────────────────────────────────────────────────────────────────
 
@@ -860,10 +867,6 @@ def _active_session_providers(session) -> list[str]:
         return list(get_providers())
     except Exception:
         return []
-
-
-def _gpu_provider_is_active(session) -> bool:
-    return _gpu_provider_from(_active_session_providers(session)) is not None
 
 
 def _is_gpu_runtime_error(msg: str) -> bool:

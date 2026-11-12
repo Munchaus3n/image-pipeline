@@ -45,6 +45,7 @@ from sse_starlette.sse import EventSourceResponse
 from contextlib import asynccontextmanager, contextmanager
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import model_cache
 
 # If pillow-avif-plugin is installed, importing it may register AVIF decoders in Pillow.
 _PILLOW_AVIF_IMPORTED = False
@@ -74,14 +75,19 @@ _warmup_model = ""
 
 def _warmup_worker():
     try:
-        from rembg.sessions import sessions_class
         model = _warmup_model
+        # A model that already passed the check needs nothing here. Skipping also keeps
+        # rembg (and the numba/scipy stack it pulls in) out of this long-lived process.
+        if model_cache.is_verified(model):
+            return
+        from rembg.sessions import sessions_class
         # Only fetch the weights; building an ORT session here would cost
         # seconds of CPU and 1-2 GB RAM for a session that is thrown away.
         # The real pipeline run will pick the right provider (DML/CUDA/CPU).
         for session_class in sessions_class:
             if session_class.name() == model:
                 session_class.download_models()
+                model_cache.mark_verified(model)  # pooch just verified the download
                 break
     except Exception:
         pass  # Warm-up is best-effort; never crash the server
@@ -1293,8 +1299,6 @@ _DEFAULT_SETTINGS = {
                      "rembg_model": "birefnet-general",
                      "bg_device_mode": "cpu", "force_cpu": True, "wipe_input_after_run": False,
                      "reuse_exact_duplicates": True, "upscale_max_px": 3600},
-    "upscaler_api": {"provider": "local", "url": "", "key": "", "model": ""},
-    "rembg_api":    {"provider": "local", "url": "", "key": ""},
     "output":       {"canvas_size": 1440, "thumbnail": True,
                      "thumbnail_size": 400, "folder_mode": "bulk", "input_dir": "", "output_dir": "",
                      "recent_input_dirs": [], "recent_output_dirs": [],
