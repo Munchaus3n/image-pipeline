@@ -60,6 +60,13 @@ DEFAULT_INPUT_DIR = _env_path("CUTOUT_STUDIO_DEFAULT_INPUT_DIR") or BASE_DIR / "
 DEFAULT_OUTPUT_DIR = _env_path("CUTOUT_STUDIO_DEFAULT_OUTPUT_DIR") or BASE_DIR / "output"
 NCNN_EXE  = BASE_DIR / "realesrgan-ncnn-vulkan" / "realesrgan-ncnn-vulkan.exe"
 
+# Upscaler models, run through realesrgan-ncnn-vulkan (GPU). Keep the guidance in step
+# with UPSCALE_MODELS in editor-ui/src/modelLabels.js.
+#   "2" -> realesr-animevideov3-x2: small model made for video frames. Quickest. Best for
+#          big batches and clean, flat surfaces; it smooths fine texture, so small print
+#          on packaging can look soft.
+#   "4" -> realesrgan-x4plus: photo model. Keeps texture and small text. Much slower,
+#          especially on integrated graphics. Best for very small sources.
 NCNN_MODELS = {
     "2": {"model": "realesr-animevideov3-x2", "scale": "2"},
     "4": {"model": "realesrgan-x4plus",        "scale": "4"},
@@ -81,6 +88,8 @@ def resolve_upscale(scale: str, upscale_model: str = "fast") -> tuple[str, str, 
     return entry["model"], entry["scale"], int(scale)
 
 
+# Default background model; the CLI --rembg-model overrides it (choices and guidance
+# live in api.py _REMBG_MODELS). Only "bria-rmbg" takes the separate BRIA code path.
 REMBG_MODEL    = "birefnet-general"
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"}
 AVIF_DECODE_ERROR = "AVIF is listed but Pillow cannot decode this file. Install Pillow with AVIF support or convert to PNG/JPEG."

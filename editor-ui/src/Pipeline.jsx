@@ -4,7 +4,7 @@ import {
   browseFolder, openFolder, previewUrl, errorDetailText,
   getSettings, patchSettings, getRembgModels, getSession, clearSession,
 } from "./api.js";
-import { bgModelLabel, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
+import { bgModelInfo, bgModelLabel, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
 import { normalizeImagePath, relativePathFromRoot, imageIdForPath } from "./paths.js";
 import {
   ArrowRight, ChevronDown, ChevronUp, Clock, FolderOpen, Play, Square, X,
@@ -1461,7 +1461,7 @@ export default function Pipeline({
               <Field
                 label="BG model"
                 htmlFor="process-bg-model"
-                hint={`Using ${bgModelLabel(rembgModel)} · ${bgDeviceLabel}. Device mode is set in Settings.`}
+                hint={`${bgModelInfo(rembgModel).bestFor} Device: ${bgDeviceLabel} (set in Settings).`}
               >
                 <Select id="process-bg-model" value={rembgModel} onChange={e => setRembgModel(e.target.value)}>
                   {rembgModels.map(m => <option key={m} value={m}>{bgModelLabel(m)}</option>)}
@@ -1474,7 +1474,7 @@ export default function Pipeline({
             <Field
               label="Skip upscale if any side is at least (px)"
               htmlFor="process-max-px"
-              hint="Empty uses the safe default."
+              hint="Photos already this large are not upscaled. Empty uses the default (3600 px)."
             >
               <TextField
                 id="process-max-px"

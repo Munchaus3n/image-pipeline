@@ -136,4 +136,4 @@ export const saveTemplates = (templates) => post("/templates/save", { templates 
 // Opens a folder in the native OS file explorer.
 // path="" → server defaults to OUTPUT_ROOT.
 export const openFolder = (absPath = "") =>
-  get(`/open-folder?path=${encodeURIComponent(absPath)}`);
+  post(`/open-folder?path=${encodeURIComponent(absPath)}`);

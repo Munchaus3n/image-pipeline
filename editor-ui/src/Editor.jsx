@@ -28,6 +28,7 @@ import {
 import { pathForFile, canSaveWithDialog, saveFileWithDialog } from "./runtime.js";
 import { toForwardSlashes, relativePathFromRoot } from "./paths.js";
 import { useDefaultOutputLabel } from "./defaultOutput.js";
+import { SHORTCUTS } from "./editorShortcuts.js";
 import PageHeader from "./components/PageHeader.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -86,20 +87,6 @@ function shouldRefocusAfterClick(e) {
   if (control.closest("[aria-haspopup], [role='dialog'], [role='listbox']")) return false;
   return true;
 }
-
-const SHORTCUTS = [
-  ["Move product", "Drag"],
-  ["Resize product", "Scroll on canvas"],
-  ["Rotate product", "Ctrl + Scroll"],
-  ["Zoom view", "Alt + Scroll"],
-  ["Pan view", "Space + drag"],
-  ["Nudge 1 px / 10 px", "Arrows / Shift + Arrows"],
-  ["Undo", "Ctrl + Z"],
-  ["Save and next", "Enter"],
-  ["Skip", "S"],
-  ["Previous", "P"],
-  ["Remove item", "Delete"],
-];
 
 const SINGLE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/tiff,image/avif,.png,.jpg,.jpeg,.webp,.tif,.tiff,.avif";
 const SUPPORTED_SINGLE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/tiff", "image/avif"]);

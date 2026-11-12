@@ -318,8 +318,10 @@ _PIPELINE_NOISE_PATTERNS = (
     "onnxruntime_providers_tensorrt.dll",
     "loadlibrary failed",
     "available providers:",
-    "ep error",
 )
+# ONNX Runtime prints "EP Error ..." banners. Matched as whole words so ordinary
+# messages such as "step error" or "deep error" are not hidden with them.
+_EP_ERROR_RE = re.compile(r"(?<![a-z])ep error(?![a-z])")
 
 def _clean(raw: bytes) -> list[str]:
     text = raw.decode("utf-8", errors="replace")
@@ -331,7 +333,7 @@ def _clean(raw: bytes) -> list[str]:
         if not line:
             continue
         lower = line.lower()
-        if any(pattern in lower for pattern in _PIPELINE_NOISE_PATTERNS):
+        if any(pattern in lower for pattern in _PIPELINE_NOISE_PATTERNS) or _EP_ERROR_RE.search(lower):
             continue
         cleaned.append(line)
     return cleaned
@@ -675,14 +677,18 @@ _seed_templates()
 
 class PlacedItem(BaseModel):
     image_path: str
-    canvas_x:   int
-    canvas_y:   int
-    scale:      float
+    # Bounded so one request cannot ask Pillow for an enormous image (memory exhaustion).
+    canvas_x:   int = Field(ge=-100_000, le=100_000)
+    canvas_y:   int = Field(ge=-100_000, le=100_000)
+    scale:      float = Field(gt=0.0, le=50.0)
     # Degrees, clockwise (matches the Editor canvas).
     rotation:   float = Field(default=0.0, ge=-360.0, le=360.0)
 
+# A placed item above this many pixels after scaling is refused (about 400 MB as RGBA).
+MAX_PLACED_ITEM_PIXELS = 100_000_000
+
 class SaveRequest(BaseModel):
-    items:       list[PlacedItem]
+    items:       list[PlacedItem] = Field(max_length=64)
     src_root:    str
     queue_index: int
     is_combo:    bool       = False
@@ -797,7 +803,7 @@ class CrossSiteRequestMiddleware:
     requests. Without this, any page open in the user's browser could make the
     terminal-workflow API act: an <img src=".../image?path=\\\\host\\share\\x.png">
     makes Windows connect to that share and hand over the user's NTLM hash, and
-    GET /open-folder, /browse or a body-less POST /pipeline/stop all work too.
+    GET /browse or a body-less POST /open-folder or /pipeline/stop all work too.
     Browsers label such requests with Sec-Fetch-Site and a foreign Origin.
     Requests without those headers (curl, scripts, typing a URL) are unchanged.
     """
@@ -924,7 +930,9 @@ def browse_file(initial: str = "", filter: str = ""):
 
 # ── Open folder in OS explorer ────────────────────────────────────────────────
 
-@app.get("/open-folder")
+# POST, not GET: it has a side effect (opens a window), so a stray link or image tag
+# must not be able to trigger it.
+@app.post("/open-folder")
 def open_folder(path: str = ""):
     """
     Open a folder in the native OS file explorer.
@@ -1094,6 +1102,8 @@ def serve_preview(path: str = Query(...), size: int = Query(default=800)):
         return Response(content=payload, media_type=mime, headers={"Cache-Control": "public, max-age=60"})
     except HTTPException:
         raise
+    except Image.DecompressionBombError as e:
+        raise HTTPException(status_code=413, detail=f"Image is too large to preview safely: {e}") from e
     except (UnidentifiedImageError, OSError) as e:
         raise HTTPException(status_code=400, detail=f"Preview decode failed: {e}") from e
     except Exception as e:
@@ -1128,9 +1138,17 @@ def save_composition(req: SaveRequest):
 
     for item in req.items:
         p = _resolve_safe_path(item.image_path, must_exist=True, allow_dir=False)
-        img = _open_image_checked(p).convert("RGBA")
+        try:
+            img = _open_image_checked(p).convert("RGBA")
+        except Image.DecompressionBombError as e:
+            raise HTTPException(status_code=413, detail=f"{p.name} is too large to open safely: {e}") from e
         w   = max(1, int(img.width  * item.scale))
         h   = max(1, int(img.height * item.scale))
+        if w * h > MAX_PLACED_ITEM_PIXELS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{p.name} would be {w}x{h}px at this scale, which is too large. Lower the scale.",
+            )
         resized = img.resize((w, h), Image.LANCZOS)
         angle = item.rotation % 360.0
         if angle > 1e-6 and abs(angle - 360.0) > 1e-6:
@@ -1197,6 +1215,9 @@ def unskip_image(req: SkipRequest):
 
 def _skip_destination(req: SkipRequest) -> tuple[Path, Path]:
     src = _resolve_safe_path(req.image_path, must_exist=True, allow_dir=False)
+    # Skip copies the file, so it must be an image: this endpoint is not a general file copier.
+    if src.suffix.lower() not in SUPPORTED_EXTS:
+        raise HTTPException(status_code=400, detail=f"Not a supported image file: {src.name}")
     src_root, output_base = _editor_output_base(req.src_root, req.output_dir)
     if src_root:
         return src, mirror_skip_path(src, src_root, output_base=output_base)
@@ -1285,12 +1306,29 @@ _DEFAULT_SETTINGS = {
     "ui":           {},
 }
 
+# Background-removal models offered in the UI (same order as BG_MODELS in
+# editor-ui/src/modelLabels.js; keep the guidance below and there in step).
+# All are BiRefNet variants, about 1 GB each, downloaded on first use.
 _REMBG_MODELS = [
+    # DEFAULT. Balanced choice for everyday product photos. Switch only if a cutout
+    # loses part of the product or keeps background.
     "birefnet-general",
+    # Smaller Swin-Tiny backbone: faster, lighter, slightly less precise edges. Best for
+    # big batches, CPU mode while the PC is in use, weak hardware. Not for hair, thin
+    # handles, wires or glass.
     "birefnet-general-lite",
+    # General's design trained on more data. Best for cluttered or unusual subjects where
+    # General cuts the wrong thing. No gain expected on routine photos.
     "birefnet-massive",
+    # Dichotomous segmentation (DIS5K): crisp outlines. Best for thin, intricate shapes
+    # (grilles, wires, chair legs, holes through the object). Not for soft or
+    # semi-transparent edges.
     "birefnet-dis",
+    # High-resolution salient objects: picks the ONE most prominent object. Best for a single
+    # clear main product. Not for several products in one photo.
     "birefnet-hrsod",
+    # BRIA RMBG-2.0, built for product / e-commerce shots; has its own code path in
+    # pipeline.py. NON-COMMERCIAL licence unless a BRIA commercial licence is held.
     "bria-rmbg",
 ]
 
@@ -1587,8 +1625,14 @@ async def run_pipeline(cfg: PipelineConfig):
                 pass
 
         try:
+            # Stop clears the run token while no process exists yet (model download wait,
+            # image count). Without these checks the run would still start afterwards,
+            # unstoppable, and a second run could start next to it.
             if cfg.do_rembg and "--rembg-model" in cmd:
                 async for status in _wait_for_warmup_download(cmd[cmd.index("--rembg-model") + 1]):
+                    if _pipeline_run_token is not run_token:
+                        yield {"data": "__error__ Stopped before the run started"}
+                        return
                     yield status
             try:
                 session_input = Path(session_input_dir)
@@ -1596,6 +1640,9 @@ async def run_pipeline(cfg: PipelineConfig):
                     session_total = len((await asyncio.to_thread(images_in_folder, session_input))[0])
             except Exception:
                 session_total = 0
+            if _pipeline_run_token is not run_token:
+                yield {"data": "__error__ Stopped before the run started"}
+                return
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
