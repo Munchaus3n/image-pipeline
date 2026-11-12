@@ -1300,9 +1300,13 @@ export default function Pipeline({
     const resumeOutputDir = resumeSession.output_dir ?? outputDir;
     setInputDir(resumeInputDir);
     setOutputDir(resumeOutputDir);
-    const removedIds = removedImages ? [...removedImages] : [];
+    // Removed/excluded images and their thumbnails belong to the folder loaded on the Input
+    // screen. When the interrupted run used another folder they say nothing about it, so
+    // they are left out instead of being matched against the wrong files.
+    const sameFolder = normalizeImagePath(resumeInputDir) === normalizeImagePath(inputDir);
+    const removedIds = sameFolder && removedImages ? [...removedImages] : [];
     const skipList = expandedImageTokens(removedIds, thumbs, resumeInputDir);
-    const activeExcludeIds = excludeTags.filter(n => !removedImages?.has(n));
+    const activeExcludeIds = sameFolder ? excludeTags.filter(n => !removedImages?.has(n)) : [];
     const activeExclude = expandedImageTokens(activeExcludeIds, thumbs, resumeInputDir);
     const parsedUpscaleMaxPx = Number.parseInt(upscaleMaxPx, 10);
     start({
@@ -1316,7 +1320,7 @@ export default function Pipeline({
     rememberInputDir?.(resumeInputDir);
     rememberOutputDir?.(resumeOutputDir);
     setShowResume(false);
-  }, [resumeSession, setInputDir, setOutputDir, removedImages, excludeTags, thumbs, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, bgDeviceMode, upscaleModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
+  }, [resumeSession, inputDir, setInputDir, setOutputDir, removedImages, excludeTags, thumbs, start, folderMode, doUpscale, scale, doRembg, outputDir, rembgModel, bgDeviceMode, upscaleModel, upscaleMaxPx, reuseExactDuplicates, rememberInputDir, rememberOutputDir]);
 
   const handleStartFresh = useCallback(async () => {
     try { await clearSession(); } catch { void 0; }

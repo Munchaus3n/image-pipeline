@@ -14,6 +14,8 @@
 export const BG_MODELS = [
   {
     // DEFAULT. The balanced choice: good edges on almost every product photo.
+    // Benchmark (Ryzen 5 7535HS, CPU, four 1800px photos): ~18 s/photo, 10 s load. The fastest
+    // of the three models measured; Lite, DIS and HRSOD were not downloaded or timed.
     // Use it unless a photo comes out wrong. If it cuts off parts of the product or keeps
     // background, try Massive (cluttered scenes), DIS (thin parts) or HRSOD (one big object).
     id: "birefnet-general",
@@ -21,7 +23,7 @@ export const BG_MODELS = [
     summary: "Balanced default for everyday product photos.",
     bestFor: "Everyday product photos. The right choice for most batches.",
     avoidWhen: "Rarely a bad pick. Switch only if a cutout loses part of the product or keeps background.",
-    notes: "Default. About 1 GB download on first use.",
+    notes: "Default. About 1 GB download on first use. Measured on a Ryzen 5 7535HS in CPU mode: about 18 s per photo, 10 s to load.",
   },
   {
     // Smaller Swin-Tiny backbone: faster and lighter, slightly less precise edges.
@@ -32,10 +34,11 @@ export const BG_MODELS = [
     summary: "Smaller and faster than General, edges a little less precise.",
     bestFor: "Large batches, a PC you are still working on, or weaker hardware.",
     avoidWhen: "Fine detail such as hair, thin handles, wires or glass.",
-    notes: "Lighter backbone (Swin-Tiny), so it needs less memory and time than General.",
+    notes: "Lighter backbone (Swin-Tiny), so it should need less memory and time than General. Not benchmarked yet.",
   },
   {
     // Same design as General, trained on a larger and more varied set of images.
+    // Benchmark (same setup): ~20-35 s/photo (noisy), 10 s load.
     // Use it on cluttered or unusual subjects where General picks the wrong thing.
     // No gain expected on routine photos, and it is the same ~1 GB download.
     id: "birefnet-massive",
@@ -43,7 +46,7 @@ export const BG_MODELS = [
     summary: "General's design trained on more data, for hard or odd subjects.",
     bestFor: "Cluttered or unusual subjects where General cuts the wrong thing.",
     avoidWhen: "Routine batches. It is not expected to beat General on simple photos.",
-    notes: "Same speed class as General. About 1 GB download on first use.",
+    notes: "About 1 GB download on first use. Measured in CPU mode: about 20 to 35 s per photo (it varied between runs), 10 s to load.",
   },
   {
     // Trained for dichotomous image segmentation (DIS5K): sharp, thin, intricate outlines.
@@ -54,7 +57,7 @@ export const BG_MODELS = [
     summary: "Crisp outlines for thin and intricate shapes.",
     bestFor: "Thin, intricate shapes: wires, grilles, chair legs, handles, holes through the object.",
     avoidWhen: "Soft or semi-transparent edges. It favours hard, crisp outlines.",
-    notes: "Trained for dichotomous image segmentation.",
+    notes: "Trained for dichotomous image segmentation. Same design as General, so a similar speed is expected. Not benchmarked yet.",
   },
   {
     // Trained for high-resolution salient objects: ONE clear main subject that stands out.
@@ -66,9 +69,10 @@ export const BG_MODELS = [
     summary: "Picks the single most prominent object in a high-resolution photo.",
     bestFor: "One clear main object that stands out from the background.",
     avoidWhen: "Several products in one photo, or a product that is not the most prominent thing.",
-    notes: "Trained for high-resolution salient object detection.",
+    notes: "Trained for high-resolution salient object detection. Same design as General, so a similar speed is expected. Not benchmarked yet.",
   },
   {
+    // Benchmark (same setup): ~27 s/photo, 29 s load.
     // BRIA RMBG-2.0, built for product and e-commerce shots. It has its own code path in
     // pipeline.py (no sigmoid, always stretched, no hole fill). LICENCE: non-commercial
     // unless you hold a BRIA commercial licence. Do not use it for commercial work
@@ -78,7 +82,7 @@ export const BG_MODELS = [
     summary: "BRIA's product-photo model. Non-commercial licence.",
     bestFor: "Product and e-commerce photos for personal or non-commercial use.",
     avoidWhen: "Any commercial use, unless you have a commercial licence from BRIA AI.",
-    notes: "Licence: non-commercial by default. About 1 GB download on first use.",
+    notes: "Licence: non-commercial by default. About 1 GB download on first use. Measured in CPU mode: about 27 s per photo, 29 s to load.",
   },
 ];
 

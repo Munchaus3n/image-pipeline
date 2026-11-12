@@ -152,13 +152,20 @@ def ask(title: str, options: list):
 
 # ── File helpers ───────────────────────────────────────────────────────────────
 
-def collect_images(root: Path, recursive: bool) -> tuple[list[Path], set[Path]]:
+def collect_images(root: Path, recursive: bool, exclude_dirs: tuple[Path, ...] = ()) -> tuple[list[Path], set[Path]]:
     """Collect images. Any file inside a folder named 'no_rembg' at any depth is
-    added to no_rembg_set (upscale + crop only, no BG removal)."""
+    added to no_rembg_set (upscale + crop only, no BG removal).
+
+    exclude_dirs: folders whose images are never collected, so an output folder
+    inside the input folder is not processed again as if it were input."""
     no_rembg_set: set[Path] = set()
 
     if recursive:
-        all_images = sorted(p for p in root.rglob("*") if p.suffix.lower() in SUPPORTED_EXTS)
+        all_images = sorted(
+            p for p in root.rglob("*")
+            if p.suffix.lower() in SUPPORTED_EXTS and p.is_file()
+            and not any(_is_same_or_inside(p, d) for d in exclude_dirs)
+        )
     else:
         all_images = sorted(p for p in root.iterdir()
                             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS)
@@ -606,6 +613,19 @@ def _is_valid_existing_output(path: Path) -> bool:
         return False
 
 
+def _save_png_atomic(img: Image.Image, dst: Path) -> None:
+    """Write a PNG so `dst` is either the old file or the complete new one, never half
+    written: a Stop in the middle must not leave a file that Resume accepts as finished.
+    The temp name ends in .tmp, so image scanners ignore a leftover."""
+    tmp = dst.with_name(dst.name + ".tmp")
+    try:
+        img.save(tmp, format="PNG")
+        os.replace(tmp, dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def _remove_invalid_output(path: Path, label: str) -> None:
     try:
         path.unlink(missing_ok=True)
@@ -651,8 +671,13 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str, out_scale: int = 
     w, h = src_img.size
     use_tile = max(w, h) > _NCNN_TILE_THRESHOLD
 
+    # ncnn writes outside the output tree; the finished image is moved in at the end.
+    fd, out_name = tempfile.mkstemp(prefix="ncnnout_", suffix=".png")
+    os.close(fd)
+    work_png = Path(out_name)
+
     def _run(tile: bool) -> subprocess.CompletedProcess:
-        cmd = [str(NCNN_EXE), "-i", str(ncnn_src), "-o", str(dst),
+        cmd = [str(NCNN_EXE), "-i", str(ncnn_src), "-o", str(work_png),
                "-n", model, "-s", scale, "-f", "png"]
         if tile:
             cmd += ["-t", _NCNN_TILE_SIZE]
@@ -665,30 +690,35 @@ def upscale_ncnn(src: Path, dst: Path, model: str, scale: str, out_scale: int = 
             result = _run(tile=True)
         if result.returncode != 0:
             err(f"NCNN failed on {src.name}: {result.stderr.strip()[:120]}")
+            work_png.unlink(missing_ok=True)
             return False
     finally:
         if tmp_png and tmp_png.exists():
             tmp_png.unlink(missing_ok=True)
 
-    if out_scale and out_scale != int(scale):
-        # The model's native scale is larger than requested (quality 2x): scale back down.
-        try:
-            with Image.open(dst) as opened:
-                resized = opened.convert("RGB").resize((w * out_scale, h * out_scale), Image.LANCZOS)
-            resized.save(dst, format="PNG")
-        except Exception as e:
-            err(f"Could not resize {src.name} to {out_scale}x: {e}")
-            return False
-
-    if alpha_mask is not None:
-        try:
-            with Image.open(dst) as opened:
-                upscaled = opened.convert("RGBA")
-            upscaled.putalpha(alpha_mask.resize((upscaled.width, upscaled.height), Image.LANCZOS))
-            upscaled.save(dst, format="PNG")
-        except Exception as e:
-            err(f"Could not restore transparency on {src.name}: {e}")
-            return False
+    # Resize (quality 2x) and transparency are done in one pass in memory, then written once.
+    resize_back = bool(out_scale) and out_scale != int(scale)
+    final_tmp = dst.with_name(dst.name + ".tmp")
+    try:
+        if resize_back or alpha_mask is not None:
+            with Image.open(work_png) as opened:
+                upscaled = opened.convert("RGB")
+            if resize_back:
+                # The model's native scale is larger than requested: scale back down.
+                upscaled = upscaled.resize((w * out_scale, h * out_scale), Image.LANCZOS)
+            if alpha_mask is not None:
+                upscaled = upscaled.convert("RGBA")
+                upscaled.putalpha(alpha_mask.resize((upscaled.width, upscaled.height), Image.LANCZOS))
+            _save_png_atomic(upscaled, dst)
+        else:
+            shutil.copyfile(work_png, final_tmp)
+            os.replace(final_tmp, dst)
+    except Exception as e:
+        err(f"Could not finish {src.name}: {e}")
+        final_tmp.unlink(missing_ok=True)
+        return False
+    finally:
+        work_png.unlink(missing_ok=True)
 
     return True
 
@@ -848,7 +878,6 @@ def _is_gpu_runtime_error(msg: str) -> bool:
         "cudart",
         "cufft",
         "cudnn",
-        "onnxruntime",
         "provider_bridge",
         "loadlibrary",
         "failed to create session",
@@ -1139,7 +1168,7 @@ def remove_bg(
             result = tight_crop(refine_edges(img, opts), opts.crop_padding)
         else:
             result = cutout_image(img, session, model_name, opts)
-        result.save(dst, format="PNG")
+        _save_png_atomic(result, dst)
         return True, None
 
     except Exception as e:
@@ -1170,7 +1199,10 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                   model: str, scale: str,
                   upscale_max_px: int = 0,
                   corrupted_dir: Path | None = None,
-                  out_scale: int = 0) -> list[Path]:
+                  out_scale: int = 0,
+                  copy_skipped: bool = False) -> list[Path]:
+    """copy_skipped: this is the last stage, so images skipped as already large enough are
+    written into dst_root too (otherwise the Editor would not find them there)."""
     section("Stage 1 / 2 — Upscaling")
     print("__stage_start__:upscale", flush=True)
     print(f"__total__:{len(images)}", flush=True)
@@ -1202,8 +1234,19 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
             if upscale_max_px > 0 and max(w, h) >= upscale_max_px:
                 skip(f"{src.name} ({w}×{h} — already ≥ {upscale_max_px}px)")
                 print(_processing_token("upscale", pid, src), flush=True)
+                if copy_skipped:
+                    try:
+                        keep = _open_image_checked(src)
+                        has_a = keep.mode in ("RGBA", "LA") or (keep.mode == "P" and "transparency" in keep.info)
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        _save_png_atomic(keep.convert("RGBA" if has_a else "RGB"), dst)
+                        outputs[-1] = dst
+                    except Exception as copy_err:
+                        warn(f"{src.name}: could not copy into upscaled/: {copy_err}")
+                        outputs[-1] = src
+                else:
+                    outputs[-1] = src
                 print(f"__skip_upscale__:{pid}", flush=True)
-                outputs[-1] = src
                 continue
         except RuntimeError as e:
             warn(f"{src.name}: {e}")
@@ -1376,7 +1419,7 @@ def batch_remove_bg(
                 _remove_invalid_output(dst, "processed")
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                tight_crop(_open_image_checked(src).convert("RGBA"), options.crop_padding).save(dst, format="PNG")
+                _save_png_atomic(tight_crop(_open_image_checked(src).convert("RGBA"), options.crop_padding), dst)
                 ok(f"{src.name} → processed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
                 print(_processing_token("rembg", pid, src), flush=True)
                 print(f"__skip_rembg__:{pid}", flush=True)
@@ -1577,11 +1620,13 @@ def main():
         err(f"Input folder not found: {input_dir}")
         sys.exit(1)
 
-    images, no_rembg_set = collect_images(input_dir, folder_mode == "clean")
+    # This run's own stage folders are not input, unless the input is one of them (rembg-only fallback).
+    own_output_dirs = tuple(d for d in (upscale_dir, rembg_dir, corrupted_dir) if not _is_same_or_inside(input_dir, d))
+    images, no_rembg_set = collect_images(input_dir, folder_mode == "clean", own_output_dirs)
 
     # Safety: bulk mode with images only in subfolders → auto-switch to recursive
     if not images and folder_mode == "bulk":
-        nested_images, nested_no_rembg = collect_images(input_dir, recursive=True)
+        nested_images, nested_no_rembg = collect_images(input_dir, recursive=True, exclude_dirs=own_output_dirs)
         if nested_images:
             warn("No top-level images found in Bulk mode — detected images in subfolders. Using recursive scan.")
             images       = nested_images
@@ -1730,6 +1775,7 @@ def main():
             upscale_max_px=args.upscale_max_px,
             corrupted_dir=corrupted_dir,
             out_scale=out_scale,
+            copy_skipped=not do_rembg,
         )
     else:
         skip("upscaling")

@@ -42,9 +42,17 @@ function installApiAuthHeader(electronSession, token, apiOrigin) {
   });
 }
 
+// The app needs no browser permission (camera, microphone, location, notifications...).
+// Electron grants them by default, so refuse every request and every check.
+function denyAllPermissions(electronSession) {
+  electronSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  electronSession.setPermissionCheckHandler(() => false);
+}
+
 module.exports = {
   API_TOKEN_HEADER,
   createApiToken,
+  denyAllPermissions,
   installApiAuthHeader,
   isAppUrl,
   isSafeExternalUrl,

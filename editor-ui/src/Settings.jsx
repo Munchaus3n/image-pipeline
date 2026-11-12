@@ -251,6 +251,8 @@ export default function Settings({ onThemeChange }) {
   const [dirty, setDirty] = useState(false);
   // Last settings loaded from / saved to the server; save() sends only the difference.
   const baselineRef = useRef(DEFAULT);
+  const statusTimerRef = useRef(null);
+  useEffect(() => () => window.clearTimeout(statusTimerRef.current), []);
   // The backend decides which models exist; the built-in list is shown until it answers.
   const [bgModelOptions, setBgModelOptions] = useState(BG_MODEL_OPTIONS);
 
@@ -297,7 +299,9 @@ export default function Settings({ onThemeChange }) {
       window.dispatchEvent(new CustomEvent("cutout-settings-saved", { detail: { settings } }));
       setStatus("Saved");
       setDirty(false);
-      setTimeout(() => setStatus(""), 2000);
+      // One timer, so an older "clear" cannot wipe a newer message.
+      window.clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = window.setTimeout(() => setStatus(""), 2000);
     } catch {
       setStatus("Save failed");
     }
@@ -306,7 +310,9 @@ export default function Settings({ onThemeChange }) {
   const reset = useCallback(() => {
     setSettings(normalizeSettings(DEFAULT));
     setDirty(true);
-  }, []);
+    // The theme is applied live elsewhere, so the screen has to follow the reset too.
+    if (onThemeChange) onThemeChange(DEFAULT.appearance.theme);
+  }, [onThemeChange]);
 
   const goToSection = (id) => {
     document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });

@@ -4,10 +4,24 @@ const assert = require("node:assert/strict");
 const {
   API_TOKEN_HEADER,
   createApiToken,
+  denyAllPermissions,
   installApiAuthHeader,
   isAppUrl,
   isSafeExternalUrl,
 } = require("../electron/security.cjs");
+
+test("browser permissions are refused", () => {
+  let requestHandler = null;
+  let checkHandler = null;
+  denyAllPermissions({
+    setPermissionRequestHandler(handler) { requestHandler = handler; },
+    setPermissionCheckHandler(handler) { checkHandler = handler; },
+  });
+  let granted = null;
+  requestHandler({}, "media", (value) => { granted = value; });
+  assert.equal(granted, false);
+  assert.equal(checkHandler({}, "geolocation"), false);
+});
 
 test("external links: only https is allowed", () => {
   assert.equal(isSafeExternalUrl("https://example.com/docs"), true);

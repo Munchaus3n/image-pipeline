@@ -1311,7 +1311,9 @@ _DEFAULT_SETTINGS = {
 # All are BiRefNet variants, about 1 GB each, downloaded on first use.
 _REMBG_MODELS = [
     # DEFAULT. Balanced choice for everyday product photos. Switch only if a cutout
-    # loses part of the product or keeps background.
+    # loses part of the product or keeps background. Benchmark (Ryzen 5 7535HS, CPU, four
+    # 1800px photos): ~18 s/photo, 10 s load; Massive ~20-35 s, BRIA ~27 s (29 s load).
+    # Lite, DIS and HRSOD were not downloaded or timed.
     "birefnet-general",
     # Smaller Swin-Tiny backbone: faster, lighter, slightly less precise edges. Best for
     # big batches, CPU mode while the PC is in use, weak hardware. Not for hair, thin
@@ -1333,6 +1335,10 @@ _REMBG_MODELS = [
 ]
 
 def _deep_merge(base: Any, incoming: Any) -> Any:
+    # An empty dict means "clear this", so "Reset to defaults" can drop saved custom guides
+    # (merging {} into a dict would otherwise change nothing). No caller sends {} for anything else.
+    if isinstance(incoming, dict) and not incoming:
+        return {}
     if isinstance(base, dict) and isinstance(incoming, dict):
         merged = dict(base)
         for key, value in incoming.items():

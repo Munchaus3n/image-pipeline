@@ -11,7 +11,9 @@ const {
   startPythonApi,
   stopPythonApi,
 } = require("./python-manager.cjs");
-const { createApiToken, installApiAuthHeader, isAppUrl, isSafeExternalUrl } = require("./security.cjs");
+const {
+  createApiToken, denyAllPermissions, installApiAuthHeader, isAppUrl, isSafeExternalUrl,
+} = require("./security.cjs");
 
 const isDev = !app.isPackaged;
 const DEV_RENDERER_URL = "http://127.0.0.1:5173";
@@ -80,6 +82,9 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      // Stated on purpose (it is also Electron's default): the page runs in the Chromium
+      // sandbox, and the preload only uses APIs that work inside it.
+      sandbox: true,
       preload: path.join(__dirname, "preload.cjs"),
       additionalArguments: [`--cutout-api-origin=http://127.0.0.1:${apiPort || LEGACY_PORT}`],
     },
@@ -97,12 +102,15 @@ function createWindow() {
 
   // The window only ever shows the app. A file dropped outside a drop zone used to
   // navigate here and replace the whole UI; now it is simply refused.
-  mainWindow.webContents.on("will-navigate", (event, url) => {
+  const keepOnApp = (event, url) => {
     const currentUrl = mainWindow?.webContents.getURL();
     if (!currentUrl || url === currentUrl || isAppUrl(url, rendererUrl())) return;
     event.preventDefault();
     if (isSafeExternalUrl(url)) shell.openExternal(url);
-  });
+  };
+  mainWindow.webContents.on("will-navigate", keepOnApp);
+  // A redirect after an allowed navigation must not lead the window somewhere else either.
+  mainWindow.webContents.on("will-redirect", keepOnApp);
 
   return mainWindow;
 }
@@ -202,6 +210,8 @@ async function waitForRenderer({ timeoutMs = 20000, intervalMs = 300 } = {}) {
 async function loadStartupError(error) {
   console.error("[electron] startup failed", error);
   writeMainLog(`startup failed: ${error?.stack || error?.message || error}`);
+  // Closing the window while the backend was still starting is not an error to report.
+  if (error?.startupAborted || app.__stoppingPythonApi) return;
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
   }
@@ -305,13 +315,17 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     writeMainLog("app ready");
+    denyAllPermissions(session.defaultSession);
     setBackendListener((status) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("backend:status", status);
     });
     try {
       await openMainWindow();
     } catch (error) {
-      await loadStartupError(error);
+      // Showing the error page can itself fail (for example the window is already gone).
+      await loadStartupError(error).catch((shownError) => {
+        writeMainLog(`could not show the startup error: ${shownError?.message || shownError}`);
+      });
     }
   });
 

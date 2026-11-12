@@ -115,7 +115,11 @@ export default function HowItWorks() {
             </div>
           ))}
         </dl>
-        <p>If you are unsure, keep CPU / Stable. It is the safest and leaves the PC usable.</p>
+        <p>
+          If you are unsure, keep CPU / Stable. It is the safest and leaves the PC usable. On a PC with
+          integrated graphics (no dedicated video memory) the GPU modes usually run out of memory and
+          switch to CPU anyway; this was seen on a Ryzen 5 7535HS with Radeon graphics.
+        </p>
       </Section>
 
       <Section title="Editor tips and shortcuts" prefKey="settings.info.editor" defaultOpen={false}>
