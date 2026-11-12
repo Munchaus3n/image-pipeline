@@ -1,6 +1,12 @@
 # Branch Strategy
 
-Cutout Studio uses one long-term branch: `main`.
+Cutout Studio has three long-lived branches:
+
+- `main` is the last stable line.
+- `V2` is where current development happens (UI redesign and everything after it). Every change is committed here first.
+- `beta` is `V2` plus the evaluation-build changes (time-limited builds, BRIA removed). `V2` is merged into it for each beta release.
+
+The notes below describe `main` as it was set up and still apply to how code is organised.
 
 - `main` holds the full source: Python API and pipeline, the editor UI, and the Electron desktop shell. The terminal/browser workflow and the desktop app are two ways to run the same code (see the README).
 - Work happens on short-lived feature branches cut from `main` and merged back by pull request.

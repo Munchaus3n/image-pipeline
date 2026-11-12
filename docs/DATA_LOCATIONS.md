@@ -1,10 +1,10 @@
 # Data Locations
 
-This document defines the future packaged app data layout for Cutout Studio. The current development checkout still stores some data locally in the repository until packaged paths are implemented.
+This document describes where the packaged (installed) Cutout Studio app keeps its data. A development checkout still stores settings, session and templates inside the repository folder; the installed app uses the layout below.
 
 ## Windows Packaged App Root
 
-Future app data root:
+App data root:
 
 `%LOCALAPPDATA%\Cutout Studio\`
 
