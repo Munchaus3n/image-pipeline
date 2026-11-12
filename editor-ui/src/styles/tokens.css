@@ -1,98 +1,179 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-ext-400.css";
+@import "@fontsource/inter/latin-ext-600.css";
+@import "@fontsource/outfit/latin-600.css";
+@import "@fontsource/outfit/latin-700.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
 
+/*
+ * Design tokens. Light is the base; dark overrides it.
+ * Legacy names (--bg, --panel, --text, --accent ...) are kept as aliases at the
+ * bottom of each block so screens that have not been migrated keep rendering.
+ */
 :root,
 [data-theme="light"] {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: light;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Outfit", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
 
-  /* Base colors - warm studio light */
-  --bg:        hsl(40, 24%, 97%);
-  --panel:     hsl(40, 18%, 94%);
-  --panel2:    hsl(40, 14%, 90%);
-  --border:    hsla(240, 7%, 12%, 0.11);
-  --text:      hsl(240, 10%, 12%);
-  --dim:       hsl(240, 5%, 45%);
-  --dim2:      hsl(240, 5%, 58%);
+  /* Surfaces */
+  --surface-app: #f5f5f1;
+  --surface-panel: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-field: #ffffff;
+  --surface-muted: #e7e7e1;
+  --surface-hover: #f0f0ea;
+  --surface-selected: #fef8e1;
+  --surface-canvas: #e7e7e1;
+  --scrim: rgba(0, 0, 0, 0.6);
 
-  /* Accent colors */
-  --accent:    hsl(235, 75%, 55%);
-  --accent-strong: hsl(235, 78%, 48%);
-  --accent-soft: hsl(235, 88%, 96%);
-  --accent-fg: hsl(0, 0%, 100%);
-  --green:     hsl(142, 65%, 38%);
-  --green-bg:  hsl(142, 52%, 94%);
-  --green-bdr: hsl(142, 39%, 76%);
-  --red:       hsl(0, 75%, 50%);
-  --red-bg:    hsl(0, 88%, 96%);
-  --red-bdr:   hsl(0, 62%, 83%);
-  --yellow:    hsl(38, 90%, 45%);
-  --yellow-bg: hsl(41, 100%, 94%);
-  --yellow-bdr: hsl(39, 70%, 80%);
-  --magenta:   hsl(293, 70%, 54%);
+  /* Text */
+  --text-primary: #000000;
+  --text-secondary: #606060;
+  --text-muted: #7d7d7d;
+  --text-disabled: #a3a39d;
+  --text-on-brand: #000000;
 
-  /* Utility */
-  --img-bg:    hsl(40, 12%, 88%);
-  --surface-muted: hsl(40, 12%, 92%);
-  --surface-elevated: hsl(0, 0%, 100%);
-  --field-bg: hsl(0, 0%, 100%);
-  --log-bg: hsl(42, 24%, 96%);
-  --log-bg-alt: hsl(40, 17%, 93%);
-  --preview-bg: hsl(0, 0%, 100%);
-  --disabled-bg: hsl(40, 10%, 88%);
-  --disabled-text: hsl(240, 4%, 54%);
-  --scrollbar: hsl(240, 5%, 76%);
-  --radius-xs: 8px;
-  --radius-sm: 12px;
-  --radius-md: 16px;
-  --radius-lg: 22px;
-  --shadow:    0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 24px rgba(15, 23, 42, 0.07);
-  --shadow-lg: 0 18px 44px rgba(15, 23, 42, 0.10), 0 6px 18px rgba(15, 23, 42, 0.07);
+  /* Borders */
+  --border-subtle: #e7e7e1;
+  --border-default: #cfcfcb;
+  --border-strong: #7d7d7d;
+  --focus-ring: #000000;
+
+  /* Brand action */
+  --brand: #ffd439;
+  --brand-hover: #ffde68;
+  --brand-active: #ffc01d;
+  --brand-ink: #141218;
+
+  /* Status */
+  --status-positive: #13a45e;
+  --status-positive-text: #0b7a43;
+  --status-positive-surface: #e8f8ee;
+  --status-warning: #ffc01d;
+  --status-warning-text: #8a5a00;
+  --status-warning-surface: #fef8e1;
+  --status-negative: #e25428;
+  --status-negative-text: #b53d17;
+  --status-negative-surface: #f8e9e4;
+  --status-info: #1d92ff;
+  --status-info-text: #1a66c7;
+  --status-info-surface: #e8f2ff;
+
+  /* Placement zones (match the guide lines drawn on the canvas) */
+  --zone-green: #13a45e;
+  --zone-blue: #2f5bff;
+  --zone-magenta: #c026d3;
+  --zone-red: #e5372b;
+  --zone-none: #a3a39d;
+
+  /* Shape */
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 16px;
+  --shadow-floating: 0 4px 16px 0 rgba(0, 0, 0, 0.1);
+
+  /* Spacing, sizing, layers */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --control-s: 24px;
+  --control-m: 28px;
+  --control-l: 32px;
+  --header-h: 48px;
+  --statusbar-h: 28px;
+  --z-panel: 10;
+  --z-popover: 100;
+  --z-modal: 200;
+  --z-toast: 300;
+  --transition: 200ms ease;
+
+  /* Legacy aliases */
+  --bg: var(--surface-app);
+  --panel: var(--surface-panel);
+  --panel2: var(--surface-muted);
+  --border: var(--border-subtle);
+  --text: var(--text-primary);
+  --dim: var(--text-secondary);
+  --dim2: var(--text-muted);
+  --accent: var(--brand);
+  --accent-strong: var(--brand-active);
+  --accent-soft: var(--surface-selected);
+  --accent-fg: var(--text-on-brand);
+  --green: var(--status-positive);
+  --green-bg: var(--status-positive-surface);
+  --green-bdr: var(--status-positive);
+  --red: var(--status-negative);
+  --red-bg: var(--status-negative-surface);
+  --red-bdr: var(--status-negative);
+  --yellow: var(--status-warning);
+  --yellow-bg: var(--status-warning-surface);
+  --yellow-bdr: var(--status-warning);
+  --magenta: var(--zone-magenta);
+  --img-bg: var(--surface-canvas);
+  --surface-elevated: var(--surface-raised);
+  --field-bg: var(--surface-field);
+  --log-bg: var(--surface-app);
+  --log-bg-alt: var(--surface-panel);
+  --preview-bg: var(--surface-panel);
+  --disabled-bg: var(--surface-app);
+  --disabled-text: var(--text-disabled);
+  --scrollbar: var(--border-default);
+  --radius-xs: var(--radius-m);
+  --radius-sm: var(--radius-m);
+  --radius-md: var(--radius-l);
+  --radius-lg: var(--radius-l);
+  --shadow: none;
+  --shadow-lg: var(--shadow-floating);
 }
 
 [data-theme="dark"] {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  color-scheme: dark;
 
-  /* Base colors - intentional darkroom */
-  --bg:        hsl(240, 10%, 4%);
-  --panel:     hsl(240, 10%, 8%);
-  --panel2:    hsl(240, 7%, 14%);
-  --border:    hsla(0, 0%, 100%, 0.09);
-  --text:      hsl(240, 5%, 91%);
-  --dim:       hsl(240, 5%, 62%);
-  --dim2:      hsl(240, 5%, 47%);
+  --surface-app: #141312;
+  --surface-panel: #1c1b19;
+  --surface-raised: #232220;
+  --surface-field: #141312;
+  --surface-muted: #2a2926;
+  --surface-hover: #242320;
+  --surface-selected: #2b2616;
+  --surface-canvas: #0f0e0d;
+  --scrim: rgba(0, 0, 0, 0.6);
 
-  /* Accent colors */
-  --accent:    hsl(235, 85%, 65%);
-  --accent-strong: hsl(235, 90%, 72%);
-  --accent-soft: hsl(235, 46%, 17%);
-  --accent-fg: hsl(0, 0%, 100%);
-  --green:     hsl(142, 70%, 45%);
-  --green-bg:  hsl(142, 43%, 15%);
-  --green-bdr: hsl(142, 47%, 30%);
-  --red:       hsl(0, 85%, 60%);
-  --red-bg:    hsl(0, 47%, 16%);
-  --red-bdr:   hsl(0, 57%, 34%);
-  --yellow:    hsl(38, 90%, 55%);
-  --yellow-bg: hsl(38, 50%, 16%);
-  --yellow-bdr: hsl(38, 53%, 32%);
-  --magenta:   hsl(294, 73%, 65%);
+  --text-primary: #f5f5f1;
+  --text-secondary: #b9b8b0;
+  --text-muted: #8f8e87;
+  --text-disabled: #5a5954;
+  --text-on-brand: #000000;
 
-  /* Utility */
-  --img-bg:    hsl(240, 10%, 6%);
-  --surface-muted: hsl(240, 7%, 12%);
-  --surface-elevated: hsl(240, 8%, 11%);
-  --field-bg: hsl(240, 10%, 7%);
-  --log-bg: hsl(240, 12%, 6%);
-  --log-bg-alt: hsl(240, 9%, 9%);
-  --preview-bg: hsl(240, 8%, 10%);
-  --disabled-bg: hsl(240, 5%, 18%);
-  --disabled-text: hsl(240, 5%, 50%);
-  --scrollbar: hsl(240, 5%, 28%);
-  --radius-xs: 8px;
-  --radius-sm: 12px;
-  --radius-md: 16px;
-  --radius-lg: 22px;
-  --shadow:    0 1px 2px rgba(0, 0, 0, 0.40), 0 12px 28px rgba(0, 0, 0, 0.32);
-  --shadow-lg: 0 22px 58px rgba(0, 0, 0, 0.52), 0 8px 24px rgba(0, 0, 0, 0.42);
+  --border-subtle: #33322e;
+  --border-default: #4a4944;
+  --border-strong: #8f8e87;
+  --focus-ring: #ffd439;
+
+  --status-positive: #1bb06a;
+  --status-positive-text: #4fd08f;
+  --status-positive-surface: #15291d;
+  --status-warning-text: #ffd466;
+  --status-warning-surface: #2b2616;
+  --status-negative: #ff7a52;
+  --status-negative-text: #ff9b7d;
+  --status-negative-surface: #2e1a14;
+  --status-info: #4aa6ff;
+  --status-info-text: #8cc4ff;
+  --status-info-surface: #14223a;
+
+  --zone-green: #1bb06a;
+  --zone-blue: #5b7cff;
+  --zone-magenta: #d95ce8;
+  --zone-red: #ff5b4d;
+  --zone-none: #5a5954;
+
+  --shadow-floating: 0 4px 16px 0 rgba(0, 0, 0, 0.4);
 }

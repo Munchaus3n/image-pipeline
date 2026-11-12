@@ -6,6 +6,7 @@ KNOWN LIMITATIONS (web build):
 */
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import ConfirmModal from "./ConfirmModal.jsx";
+import { compactForMatch, naturalParts, templateKeywords } from "./utils/text.js";
 import {
   getConfig, getSource, getImages,
   imageUrl, saveComposition, skipImage, unskipImage,
@@ -74,14 +75,6 @@ const DEFAULT_OUTPUT_IDENTITY = "__default_output__";
 function normalizeOutputIdentity(path = "") {
   const key = normalizePathKey(path);
   return key || DEFAULT_OUTPUT_IDENTITY;
-}
-
-function naturalParts(value = "") {
-  return String(value)
-    .toLowerCase()
-    .split(/(\d+)/)
-    .filter(Boolean)
-    .map(part => (/^\d+$/.test(part) ? Number(part) : part));
 }
 
 function compareNaturalPaths(a, b) {
@@ -153,28 +146,6 @@ function initialScaleFor(guide, width, height) {
   if (!(width > 0) || !(height > 0)) return 1;
   const zoneHeight = guide ? guide.bottom - guide.top : CANVAS_SIZE;
   return Math.min(1, zoneHeight / height, CANVAS_SIZE / width);
-}
-
-// Letters and digits only, lower-case, accents removed; `index` maps each kept
-// character back to its position in `text` so digit boundaries can be checked.
-function compactForMatch(value) {
-  const text = String(value || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
-  let compact = "";
-  const index = [];
-  for (let i = 0; i < text.length; i += 1) {
-    if (/[\p{L}\p{N}]/u.test(text[i])) {
-      compact += text[i];
-      index.push(i);
-    }
-  }
-  return { text, compact, index };
-}
-
-function templateKeywords(tpl) {
-  return String(tpl?.match || "")
-    .split(/[,;\n]+/)
-    .map(word => word.trim())
-    .filter(Boolean);
 }
 
 // Template whose keywords appear in the file name; the longest keyword wins.
@@ -2466,6 +2437,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         message={confirmState?.message}
         confirmLabel={confirmState?.confirmLabel}
         cancelLabel={confirmState?.cancelLabel}
+        tone="default"
         onConfirm={() => closeConfirm(true)}
         onCancel={() => closeConfirm(false)}
       />

@@ -445,6 +445,7 @@ export default function Templates({ onBack }) {
         message={confirmOverwrite ? `A template named "${confirmOverwrite}" already exists. Replace it?` : ""}
         confirmLabel="Replace"
         cancelLabel="Cancel"
+        tone="default"
         onConfirm={() => closeOverwrite(true)}
         onCancel={() => closeOverwrite(false)}
       />
