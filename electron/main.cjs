@@ -196,9 +196,9 @@ function stoppedHtml() {
     <meta charset="utf-8" />
     <title>${APP_NAME}</title>
     <style>
-      body { margin: 0; height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #0b0f17; color: #e5edf7; }
+      body { margin: 0; height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #141312; color: #f5f5f1; }
       main { text-align: center; }
-      h1 { margin: 0; font-size: 22px; font-weight: 500; }
+      h1 { margin: 0; padding-bottom: 12px; border-bottom: 4px solid #ffd439; display: inline-block; font-size: 22px; font-weight: 600; }
     </style>
   </head>
   <body>
