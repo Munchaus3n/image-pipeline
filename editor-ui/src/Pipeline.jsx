@@ -6,7 +6,15 @@ import {
 } from "./api.js";
 import { bgModelLabel, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
 import { normalizeImagePath, relativePathFromRoot, imageIdForPath } from "./paths.js";
+import {
+  ArrowRight, ChevronDown, ChevronUp, Clock, FolderOpen, Play, Square, X,
+} from "lucide-react";
 import PageHeader from "./components/PageHeader.jsx";
+import {
+  Button, IconButton, MenuList, Popover, ResizablePanel, Section, SegmentedControl, Select,
+  Switch, TextField,
+} from "./components/ui/index.jsx";
+import { useUiPref } from "./hooks/useUiPref.js";
 import { useDefaultOutputLabel } from "./defaultOutput.js";
 /*
 KNOWN LIMITATIONS (web build):
@@ -49,66 +57,38 @@ function expandedImageTokens(ids, thumbs, inputDir) {
   return [...tokens];
 }
 
-const C = {
-  bg:      "var(--bg)",      panel:   "var(--panel)",   panel2:  "var(--panel2)",
-  border:  "var(--border)",  text:    "var(--text)",    dim:     "var(--dim)",
-  dim2:    "var(--dim2)",    accent:  "var(--accent)",
-  green:   "var(--green)",   greenBg: "var(--green-bg)", greenBdr: "var(--green-bdr)",
-  red:     "var(--red)",     redBg:   "var(--red-bg)",   redBdr:  "var(--red-bdr)",
-  yellow:  "var(--yellow)",  blue:    "var(--accent)",   magenta: "var(--magenta)",
-};
-
-// Live strip tiles are ~134px; 320px previews stay sharp on 2x displays.
+// Live strip tiles are up to ~168px; 320px previews stay sharp on 2x displays.
 const PREVIEW_SLOT_SIZE = 320;
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
-function Row({ label, children, className = "", controlsClassName = "" }) {
+// Label and control on one line.
+function Row({ label, hint, children }) {
   return (
-    <div className={`pipeline-row ${className}`.trim()} style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "7px 0", borderBottom: `1px solid ${C.border}`
-    }}>
-      <span className="pipeline-field-label" style={{ fontSize: 12, color: C.dim }}>{label}</span>
-      <div className={`pipeline-row-controls ${controlsClassName}`.trim()} style={{ display: "flex", gap: 5, alignItems: "center" }}>{children}</div>
-    </div>
-  );
-}
-function Btn({ label, active, color, onClick, style = {}, className = "" }) {
-  const bg  = active ? (color ? color + "22" : "color-mix(in srgb, var(--accent) 12%, transparent)") : "transparent";
-  const fg  = active ? (color || C.text) : C.dim;
-  const bdr = active ? (color ? color + "55" : "color-mix(in srgb, var(--accent) 35%, transparent)") : "transparent";
-  return (
-    <button className={`pipeline-btn ${className}`.trim()} onClick={onClick} style={{
-      background: bg, color: fg, border: `1px solid ${bdr}`,
-      borderRadius: 8, padding: "4px 12px", fontSize: 11, minWidth: 42,
-      cursor: "pointer", fontFamily: "inherit", fontWeight: active ? 600 : 400,
-      ...style,
-    }}>{label}</button>
-  );
-}
-
-function PillToggle({ value, onChange }) {
-  return (
-    <div className={`pipeline-toggle ${value ? "is-on" : "is-off"}`} onClick={() => onChange(!value)} style={{
-      width: 40, height: 22, borderRadius: 11, cursor: "pointer", flexShrink: 0,
-      background: value ? C.greenBg : C.redBg,
-      border: `1px solid ${value ? C.greenBdr : C.redBdr}`,
-      position: "relative", transition: "background 0.2s ease, border-color 0.2s ease",
-    }}>
-      <div className={`pipeline-toggle-thumb ${value ? "is-on" : "is-off"}`} style={{
-        width: 16, height: 16, borderRadius: "50%",
-        background: value ? C.green : C.red,
-        position: "absolute", top: 2,
-        left: value ? 20 : 2,
-        transition: "left 0.2s ease, background 0.2s ease",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
-      }} />
+    <div className="pipeline-row">
+      <div className="ui-row">
+        <span className="ui-row-label">{label}</span>
+        <div className="pipeline-row-controls">{children}</div>
+      </div>
+      {hint ? <p className="ui-hint">{hint}</p> : null}
     </div>
   );
 }
 
-function FolderInput({ value, onChange, placeholder, recent = [], onRemember }) {
+// Label above a full-width control.
+function Field({ label, htmlFor, hint, children }) {
+  return (
+    <div className="pipeline-field">
+      <label className="ui-row-label" htmlFor={htmlFor}>{label}</label>
+      {children}
+      {hint ? <p className="ui-hint">{hint}</p> : null}
+    </div>
+  );
+}
+
+function FolderInput({ id, value, onChange, placeholder, recent = [], onRemember }) {
+  const [recentOpen, setRecentOpen] = useState(false);
+  const recentRef = useRef(null);
   const browse = useCallback(async () => {
     try {
       const { path } = await browseFolder(value);
@@ -120,94 +100,52 @@ function FolderInput({ value, onChange, placeholder, recent = [], onRemember }) 
   }, [value, onChange, onRemember]);
 
   return (
-    <div className="pipeline-folder-input" style={{ display: "flex", gap: 4, width: "100%" }}>
-      <input
+    <div className="pipeline-folder-input">
+      <TextField
+        id={id}
+        mono
         className="pipeline-path-field"
         value={value}
         onChange={e => onChange(e.target.value)}
         onBlur={() => onRemember?.(value)}
         placeholder={placeholder}
-        style={{
-          flex: 1, background: C.panel2, color: C.text,
-          border: `1px solid ${C.border}`, borderRadius: 4,
-          padding: "5px 8px", fontSize: 11, fontFamily: "JetBrains Mono",
-          outline: "none", minWidth: 0
-        }}
+        title={value}
       />
       {recent.length > 0 && (
-        <select
-          value=""
-          onChange={e => {
-            if (!e.target.value) return;
-            onChange(e.target.value);
-            onRemember?.(e.target.value);
-          }}
-          style={{
-            width: 34, background: C.panel2, color: C.dim,
-            border: `1px solid ${C.border}`, borderRadius: 8,
-            fontSize: 10, cursor: "pointer", flexShrink: 0,
-          }}
-          title="Recent folders"
-        >
-          <option value="">Recent folders</option>
-          {recent.map(path => <option key={path} value={path}>{path}</option>)}
-        </select>
+        <>
+          <IconButton
+            ref={recentRef}
+            icon={Clock}
+            variant="secondary"
+            label="Recent folders"
+            aria-haspopup="listbox"
+            aria-expanded={recentOpen}
+            onClick={() => setRecentOpen(open => !open)}
+          />
+          <Popover
+            open={recentOpen}
+            onClose={() => setRecentOpen(false)}
+            anchorRef={recentRef}
+            width={320}
+            align="end"
+            label="Recent folders"
+            className="pipeline-recent"
+          >
+            <MenuList
+              items={recent.map(path => ({ value: path, label: path }))}
+              value={value}
+              onSelect={(path) => {
+                onChange(path);
+                onRemember?.(path);
+                setRecentOpen(false);
+              }}
+            />
+          </Popover>
+        </>
       )}
-      <button
-        className="pipeline-btn pipeline-browse-button pipeline-secondary-button"
-        onClick={browse}
-        aria-label="Browse folder"
-        title="Browse folder"
-        style={{
-          background: C.panel2, color: C.dim,
-          border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 9px",
-          fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0
-        }}
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2.5 5.5h11v6.25a1.25 1.25 0 0 1-1.25 1.25h-8.5A1.25 1.25 0 0 1 2.5 11.75V5.5Z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
-          <path d="M2.5 5.5V4.25A1.25 1.25 0 0 1 3.75 3h3.1l1.25 1.25h4.15A1.25 1.25 0 0 1 13.5 5.5" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
-        </svg>
-      </button>
+      <IconButton icon={FolderOpen} variant="secondary" label="Browse folder" onClick={browse} />
     </div>
   );
-}
-
-function ProcessPanelSection({ title, children, defaultOpen = true }) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  return (
-    <section className="pipeline-panel-section">
-      <button
-        type="button"
-        className="pipeline-panel-toggle"
-        onClick={() => setOpen(value => !value)}
-        aria-expanded={open}
-      >
-        <span className="pipeline-panel-title">{title}</span>
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-          fill="none"
-          className="pipeline-panel-chevron"
-          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
-          aria-hidden="true"
-        >
-          <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      </button>
-      {open && (
-        <div className="pipeline-panel-content">
-          {children}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function FieldLabel({ children }) {
-  return <div className="pipeline-field-label" style={{ fontSize: 11, color: C.dim, marginBottom: 4 }}>{children}</div>;
 }
 
 // ── Pipeline hook ─────────────────────────────────────────────────────────────
@@ -870,22 +808,22 @@ function PipelinePreviewStrip({ previewPath, livePreviewStrip, imageDone, totalI
     ...sourceItems.slice(0, 4),
     ...Array.from({ length: Math.max(0, 4 - sourceItems.length) }, (_, index) => ({
       placeholder: true,
-      label: index === 0 && sourceItems.length === 0 ? "Images will appear here during processing." : "",
+      label: index === 0 && sourceItems.length === 0 ? "Images appear here during processing." : "",
     })),
   ].slice(0, 4);
 
   return (
-    <div className="pipeline-zone pipeline-progress-card pipeline-preview-strip">
-      <div className="pipeline-live-title-row">
-        <div className="pipeline-live-title">Live Stream · current / recent</div>
-        <div className="pipeline-live-counter">{processedLabel}</div>
-      </div>
+    <section className="pipeline-card pipeline-preview-strip">
+      <header className="pipeline-card-head">
+        <h2 className="pipeline-card-title">Live stream</h2>
+        <span className="ui-badge">{processedLabel}</span>
+      </header>
       <div className="pipeline-preview-grid">
         {slotItems.map((item, idx) => (
           <PipelinePreviewSlot key={item.path || `preview-placeholder-${idx}`} item={item} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -896,42 +834,14 @@ function PipelinePreviewSlot({ item }) {
   const placeholderLabel = item?.label || "";
   const status = item?.status || "processing";
   const statusLabel = item?.label || (status === "processing" ? "processing..." : status.toUpperCase());
-  const statusColor = {
-    processing: C.yellow,
-    done: C.green,
-    skip: C.yellow,
-    error: C.red,
-  }[status] || C.dim;
 
   return (
-    <div className={`pipeline-preview-slot is-${status}`} style={{ position: "relative" }}>
+    <div className={`pipeline-preview-slot is-${status}`}>
       {hasImage ? (
         <>
           <img className="pipeline-preview-image" src={src} alt={fileLabel} />
-          <div
-            className="pipeline-live-preview-status"
-            style={{
-              position: "absolute",
-              top: 6,
-              left: 6,
-              maxWidth: "calc(100% - 12px)",
-              padding: "2px 6px",
-              borderRadius: 4,
-              background: "rgba(0,0,0,0.62)",
-              color: statusColor,
-              border: `1px solid ${statusColor}`,
-              fontSize: 9,
-              fontWeight: 700,
-              lineHeight: 1.2,
-              textTransform: status === "processing" ? "none" : "uppercase",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {statusLabel}
-          </div>
-          {fileLabel && <div className="pipeline-live-preview-name">{fileLabel}</div>}
+          <span className={`pipeline-preview-status is-${status}`}>{statusLabel}</span>
+          {fileLabel && <span className="pipeline-preview-name" title={fileLabel}>{fileLabel}</span>}
         </>
       ) : (
         <div className="pipeline-preview-placeholder">{placeholderLabel}</div>
@@ -940,10 +850,10 @@ function PipelinePreviewSlot({ item }) {
   );
 }
 
-function SmStat({ label, value, color }) {
+function SmStat({ label, value, tone }) {
   return (
-    <div className="pipeline-stat" style={{ textAlign: "center" }}>
-      <div className="pipeline-stat-value" style={{ color }}>{value}</div>
+    <div className="pipeline-stat">
+      <div className={`pipeline-stat-value${tone ? ` is-${tone}` : ""}`}>{value}</div>
       <div className="pipeline-stat-label">{label}</div>
     </div>
   );
@@ -992,36 +902,41 @@ function Zone2({ upStats, bgStats, totalImages, elapsed, done, stage, doUpscale,
           : "Remove BG";
 
   return (
-    <div className="pipeline-progress-card">
-      <div className="pipeline-progress-inner">
-        <div className="pipeline-progress-head">
-          <span className={`pipeline-progress-stage-pill ${done ? "is-done" : "is-active"}`}>{stagePill}</span>
-          <span className="pipeline-progress-percent">{progressPct}%</span>
-        </div>
+    <section className="pipeline-card pipeline-progress-card">
+      <header className="pipeline-card-head">
+        <span className={`pipeline-progress-stage-pill ${done ? "is-done" : "is-active"}`}>{stagePill}</span>
+        <span className="pipeline-progress-percent">{progressPct}%</span>
+      </header>
 
-        <div className="pipeline-progress-title">
-          {done ? "Batch processing complete." : "Batch processing in progress..."}
-        </div>
+      <h2 className="pipeline-progress-title">
+        {done ? "Batch complete" : "Processing batch…"}
+      </h2>
 
-        <div className="pipeline-progress-meta">
-          <span>{totalUnits > 0 ? countLabel : "count pending"}</span>
-          <span>{etaLabel}</span>
-          <span>elapsed {fmt(elapsed)}</span>
-          {oomGpuCount > 0 && <span>OOM fallback {oomGpuCount}</span>}
-          {done && totalErrors > 0 && <span>{totalErrors} error{totalErrors > 1 ? "s" : ""}</span>}
-        </div>
-
-        <div className="pipeline-progress-bar">
-          <div style={{ width: `${progressPct}%` }} />
-        </div>
-
-        <div className="pipeline-progress-stats">
-          <SmStat label="Upscale" value={upProcessed} color={doUpscale && upProcessed > 0 ? C.green : C.dim} />
-          <SmStat label="Remove BG" value={bgProcessed} color={doRembg && bgProcessed > 0 ? C.green : C.dim} />
-          <SmStat label="Errors" value={totalErrors} color={totalErrors > 0 ? C.red : C.dim} />
-        </div>
+      <div
+        className="pipeline-progress-bar"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progressPct}
+        aria-label="Batch progress"
+      >
+        <div style={{ width: `${progressPct}%` }} />
       </div>
-    </div>
+
+      <div className="pipeline-progress-meta">
+        <span>{totalUnits > 0 ? countLabel : "count pending"}</span>
+        <span>{etaLabel}</span>
+        <span>elapsed {fmt(elapsed)}</span>
+        {oomGpuCount > 0 && <span>OOM fallback {oomGpuCount}</span>}
+        {done && totalErrors > 0 && <span className="is-bad">{totalErrors} error{totalErrors > 1 ? "s" : ""}</span>}
+      </div>
+
+      <div className="pipeline-progress-stats">
+        <SmStat label="Upscale" value={upProcessed} tone={doUpscale && upProcessed > 0 ? "ok" : ""} />
+        <SmStat label="Remove BG" value={bgProcessed} tone={doRembg && bgProcessed > 0 ? "ok" : ""} />
+        <SmStat label="Errors" value={totalErrors} tone={totalErrors > 0 ? "bad" : ""} />
+      </div>
+    </section>
   );
 }
 
@@ -1032,32 +947,30 @@ function ReadyCard({ nothingSelected, doUpscale, doRembg, activeExcludeCount, sk
   ].filter(Boolean);
 
   return (
-    <div className={`pipeline-ready-card ${nothingSelected ? "is-disabled" : "is-ready"}`}>
-      <div className="pipeline-ready-icon" aria-hidden="true">▶</div>
-      <div className="pipeline-ready-title">
-        {nothingSelected ? "Select stages to continue" : "Ready to process"}
-      </div>
-      <div className="pipeline-ready-subtitle">
-        {nothingSelected ? "Enable at least one stage to start." : "Press Run Pipeline in the header to begin processing."}
-      </div>
+    <section className={`pipeline-card pipeline-ready-card ${nothingSelected ? "is-disabled" : "is-ready"}`}>
+      <Play size={20} className="pipeline-ready-icon" aria-hidden="true" />
+      <div className="pipeline-ready-copy">
+        <h2 className="pipeline-ready-title">
+          {nothingSelected ? "Select stages to continue" : "Ready to process"}
+        </h2>
+        <p className="pipeline-ready-subtitle">
+          {nothingSelected ? "Enable at least one stage to start." : "Press Run pipeline to begin."}
+        </p>
 
-      <div className="pipeline-ready-meta">
-        {!nothingSelected && activeStages.length > 0 && (
-          <span className="pipeline-ready-meta-item">{activeStages.join(" + ")}</span>
-        )}
-        {activeExcludeCount > 0 && (
-          <span className="pipeline-ready-meta-item">{activeExcludeCount} excluded</span>
-        )}
-        {skipCount > 0 && (
-          <span className="pipeline-ready-meta-item">{skipCount} skipped</span>
-        )}
-        {canvasSize && <span className="pipeline-ready-meta-item">{canvasSize}px canvas</span>}
-      </div>
+        <div className="pipeline-ready-meta">
+          {!nothingSelected && activeStages.length > 0 && (
+            <span className="ui-badge">{activeStages.join(" + ")}</span>
+          )}
+          {activeExcludeCount > 0 && <span className="ui-badge">{activeExcludeCount} excluded</span>}
+          {skipCount > 0 && <span className="ui-badge">{skipCount} skipped</span>}
+          {canvasSize && <span className="ui-badge">{canvasSize}px canvas</span>}
+        </div>
 
-      <div className={`pipeline-ready-source ${inputDir ? "is-ready" : "is-missing"}`}>
-        {inputDir ? "Input source configured." : "Input source missing. Set it on the left or drop a folder below."}
+        <p className={`pipeline-ready-source ${inputDir ? "is-ready" : "is-missing"}`}>
+          {inputDir ? "Input source configured." : "Input source missing. Set it on the left or pick a folder on the Input screen."}
+        </p>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1067,43 +980,28 @@ function ActivityPanel({ logRef, log, running, open, setOpen }) {
   const entries = log.filter(Boolean);
 
   return (
-    <div className={`pipeline-activity-panel ${open ? "is-open" : "is-collapsed"}`} style={{
-      flex: open ? "1 1 auto" : "0 0 36px", minWidth: 0, minHeight: 0,
-      display: "flex", flexDirection: "column",
-      transition: "flex 0.2s ease"
-    }}>
-      <div className="pipeline-bottom-panel-header">
-        <div className="pipeline-bottom-panel-title">
-          PIPELINE TELEMETRY {"\u00b7"} {entries.length} ENTRIES
-        </div>
-        <button
-          className={`pipeline-bottom-panel-toggle ${open ? "is-open" : ""}`}
-          onClick={() => setOpen(v => !v)}
-          aria-label={open ? "Collapse telemetry" : "Expand telemetry"}
+    <section className={`pipeline-card pipeline-activity-panel ${open ? "is-open" : "is-collapsed"}`}>
+      <header className="pipeline-card-head">
+        <h2 className="pipeline-card-title">Activity</h2>
+        <span className="ui-badge">{entries.length}</span>
+        <span className="pipeline-spacer" />
+        <IconButton
+          icon={open ? ChevronDown : ChevronUp}
+          label={open ? "Collapse activity log" : "Expand activity log"}
+          size="s"
           aria-expanded={open}
-        >
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 10 10"
-            fill="none"
-            className="pipeline-panel-chevron"
-            style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
-            aria-hidden="true"
-          >
-            <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
+          onClick={() => setOpen(v => !v)}
+        />
+      </header>
       {open && (
         <div className="pipeline-log-list pipeline-activity-console" ref={logRef}>
           {entries.length === 0 ? (
-            <div className="pipeline-log-empty">{running ? "Waiting for pipeline activity..." : "Configure and press Run Pipeline."}</div>
+            <div className="pipeline-log-empty">{running ? "Waiting for pipeline activity…" : "Configure and press Run pipeline."}</div>
           ) : entries.map((entry) => {
             const status = telemetryStatus(entry.raw);
             return (
               <div key={entry.id} className={`pipeline-activity-entry is-${entry.kind || "info"}`}>
-                <span className="pipeline-activity-time">[{entry.time || telemetryTimestamp()}]</span>
+                <span className="pipeline-activity-time">{entry.time || telemetryTimestamp()}</span>
                 <span className="pipeline-activity-message">
                   {status.message}
                   {status.label && (
@@ -1115,7 +1013,7 @@ function ActivityPanel({ logRef, log, running, open, setOpen }) {
           })}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -1147,7 +1045,7 @@ export default function Pipeline({
   const [upscaleMaxPx, setUpscaleMaxPx] = useState("3600");
   const [reuseExactDuplicates, setReuseExactDuplicates] = useState(true);
   const [rembgModels, setRembgModels] = useState(["birefnet-general"]);
-  const [logOpen, setLogOpen] = useState(true);
+  const [logOpen, setLogOpen] = useUiPref("process.logOpen", true);
   const [resumeSession, setResumeSession] = useState(null);
   const [showResume, setShowResume] = useState(false);
   const doneNotifiedRef = useRef(false);
@@ -1335,283 +1233,228 @@ export default function Pipeline({
   const bgDeviceLabel = bgDeviceOption(bgDeviceMode).label;
 
   return (
-    <div className="pipeline-screen" style={{
-      display: "flex", flexDirection: "column", background: C.bg, height: "100%",
-      overflow: "hidden", fontFamily: "'Outfit','DM Sans',system-ui,sans-serif",
-      color: C.text, fontSize: 13
-    }}>
-      <style>{`
-        .pipeline-screen button:hover { filter: brightness(1.15); }
-        ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
-        ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
-        select option{background:var(--panel2)}
-      `}</style>
-
+    <div className="pipeline-screen">
       <PageHeader
-        title={"PROCESS \u00b7 PIPELINE"}
-        subtitle="Configure processing settings, then run the batch."
+        title="Process"
+        subtitle="Configure the stages, then run the batch"
         className="pipeline-app-header"
-        actionsClassName="pipeline-header-actions"
         actions={(
         <>
-          {!running ? (
-            <button
-              className="pipeline-btn pipeline-header-run-button"
-              onClick={handleStart}
-              disabled={nothingSelected}
-            >
-              ▶  Run Pipeline
-            </button>
-          ) : (
-            <button
-              className="pipeline-btn pipeline-header-stop-button"
-              onClick={stop}
-            >
-              ■  Stop
-            </button>
-          )}
           {done && !running && (
-            <button
-              className="pipeline-btn pipeline-secondary-button pipeline-open-editor-button"
+            <Button
+              iconEnd={ArrowRight}
               onClick={() => onGoToEditor?.({ canvasSize: parseInt(canvasSize, 10) || 1440 })}
             >
-              Open Editor →
-            </button>
+              Open editor
+            </Button>
+          )}
+          {!running ? (
+            <Button variant="primary" icon={Play} onClick={handleStart} disabled={nothingSelected}>
+              Run pipeline
+            </Button>
+          ) : (
+            <Button variant="danger" icon={Square} onClick={stop}>
+              Stop
+            </Button>
           )}
         </>
         )}
       />
 
-      <div className="pipeline-main pipeline-layout" style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
+      <div className="pipeline-layout">
 
-        {/* Sidebar */}
-        <div className="pipeline-settings-panel" style={{
-          width: 300, background: C.panel, borderRight: `1px solid ${C.border}`,
-          padding: "14px", display: "flex", flexDirection: "column",
-          flexShrink: 0, overflow: "hidden"
-        }}>
+        {/* Settings panel */}
+        <ResizablePanel
+          prefKey="process.settings"
+          side="left"
+          defaultWidth={320}
+          min={280}
+          max={460}
+          className="pipeline-settings-panel"
+          aria-label="Pipeline settings"
+        >
           <div className="pipeline-settings-scroll">
           {showResume && resumeSession && (
-            <div className="pipeline-resume-card" style={{
-              marginBottom: 12,
-              background: "color-mix(in srgb, var(--accent) 10%, transparent)",
-              border: `1px solid color-mix(in srgb, var(--accent) 35%, transparent)`,
-              borderRadius: 6, padding: "10px 10px 8px",
-            }}>
-              <button
+            <div className="pipeline-resume-card" role="region" aria-label="Resume previous session">
+              <IconButton
+                icon={X}
+                label="Dismiss resume prompt"
+                size="s"
                 className="pipeline-resume-dismiss"
                 onClick={() => setShowResume(false)}
-                aria-label="Dismiss resume prompt"
-              >
-                ×
-              </button>
-              <div style={{ fontSize: 11, color: C.text, fontWeight: 600, marginBottom: 4 }}>
-                Resume previous session?
-              </div>
-              <div style={{ fontSize: 10, color: C.dim, lineHeight: 1.5 }}>
+              />
+              <strong>Resume previous session?</strong>
+              <span>
                 {Math.max(0, (resumeSession.total ?? 0) - (resumeSession.queue_index ?? 0))} image(s) remaining
-              </div>
-              <div style={{ fontSize: 9, color: C.dim2, fontFamily: "JetBrains Mono", marginTop: 4, wordBreak: "break-all" }}>
-                {resumeSession.src_root}
-              </div>
-              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                <button className="pipeline-btn pipeline-run-button" onClick={handleResume} style={{
-                  flex: 1, background: C.greenBg, color: C.green, border: `1px solid ${C.greenBdr}`,
-                  borderRadius: 6, padding: "6px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
-                }}>Resume</button>
-                <button className="pipeline-btn pipeline-secondary-button" onClick={handleStartFresh} style={{
-                  flex: 1, background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
-                  borderRadius: 6, padding: "6px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
-                }}>Start fresh</button>
+              </span>
+              <code title={resumeSession.src_root}>{resumeSession.src_root}</code>
+              <div className="pipeline-resume-actions">
+                <Button onClick={handleResume}>Resume</Button>
+                <Button variant="ghost" onClick={handleStartFresh}>Start fresh</Button>
               </div>
             </div>
           )}
 
-          <ProcessPanelSection title="Folders">
-            <div className="pipeline-panel-field">
-              <FieldLabel>Input folder</FieldLabel>
+          <Section title="Folders" prefKey="process.folders">
+            <Field label="Input folder" htmlFor="process-input-dir">
               <FolderInput
+                id="process-input-dir"
                 value={inputDir}
                 onChange={setInputDir}
                 placeholder="default: ./input"
                 recent={recentInputDirs}
                 onRemember={rememberInputDir}
               />
-            </div>
-            <div className="pipeline-panel-field">
-              <FieldLabel>Output folder</FieldLabel>
+            </Field>
+            <Field label="Output folder" htmlFor="process-output-dir">
               <FolderInput
+                id="process-output-dir"
                 value={outputDir}
                 onChange={setOutputDir}
                 placeholder={`default: ${defaultOutputLabel}`}
                 recent={recentOutputDirs}
                 onRemember={rememberOutputDir}
               />
-            </div>
-          </ProcessPanelSection>
+            </Field>
+          </Section>
 
-          <ProcessPanelSection title="Processing">
+          <Section title="Processing" prefKey="process.processing">
             <Row label="Folder mode">
-              <Btn label="Bulk" active={folderMode === "bulk"} onClick={() => setFolderMode("bulk")} />
-              <Btn label="Clean" active={folderMode === "clean"} onClick={() => setFolderMode("clean")} />
+              <SegmentedControl
+                label="Folder mode"
+                value={folderMode}
+                onChange={setFolderMode}
+                options={[{ value: "bulk", label: "Bulk" }, { value: "clean", label: "Clean" }]}
+              />
             </Row>
 
             <Row label="Upscale (NCNN)">
-              <PillToggle value={doUpscale} onChange={setDoUpscale} />
+              <Switch checked={doUpscale} onChange={setDoUpscale} aria-label="Upscale (NCNN)" />
             </Row>
 
             {doUpscale && (
               <Row label="Scale factor">
-                <Btn label="2×" active={scale === "2"} onClick={() => setScale("2")} />
-                <Btn label="4×" active={scale === "4"} onClick={() => setScale("4")} />
+                <SegmentedControl
+                  label="Scale factor"
+                  value={scale}
+                  onChange={setScale}
+                  options={[{ value: "2", label: "2×" }, { value: "4", label: "4×" }]}
+                />
               </Row>
             )}
 
             <Row label="Remove BG">
-              <PillToggle value={doRembg} onChange={setDoRembg} />
-            </Row>
-            <Row label="Reuse exact duplicates" className="pipeline-row-duplicate-reuse" controlsClassName="pipeline-row-controls-wrap">
-              <div className="pipeline-duplicate-toggle">
-                <span>Process identical files once and copy results to duplicates.</span>
-                <PillToggle value={reuseExactDuplicates} onChange={handleReuseExactDuplicatesChange} />
-              </div>
-            </Row>
-            {doRembg && (
-              <>
-                <Row label="BG model">
-                  <select
-                    value={rembgModel} onChange={e => setRembgModel(e.target.value)}
-                    style={{
-                      background: C.panel2, color: C.text, border: `1px solid ${C.border}`,
-                      borderRadius: 4, padding: "4px 8px", fontSize: 11, width: 170,
-                      outline: "none", fontFamily: "inherit", colorScheme: "dark",
-                    }}
-                  >
-                    {rembgModels.map(m => <option key={m} value={m}>{bgModelLabel(m)}</option>)}
-                  </select>
-                </Row>
-                <div style={{
-                  padding: "7px 0 0",
-                  color: C.dim,
-                  fontSize: 10,
-                  lineHeight: 1.35,
-                }}>
-                  <div>
-                    Using <span style={{ color: C.text }}>{bgModelLabel(rembgModel)}</span>{" \u00b7 "}<span style={{ color: C.text }}>{bgDeviceLabel}</span>
-                  </div>
-                  <div style={{ color: C.dim2, marginTop: 2 }}>Device mode is set in Settings.</div>
-                </div>
-              </>
-            )}
-          </ProcessPanelSection>
-
-          <ProcessPanelSection title="Output Settings">
-            <Row label="Skip upscale if any side >=" className="pipeline-row-output-limit" controlsClassName="pipeline-row-controls-wrap">
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input
-                  type="number"
-                  value={upscaleMaxPx}
-                  onChange={e => setUpscaleMaxPx(e.target.value)}
-                  placeholder="3600"
-                  min={256} max={8192}
-                  style={{
-                    width: 90, background: C.panel2, color: C.text,
-                    border: `1px solid ${C.border}`, borderRadius: 4,
-                    padding: "4px 5px", fontSize: 11, fontFamily: "JetBrains Mono",
-                    outline: "none", textAlign: "center"
-                  }}
-                />
-                <span style={{ fontSize: 10, color: C.dim }}>empty = safe default</span>
-              </div>
+              <Switch checked={doRembg} onChange={setDoRembg} aria-label="Remove BG" />
             </Row>
 
-            <Row label="Canvas size (px)" className="pipeline-row-canvas-size" controlsClassName="pipeline-row-controls-wrap">
-              <div className="pipeline-canvas-size-controls" style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                {["1080", "1440", "2048"].map(s => (
-                  <Btn key={s} label={s} active={canvasSize === s} onClick={() => setCanvasSize(s)} />
-                ))}
-                <input type="number" value={canvasSize} onChange={e => setCanvasSize(e.target.value)}
-                  min={256} max={8192}
-                  style={{
-                    width: 54, background: C.panel2, color: C.text,
-                    border: `1px solid ${C.border}`, borderRadius: 4,
-                    padding: "4px 5px", fontSize: 11, fontFamily: "JetBrains Mono",
-                    outline: "none", textAlign: "center"
-                  }}
-                />
-              </div>
-            </Row>
-          </ProcessPanelSection>
-
-          </div>
-
-          {/* Action buttons */}
-          <div className="pipeline-top pipeline-settings-actions" style={{ paddingTop: 12 }}>
-            <button
-              className="pipeline-btn pipeline-secondary-button"
-              onClick={() => openFolder(outputDir.trim()).catch(() => {})}
-              style={{
-                width: "100%", marginTop: 0, padding: "10px 0",
-                background: C.panel2, color: C.dim, border: `1px solid ${C.border}`,
-                borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
-              }}
-            >
-              📁 Open Output Folder
-            </button>
-          </div>
-        </div>
-
-        {/* Right zone */}
-        <div className="pipeline-results-area pipeline-workspace" style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, padding: "0 12px 12px 12px", overflowY: "auto", overflowX: "hidden" }}>
-          <div className="pipeline-results-column" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 10 }}>
-
-            <div className="pipeline-status-area" style={{ flex: "0 0 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
-              <div className="pipeline-status-card-slot">
-                {(running || done) && (
-                  <Zone2
-                    upStats={upStats} bgStats={bgStats}
-                    totalImages={totalImages} elapsed={elapsed}
-                    done={done} stage={stage}
-                    doUpscale={doUpscale} doRembg={doRembg}
-                    oomGpuCount={oomGpuCount}
-                    imageProgress={imageProgress}
-                    eta={eta}
-                  />
-                )}
-                {!running && !done && (
-                  <ReadyCard
-                    nothingSelected={nothingSelected}
-                  doUpscale={doUpscale}
-                  doRembg={doRembg}
-                  activeExcludeCount={activeExcludeCount}
-                  skipCount={skipCount}
-                  canvasSize={canvasSize}
-                  inputDir={inputDir}
-                  />
-                )}
-              </div>
-
-              <div className="pipeline-live-area">
-                <PipelinePreviewStrip
-                  imageDone={imageDone} totalImages={totalImages}
-                  previewPath={previewPath}
-                  livePreviewStrip={livePreviewStrip}
-                />
-              </div>
-            </div>
-
-            <div className="pipeline-bottom-panels" style={{ flex: "1 1 auto", minHeight: 210, display: "flex", flexDirection: "column", gap: 8 }}>
-              <ActivityPanel
-                logRef={logRef} log={log} running={running}
-                open={logOpen} setOpen={setLogOpen}
+            <Row label="Reuse exact duplicates" hint="Process identical files once and copy results to duplicates.">
+              <Switch
+                checked={reuseExactDuplicates}
+                onChange={handleReuseExactDuplicatesChange}
+                aria-label="Reuse exact duplicates"
               />
-            </div>
+            </Row>
+
+            {doRembg && (
+              <Field
+                label="BG model"
+                htmlFor="process-bg-model"
+                hint={`Using ${bgModelLabel(rembgModel)} · ${bgDeviceLabel}. Device mode is set in Settings.`}
+              >
+                <Select id="process-bg-model" value={rembgModel} onChange={e => setRembgModel(e.target.value)}>
+                  {rembgModels.map(m => <option key={m} value={m}>{bgModelLabel(m)}</option>)}
+                </Select>
+              </Field>
+            )}
+          </Section>
+
+          <Section title="Output" prefKey="process.output">
+            <Field
+              label="Skip upscale if any side is at least (px)"
+              htmlFor="process-max-px"
+              hint="Empty uses the safe default."
+            >
+              <TextField
+                id="process-max-px"
+                mono
+                type="number"
+                value={upscaleMaxPx}
+                onChange={e => setUpscaleMaxPx(e.target.value)}
+                placeholder="3600"
+                min={256}
+                max={8192}
+              />
+            </Field>
+
+            <Field label="Canvas size (px)" htmlFor="process-canvas-size">
+              <div className="pipeline-canvas-size">
+                <SegmentedControl
+                  label="Canvas size presets"
+                  value={canvasSize}
+                  onChange={setCanvasSize}
+                  options={["1080", "1440", "2048"]}
+                />
+                <TextField
+                  id="process-canvas-size"
+                  mono
+                  type="number"
+                  value={canvasSize}
+                  onChange={e => setCanvasSize(e.target.value)}
+                  min={256}
+                  max={8192}
+                />
+              </div>
+            </Field>
+          </Section>
 
           </div>
+
+          <div className="pipeline-settings-actions">
+            <Button icon={FolderOpen} onClick={() => openFolder(outputDir.trim()).catch(() => {})}>
+              Open output folder
+            </Button>
+          </div>
+        </ResizablePanel>
+
+        {/* Workspace */}
+        <div className="pipeline-workspace">
+          <div className="pipeline-status-card-slot">
+            {(running || done) && (
+              <Zone2
+                upStats={upStats} bgStats={bgStats}
+                totalImages={totalImages} elapsed={elapsed}
+                done={done} stage={stage}
+                doUpscale={doUpscale} doRembg={doRembg}
+                oomGpuCount={oomGpuCount}
+                imageProgress={imageProgress}
+                eta={eta}
+              />
+            )}
+            {!running && !done && (
+              <ReadyCard
+                nothingSelected={nothingSelected}
+                doUpscale={doUpscale}
+                doRembg={doRembg}
+                activeExcludeCount={activeExcludeCount}
+                skipCount={skipCount}
+                canvasSize={canvasSize}
+                inputDir={inputDir}
+              />
+            )}
+          </div>
+
+          <PipelinePreviewStrip
+            imageDone={imageDone} totalImages={totalImages}
+            previewPath={previewPath}
+            livePreviewStrip={livePreviewStrip}
+          />
+
+          <ActivityPanel
+            logRef={logRef} log={log} running={running}
+            open={logOpen} setOpen={setLogOpen}
+          />
         </div>
       </div>
     </div>
   );
 }
-
-

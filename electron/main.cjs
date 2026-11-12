@@ -95,11 +95,11 @@ function createWindow() {
     title: APP_NAME,
     width: 1400,
     height: 900,
-    minWidth: 1200,
-    minHeight: 700,
+    minWidth: 960,
+    minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: "#0b0f17",
+    backgroundColor: "#141312",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -147,11 +147,11 @@ function errorHtml(message) {
     <meta charset="utf-8" />
     <title>Cutout Studio</title>
     <style>
-      body { margin: 0; font-family: system-ui, sans-serif; background: #0b0f17; color: #e5edf7; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #141312; color: #f5f5f1; }
       main { max-width: 720px; margin: 12vh auto; padding: 32px; }
-      h1 { margin: 0 0 12px; font-size: 24px; }
-      p { color: #aab6c8; line-height: 1.6; }
-      pre { white-space: pre-wrap; background: #151b25; border: 1px solid #273246; padding: 16px; border-radius: 6px; }
+      h1 { margin: 0 0 12px; padding-bottom: 12px; border-bottom: 4px solid #ffd439; display: inline-block; font-size: 24px; }
+      p { color: #b9b8b0; line-height: 1.6; }
+      pre { white-space: pre-wrap; background: #1c1b19; border: 1px solid #33322e; padding: 16px; border-radius: 8px; }
     </style>
   </head>
   <body>
@@ -172,10 +172,10 @@ function startingHtml() {
     <meta charset="utf-8" />
     <title>Cutout Studio</title>
     <style>
-      body { margin: 0; height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #0b0f17; color: #e5edf7; }
+      body { margin: 0; height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #141312; color: #f5f5f1; }
       main { text-align: center; }
-      h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; }
-      p { margin: 0; color: #aab6c8; }
+      h1 { margin: 0 0 12px; padding-bottom: 12px; border-bottom: 4px solid #ffd439; display: inline-block; font-size: 24px; font-weight: 600; }
+      p { margin: 0; color: #b9b8b0; }
     </style>
   </head>
   <body>

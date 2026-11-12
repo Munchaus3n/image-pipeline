@@ -741,6 +741,10 @@ class TemplateEntry(BaseModel):
     ref_image: str = ""
     # Comma-separated file-name keywords for the Editor's template auto-match.
     match:     str = ""
+    # ISO-8601 timestamps set by the Templates screen. Empty for templates saved
+    # before these fields existed; the UI sorts those after dated ones.
+    created_at: str = ""
+    updated_at: str = ""
 
 class TemplatesPayload(BaseModel):
     templates: dict[str, TemplateEntry]
@@ -1274,9 +1278,11 @@ _DEFAULT_SETTINGS = {
                      "thumbnail_size": 400, "folder_mode": "bulk", "input_dir": "", "output_dir": "",
                      "recent_input_dirs": [], "recent_output_dirs": [],
                      "do_upscale": True, "do_rembg": True, "upscale_scale": "2"},
-    "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#f5f5f1", "theme": "light"},
+    "appearance":   {"guide_opacity": 1.0, "ref_img_opacity": 0.05, "canvas_bg_color": "#f5f5f1", "theme": "dark"},
     "guides":       {"use_custom": False, "custom": {}},
     "editor":       {"auto_template_match": True},
+    # UI layout preferences (panel widths, collapsed sections, list sort...).
+    "ui":           {},
 }
 
 _REMBG_MODELS = [

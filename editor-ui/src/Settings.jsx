@@ -1,28 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { FolderOpen } from "lucide-react";
 import { browseFolder, getSettings, patchSettings } from "./api.js";
 import { useDefaultOutputLabel } from "./defaultOutput.js";
 import { BG_MODEL_OPTIONS, BG_DEVICE_OPTIONS, bgDeviceOption, normalizeBgDeviceMode } from "./modelLabels.js";
+import PageHeader from "./components/PageHeader.jsx";
+import {
+  Button, IconButton, Select as UiSelect, Slider as UiSlider, Switch, TextField,
+} from "./components/ui/index.jsx";
+import { zoneColor } from "./utils/zones.js";
 
-function Section({ title, description, children, defaultOpen = false, tone = "default" }) {
-  const [open, setOpen] = useState(defaultOpen);
-
+// A titled card of rows. The section list on the left scrolls to these by id.
+function Group({ id, title, description, children, tone = "default" }) {
   return (
-    <section className={`settings-section settings-section-${tone}`}>
-      <button
-        type="button"
-        className="settings-section-toggle"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-      >
-        <span className="settings-section-copy">
-          <span className="settings-section-title">{title}</span>
-          {description && <span className="settings-section-description">{description}</span>}
-        </span>
-        <span className="settings-section-arrow" aria-hidden="true" />
-      </button>
-      <div className={open ? "settings-section-body is-open" : "settings-section-body"} aria-hidden={!open}>
-        <div className="settings-section-body-inner">{children}</div>
-      </div>
+    <section id={id} className={`settings-group settings-group-${tone}`}>
+      <header className="settings-group-head">
+        <h2 className="settings-group-title">{title}</h2>
+        {description && <p className="settings-group-description">{description}</p>}
+      </header>
+      <div className="settings-group-body">{children}</div>
     </section>
   );
 }
@@ -39,32 +34,25 @@ function Row({ label, hint, children, tone = "default" }) {
   );
 }
 
-function Toggle({ value, onChange, tone = "default" }) {
-  return (
-    <button
-      type="button"
-      className={`settings-toggle settings-toggle-${tone}${value ? " is-on" : " is-off"}`}
-      onClick={() => onChange(!value)}
-      aria-pressed={value}
-    >
-      <span className="settings-toggle-thumb" />
-    </button>
-  );
+function Toggle({ value, onChange, label }) {
+  return <Switch checked={!!value} onChange={onChange} aria-label={label} />;
 }
 
-function Slider({ value, onChange, min = 0, max = 100, step = 1, format = value => `${value}%` }) {
+function Slider({ value, onChange, min = 0, max = 100, step = 1, decimals = 0, display, parse, suffix, label }) {
   return (
-    <div className="settings-slider">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={event => onChange(parseFloat(event.target.value))}
-      />
-      <span>{format(value)}</span>
-    </div>
+    <UiSlider
+      className="settings-slider"
+      value={value}
+      onChange={onChange}
+      min={min}
+      max={max}
+      step={step}
+      decimals={decimals}
+      display={display}
+      parse={parse}
+      suffix={suffix}
+      label={label}
+    />
   );
 }
 
@@ -76,30 +64,37 @@ function opacityPercent(value) {
   return Math.max(0, Math.min(100, percentValue));
 }
 
-function OpacitySlider({ value, onChange }) {
-  const displayValue = opacityPercent(value);
+// Opacity may be stored as a fraction (0 to 1) or, in older files, as a percent.
+function OpacitySlider({ value, onChange, label }) {
   const usesPercentStorage = Number(value) > 1;
+  const fraction = opacityPercent(value) / 100;
+  const emit = next => onChange(usesPercentStorage ? Math.round(next * 100) : next);
 
   return (
     <Slider
-      value={displayValue}
+      label={label}
+      value={fraction}
       min={0}
-      max={100}
-      step={1}
-      onChange={nextPercent => onChange(usesPercentStorage ? nextPercent : nextPercent / 100)}
-      format={nextValue => `${Math.round(opacityPercent(nextValue))}%`}
+      max={1}
+      step={0.01}
+      display={v => Math.round(v * 100)}
+      parse={v => v / 100}
+      suffix="%"
+      onChange={emit}
     />
   );
 }
 
-function NumInput({ value, onChange, min, max, width = 80 }) {
+function NumInput({ value, onChange, min, max, width = 88, label }) {
   // While typing, keep the raw text so the field can be cleared and retyped.
   // Only a real number is committed; an empty field never becomes 0.
   const [draft, setDraft] = useState(null);
   return (
-    <input
-      className="settings-number-input"
+    <TextField
+      mono
+      className="settings-number"
       type="number"
+      aria-label={label}
       value={draft ?? value}
       min={min}
       max={max}
@@ -115,13 +110,15 @@ function NumInput({ value, onChange, min, max, width = 80 }) {
   );
 }
 
-function OptionalNumInput({ value, onChange, min, max, width = 80, placeholder = "" }) {
+function OptionalNumInput({ value, onChange, min, max, width = 88, placeholder = "", label }) {
   const shown = Number(value) > 0 ? String(value) : "";
 
   return (
-    <input
-      className="settings-number-input"
+    <TextField
+      mono
+      className="settings-number"
       type="number"
+      aria-label={label}
       value={shown}
       min={min}
       max={max}
@@ -130,20 +127,6 @@ function OptionalNumInput({ value, onChange, min, max, width = 80, placeholder =
         const raw = event.target.value.trim();
         onChange(raw === "" ? 0 : Number(raw));
       }}
-      style={{ width }}
-    />
-  );
-}
-
-function TextInput({ value, onChange, placeholder, width = 240, mono = true, maxLength }) {
-  return (
-    <input
-      className={mono ? "settings-text-input settings-mono-input" : "settings-text-input"}
-      type="text"
-      value={value}
-      placeholder={placeholder}
-      maxLength={maxLength}
-      onChange={event => onChange(event.target.value)}
       style={{ width }}
     />
   );
@@ -166,47 +149,52 @@ function FolderPathInput({ value, onChange, placeholder, browseLabel }) {
 
   return (
     <div className="settings-path-control">
-      <TextInput
+      <TextField
+        mono
+        aria-label={browseLabel}
         value={value}
         placeholder={placeholder}
-        onChange={onChange}
-        width="100%"
+        title={value}
+        onChange={event => onChange(event.target.value)}
       />
-      <button
-        type="button"
-        className="settings-path-browse"
+      <IconButton
+        icon={FolderOpen}
+        variant="secondary"
+        label={browseLabel}
         onClick={browse}
         disabled={browsing}
-        title={browseLabel}
-        aria-label={browseLabel}
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2.5 5.5h11v6.25a1.25 1.25 0 0 1-1.25 1.25h-8.5A1.25 1.25 0 0 1 2.5 11.75V5.5Z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
-          <path d="M2.5 5.5V4.25A1.25 1.25 0 0 1 3.75 3h3.1l1.25 1.25h4.15A1.25 1.25 0 0 1 13.5 5.5" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
-        </svg>
-      </button>
+      />
     </div>
   );
 }
 
-function Select({ value, onChange, options, wide }) {
+function Select({ value, onChange, options, wide, label }) {
   return (
-    <select
-      className="settings-select"
+    <UiSelect
+      className={wide ? "settings-select is-wide" : "settings-select"}
       value={value}
+      aria-label={label}
       onChange={event => onChange(event.target.value)}
-      style={{ minWidth: wide ? 260 : 140 }}
     >
-      {options.map(([optionValue, label]) => (
+      {options.map(([optionValue, optionLabel]) => (
         <option key={optionValue} value={optionValue}>
-          {label}
+          {optionLabel}
         </option>
       ))}
-    </select>
+    </UiSelect>
   );
 }
 
 const BG_DEVICE_SELECT_OPTIONS = BG_DEVICE_OPTIONS.map(option => [option.value, option.label]);
+
+const SECTIONS = [
+  ["settings-paths", "Workspace paths"],
+  ["settings-appearance", "Appearance"],
+  ["settings-safety", "Safety"],
+  ["settings-processing", "Processing defaults"],
+  ["settings-bg", "Background removal"],
+  ["settings-guides", "Guides"],
+];
 
 function normalizeSettings(rawSettings) {
   const next = rawSettings || DEFAULT;
@@ -303,49 +291,49 @@ export default function Settings({ onThemeChange }) {
     setDirty(true);
   }, []);
 
+  const goToSection = (id) => {
+    document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+
   return (
     <div className="settings-screen">
-      <style>{`
-        [data-theme="dark"] select option { background: hsl(222,20%,16%); color: hsl(210,40%,95%); }
-        [data-theme="light"] select option { background: hsl(220,14%,94%); color: hsl(224,20%,15%); }
-        select option { background: var(--panel2); color: var(--text); }
-      `}</style>
+      <PageHeader
+        title="Settings"
+        subtitle="Defaults, appearance and safety options"
+        className="settings-app-header"
+        actions={(
+          <>
+            {status && (
+              <span className={status === "Saved" ? "settings-status is-ok" : "settings-status is-error"} role="status">
+                {status}
+              </span>
+            )}
+            {dirty && <span className="settings-unsaved">Unsaved changes</span>}
+            <Button variant="ghost" onClick={reset} title="Fill the form with the built-in defaults. Nothing is saved until you press Save.">
+              Reset to defaults
+            </Button>
+            <Button variant="primary" onClick={save} disabled={!dirty}>
+              Save settings
+            </Button>
+          </>
+        )}
+      />
 
-      <header className="settings-header">
-        <div className="settings-title-group">
-          <h1 className="settings-title">Settings &middot; Workspace</h1>
-          <p className="settings-subtitle">Configure defaults, appearance, and safety options.</p>
-        </div>
-        <div className="settings-actions">
-          {status && (
-            <span className={status === "Saved" ? "settings-status is-ok" : "settings-status is-error"}>
-              {status}
-            </span>
-          )}
-          <button
-            type="button"
-            className={dirty ? "settings-button settings-button-warning" : "settings-button settings-button-secondary"}
-            onClick={reset}
-          >
-            Reset Draft
-          </button>
-          <button
-            type="button"
-            className={dirty ? "settings-button settings-button-primary" : "settings-button settings-button-secondary"}
-            onClick={save}
-          >
-            Save Settings
-          </button>
-        </div>
-      </header>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SECTIONS.map(([id, label]) => (
+            <button key={id} type="button" className="settings-nav-item" onClick={() => goToSection(id)}>
+              {label}
+            </button>
+          ))}
+        </nav>
 
-      <main className="settings-body">
-        <div className="settings-grid">
-          <div className="settings-column">
-            <Section
-              title="Workspace Paths"
+        <main className="settings-body">
+          <div className="settings-content">
+            <Group
+              id="settings-paths"
+              title="Workspace paths"
               description="Default folders used when the app starts."
-              defaultOpen
             >
               <Row label="Default input folder" hint="Leave blank to use ./input.">
                 <FolderPathInput
@@ -365,38 +353,44 @@ export default function Settings({ onThemeChange }) {
               </Row>
               <Row label="Folder mode" hint="Default processing folder layout.">
                 <Select
+                  label="Folder mode"
                   value={settings.output.folder_mode}
                   onChange={value => setSetting("output", "folder_mode", value)}
                   options={[["bulk", "Bulk - flat folder"], ["clean", "Clean - subfolders"]]}
                 />
               </Row>
-            </Section>
+            </Group>
 
-            <Section
+            <Group
+              id="settings-appearance"
               title="Appearance"
               description="Theme and editor display defaults."
-              defaultOpen
             >
-              <Row label="Theme" hint="Theme selection is still persisted through settings.">
+              <Row label="Theme">
                 <Select
+                  label="Theme"
                   value={settings.appearance.theme || "dark"}
                   onChange={value => setSetting("appearance", "theme", value)}
                   options={[["dark", "Dark"], ["light", "Light"]]}
                 />
               </Row>
-              <Row label="Canvas background">
+              <Row label="Canvas background" hint="Preview only. Saved images always keep a transparent background.">
                 <div className="settings-color-group">
                   <input
                     className="settings-color-input"
                     type="color"
+                    aria-label="Canvas background color"
                     value={settings.appearance.canvas_bg_color || "#ffffff"}
                     onChange={event => setSetting("appearance", "canvas_bg_color", event.target.value)}
                   />
-                  <TextInput
+                  <TextField
+                    mono
+                    className="settings-hex"
+                    aria-label="Canvas background hex"
                     value={settings.appearance.canvas_bg_color || "#ffffff"}
                     maxLength={7}
-                    width={88}
-                    onChange={value => {
+                    onChange={event => {
+                      const value = event.target.value;
                       if (/^#[0-9a-fA-F]{0,6}$/.test(value)) setSetting("appearance", "canvas_bg_color", value);
                     }}
                   />
@@ -404,22 +398,24 @@ export default function Settings({ onThemeChange }) {
               </Row>
               <Row label="Guide opacity">
                 <OpacitySlider
+                  label="Guide opacity"
                   value={settings.appearance.guide_opacity}
                   onChange={value => setSetting("appearance", "guide_opacity", value)}
                 />
               </Row>
               <Row label="Reference image opacity">
                 <OpacitySlider
+                  label="Reference image opacity"
                   value={settings.appearance.ref_img_opacity}
                   onChange={value => setSetting("appearance", "ref_img_opacity", value)}
                 />
               </Row>
-            </Section>
+            </Group>
 
-            <Section
+            <Group
+              id="settings-safety"
               title="Safety"
               description="Options that can remove or reset work."
-              defaultOpen
               tone="warning"
             >
               <Row
@@ -428,22 +424,21 @@ export default function Settings({ onThemeChange }) {
                 tone="warning"
               >
                 <Toggle
+                  label="Wipe input after run"
                   value={!!settings.processing.wipe_input_after_run}
                   onChange={value => setSetting("processing", "wipe_input_after_run", value)}
-                  tone="warning"
                 />
               </Row>
-            </Section>
-          </div>
+            </Group>
 
-          <div className="settings-column">
-            <Section
-              title="Processing Defaults"
+            <Group
+              id="settings-processing"
+              title="Processing defaults"
               description="Defaults used by Process and Editor."
-              defaultOpen
             >
               <Row label="Canvas size (px)">
                 <NumInput
+                  label="Canvas size"
                   value={settings.output.canvas_size}
                   min={256}
                   max={8192}
@@ -452,6 +447,7 @@ export default function Settings({ onThemeChange }) {
               </Row>
               <Row label="Thumbnail" hint="Generate resized preview on save.">
                 <Toggle
+                  label="Thumbnail"
                   value={settings.output.thumbnail}
                   onChange={value => setSetting("output", "thumbnail", value)}
                 />
@@ -459,6 +455,7 @@ export default function Settings({ onThemeChange }) {
               {settings.output.thumbnail && (
                 <Row label="Thumbnail size (px)" hint="Width and height of generated preview.">
                   <NumInput
+                    label="Thumbnail size"
                     value={settings.output.thumbnail_size || 400}
                     min={64}
                     max={2048}
@@ -471,18 +468,21 @@ export default function Settings({ onThemeChange }) {
                 hint="In the Editor, pick the template whose file-name words (set on the Templates screen) appear in the photo's name."
               >
                 <Toggle
+                  label="Auto-match template"
                   value={settings.editor?.auto_template_match ?? true}
                   onChange={value => setSetting("editor", "auto_template_match", value)}
                 />
               </Row>
               <Row label="Default upscale">
                 <Toggle
+                  label="Default upscale"
                   value={settings.output.do_upscale ?? true}
                   onChange={value => setSetting("output", "do_upscale", value)}
                 />
               </Row>
               <Row label="Default remove BG">
                 <Toggle
+                  label="Default remove BG"
                   value={settings.output.do_rembg ?? true}
                   onChange={value => setSetting("output", "do_rembg", value)}
                 />
@@ -490,6 +490,7 @@ export default function Settings({ onThemeChange }) {
               {(settings.output.do_upscale ?? true) && (
                 <Row label="Default upscale factor">
                   <Select
+                    label="Default upscale factor"
                     value={settings.output.upscale_scale || "2"}
                     onChange={value => setSetting("output", "upscale_scale", value)}
                     options={[["2", "2x"], ["4", "4x"]]}
@@ -504,30 +505,36 @@ export default function Settings({ onThemeChange }) {
                     : "Fast model tuned for video frames. It can smooth fine texture."}
                 >
                   <Select
+                    label="2x upscale quality"
                     value={settings.processing.upscale_model || "fast"}
                     onChange={value => setSetting("processing", "upscale_model", value)}
                     options={[["fast", "Fast"], ["quality", "Quality (slow)"]]}
                   />
                 </Row>
               )}
-              <Row label="Skip upscale if any side >=" hint="Empty means no quality skip rule.">
-                <OptionalNumInput
-                  value={settings.processing.upscale_max_px}
-                  min={512}
-                  max={8192}
-                  placeholder="no skip"
-                  onChange={value => setSetting("processing", "upscale_max_px", value)}
-                />
-                <span className="settings-unit">px</span>
+              <Row label="Skip upscale if any side is at least" hint="Empty means no quality skip rule.">
+                <div className="settings-inline">
+                  <OptionalNumInput
+                    label="Skip upscale threshold"
+                    value={settings.processing.upscale_max_px}
+                    min={512}
+                    max={8192}
+                    placeholder="no skip"
+                    onChange={value => setSetting("processing", "upscale_max_px", value)}
+                  />
+                  <span className="settings-unit">px</span>
+                </div>
               </Row>
-            </Section>
+            </Group>
 
-            <Section
-              title="Background Removal"
+            <Group
+              id="settings-bg"
+              title="Background removal"
               description="Model and mask cleanup preferences."
             >
               <Row label="Model">
                 <Select
+                  label="Background removal model"
                   value={settings.processing.rembg_model}
                   onChange={value => setSetting("processing", "rembg_model", value)}
                   wide
@@ -539,6 +546,7 @@ export default function Settings({ onThemeChange }) {
                 hint={bgDeviceOption(normalizeBgDeviceMode(settings.processing.bg_device_mode, settings.processing)).help}
               >
                 <Select
+                  label="Background removal device"
                   value={normalizeBgDeviceMode(settings.processing.bg_device_mode, settings.processing)}
                   onChange={value => setSetting("processing", "bg_device_mode", value)}
                   options={BG_DEVICE_SELECT_OPTIONS}
@@ -547,12 +555,16 @@ export default function Settings({ onThemeChange }) {
               </Row>
               <Row label="Crop padding" hint="Fraction added after crop.">
                 <Slider
+                  label="Crop padding"
                   value={settings.processing.crop_padding}
                   min={0}
                   max={0.2}
                   step={0.005}
+                  decimals={1}
+                  display={v => v * 100}
+                  parse={v => v / 100}
+                  suffix="%"
                   onChange={value => setSetting("processing", "crop_padding", value)}
-                  format={value => `${(value * 100).toFixed(1)}%`}
                 />
               </Row>
               <Row
@@ -562,6 +574,7 @@ export default function Settings({ onThemeChange }) {
                   : "Soft feathered edge that never grows past the detected outline."}
               >
                 <Select
+                  label="Edge style"
                   value={settings.processing.edge_mode || "soft"}
                   onChange={value => setSetting("processing", "edge_mode", value)}
                   options={[["soft", "Soft"], ["hard", "Hard"]]}
@@ -570,57 +583,67 @@ export default function Settings({ onThemeChange }) {
               {(settings.processing.edge_mode || "soft") === "soft" && (
                 <Row label="Edge blur radius" hint="Feather width for the soft style. 0 = off.">
                   <Slider
+                    label="Edge blur radius"
                     value={settings.processing.edge_blur}
                     min={0}
                     max={5}
                     step={0.1}
+                    decimals={1}
                     onChange={value => setSetting("processing", "edge_blur", value)}
-                    format={value => value.toFixed(1)}
                   />
                 </Row>
               )}
               <Row label="Remove edge colour fringe" hint="Replaces the old background colour left on edge pixels. About 1 s per image.">
                 <Toggle
+                  label="Remove edge colour fringe"
                   value={settings.processing.decontaminate ?? true}
                   onChange={value => setSetting("processing", "decontaminate", value)}
                 />
               </Row>
-            </Section>
+            </Group>
 
-            <Section
+            <Group
+              id="settings-guides"
               title="Guides"
               description="Optional manual guide overrides."
             >
               <Row label="Use custom guides" hint="Override config.ini.">
                 <Toggle
+                  label="Use custom guides"
                   value={!!settings.guides?.use_custom}
                   onChange={value => setSetting("guides", "use_custom", value)}
                 />
               </Row>
-              {["green", "blue", "magenta", "red"].map(zone => (
-                <div key={zone} className="settings-guide-block">
-                  <div className="settings-guide-title">{zone} guide</div>
-                  <div className="settings-guide-grid">
-                    {["top", "bottom", "left", "right"].map(position => (
-                      <label key={position} className="settings-guide-field">
-                        <span>{position}</span>
-                        <NumInput
-                          width={60}
-                          value={Number(settings.guides?.custom?.[zone]?.[position] ?? 0)}
-                          onChange={value => setSetting("guides", "custom", {
-                            ...(settings.guides?.custom || {}),
-                            [zone]: { ...(settings.guides?.custom?.[zone] || {}), [position]: value },
-                          })}
-                        />
-                      </label>
-                    ))}
+              <div className="settings-guides">
+                {["green", "blue", "magenta", "red"].map(zone => (
+                  <div key={zone} className="settings-guide-block">
+                    <div className="settings-guide-title">
+                      <span className="ui-dot" style={{ background: zoneColor(zone) }} aria-hidden="true" />
+                      {zone[0].toUpperCase() + zone.slice(1)} guide
+                    </div>
+                    <div className="settings-guide-grid">
+                      {["top", "bottom", "left", "right"].map(position => (
+                        <label key={position} className="settings-guide-field">
+                          <span>{position}</span>
+                          <NumInput
+                            width={72}
+                            label={`${zone} guide ${position}`}
+                            value={Number(settings.guides?.custom?.[zone]?.[position] ?? 0)}
+                            onChange={value => setSetting("guides", "custom", {
+                              ...(settings.guides?.custom || {}),
+                              [zone]: { ...(settings.guides?.custom?.[zone] || {}), [position]: value },
+                            })}
+                          />
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </Section>
+                ))}
+              </div>
+            </Group>
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

@@ -8,15 +8,43 @@ import Settings from "./Settings.jsx";
 import BackendBanner from "./components/BackendBanner.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { getSettings, patchSettings } from "./api.js";
+import { loadUiPrefs, useUiPref } from "./hooks/useUiPref.js";
+import {
+  Crop, FolderOpen, LayoutTemplate, Moon, PanelLeftClose, PanelLeftOpen,
+  Settings as SettingsIcon, Sparkles, Sun,
+} from "lucide-react";
 import "./index.css";
 
 const TABS = [
-  { id: "input", label: "Input", hint: "Select source folder" },
-  { id: "pipeline", label: "Process", hint: "Configure pipeline" },
-  { id: "editor", label: "Editor", hint: "Review and export" },
-  { id: "templates", label: "Templates" },
-  { id: "settings", label: "Settings" },
+  { id: "input", label: "Input", hint: "Select source folder", icon: FolderOpen },
+  { id: "pipeline", label: "Process", hint: "Configure pipeline", icon: Sparkles },
+  { id: "editor", label: "Editor", hint: "Review and export", icon: Crop },
+  { id: "templates", label: "Templates", icon: LayoutTemplate },
+  { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
+
+const NARROW_QUERY = "(max-width: 1199px)";
+
+// True below 1200px wide: the nav rail collapses to icons unless the user chose otherwise.
+function useNarrowWindow() {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches);
+  useEffect(() => {
+    const query = window.matchMedia(NARROW_QUERY);
+    const onChange = (e) => setNarrow(e.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  return narrow;
+}
+
+function BrandMark() {
+  return (
+    <svg className="app-brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <rect width="24" height="24" rx="6" fill="var(--brand)" />
+      <circle cx="12" cy="12" r="5.5" fill="none" stroke="var(--brand-ink)" strokeWidth="2" strokeDasharray="3 2.2" />
+    </svg>
+  );
+}
 
 const RECENT_LIMIT = 8;
 const THEME_STORAGE_KEY = "image-pipeline-theme";
@@ -78,6 +106,9 @@ export function Root() {
   const [screen, setScreen] = useState("input");
   const [theme, setTheme] = useState(loadStoredTheme);
   const [mountedScreens, setMountedScreens] = useState(() => new Set(["input"]));
+  const narrow = useNarrowWindow();
+  const [navPref, setNavPref] = useUiPref("nav.collapsed", null);
+  const navCollapsed = navPref ?? narrow;
   const [inputDir, setInputDir] = useState("");
   const [outputDir, setOutputDir] = useState("");
   // Output folder the Editor follows. Only updated on blur / Browse / Recent pick / run,
@@ -85,6 +116,12 @@ export function Root() {
   const [committedOutputDir, setCommittedOutputDir] = useState("");
   const [recentInputDirs, rememberInputDir, loadRecentInputDirs] = useRecentFolders("recent_input_dirs");
   const [recentOutputDirs, rememberRecentOutputDir, loadRecentOutputDirs] = useRecentFolders("recent_output_dirs");
+
+  useEffect(() => { loadUiPrefs(); }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     getSettings()
@@ -155,74 +192,83 @@ export function Root() {
   return (
     <>
     <BackendBanner />
-    <div
-      className="app-shell"
-      data-theme={theme}
-      style={{
-        display: "flex",
-        height: "100vh",
-        overflow: "hidden",
-        background: "var(--bg)",
-        color: "var(--text)",
-      }}
-    >
-      <aside className="app-sidebar">
-        <div className="app-header app-logo">
-          <div className="app-logo-mark" aria-hidden="true"><span /></div>
-          <div>
-            <div className="app-title">Cutout Studio</div>
-            <div className="app-version">Product image workflow</div>
+    <div className="app-shell" data-theme={theme}>
+      <aside className={navCollapsed ? "app-rail is-collapsed" : "app-rail"} aria-label="Main navigation">
+        <div className="app-brand">
+          <BrandMark />
+          <div className="app-brand-copy">
+            <div className="app-brand-title">Cutout Studio</div>
+            <div className="app-brand-version">v{__APP_VERSION__}</div>
           </div>
         </div>
 
-        <nav className="app-tabs">
+        <nav className="app-nav-group" aria-label="Workflow">
+          <div className="app-nav-label">Workflow</div>
           {primaryTabs.map((tab, i) => {
             const active = screen === tab.id;
-            const status = active ? "Active" : mountedScreens.has(tab.id) ? "Ready" : "Idle";
+            const state = active ? "active" : mountedScreens.has(tab.id) ? "ready" : "idle";
             return (
               <button
                 key={tab.id}
-                className={active ? "app-tab app-tab-active" : "app-tab"}
+                className={active ? "app-nav-item is-active" : "app-nav-item"}
                 onClick={() => openScreen(tab.id)}
                 aria-current={active ? "page" : undefined}
+                title={navCollapsed ? `${tab.label} - ${tab.hint}` : tab.hint}
               >
-                <span className="app-tab-meta">
-                  <span className="app-tab-step">{String(i + 1).padStart(2, "0")}</span>
-                  <span className="app-tab-status">{status}</span>
-                </span>
-                <span className="app-tab-copy">
-                  <span className="app-tab-label">{tab.label}</span>
-                  <span className="app-tab-hint">{tab.hint}</span>
-                </span>
+                <tab.icon size={16} aria-hidden="true" />
+                <span className="app-nav-text">{tab.label}</span>
+                <span className="app-nav-step">{String(i + 1).padStart(2, "0")}</span>
+                <span className={`app-nav-state is-${state}`} aria-hidden="true" />
               </button>
             );
           })}
         </nav>
 
-        <nav className="app-tabs app-tabs-secondary">
+        <nav className="app-nav-group" aria-label="Library">
+          <div className="app-nav-label">Library</div>
           {secondaryTabs.map((tab) => {
             const active = screen === tab.id;
             return (
               <button
                 key={tab.id}
-                className={active ? "app-tab app-tab-secondary app-tab-active" : "app-tab app-tab-secondary"}
+                className={active ? "app-nav-item is-active" : "app-nav-item"}
                 onClick={() => openScreen(tab.id)}
                 aria-current={active ? "page" : undefined}
+                title={navCollapsed ? tab.label : undefined}
               >
-                <span className="app-tab-label">{tab.label}</span>
+                <tab.icon size={16} aria-hidden="true" />
+                <span className="app-nav-text">{tab.label}</span>
               </button>
             );
           })}
         </nav>
 
-        <button className="app-theme-toggle" onClick={handleThemeToggle}>
-          Theme: {theme === "dark" ? "Dark" : "Light"}
-        </button>
+        <div className="app-rail-footer">
+          <button
+            className="app-nav-item"
+            onClick={handleThemeToggle}
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          >
+            {theme === "dark" ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}
+            <span className="app-nav-text">{theme === "dark" ? "Dark theme" : "Light theme"}</span>
+          </button>
+          <button
+            className="app-nav-item"
+            onClick={() => setNavPref(!navCollapsed)}
+            aria-expanded={!navCollapsed}
+            title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
+          >
+            {navCollapsed
+              ? <PanelLeftOpen size={16} aria-hidden="true" />
+              : <PanelLeftClose size={16} aria-hidden="true" />}
+            <span className="app-nav-text">Collapse</span>
+          </button>
+        </div>
       </aside>
 
       <main className="app-main">
         {mountedScreens.has("input") && (
-          <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "input" ? "flex" : "none", flexDirection: "column" }}>
+          <div className="app-screen" style={{ display: screen === "input" ? "flex" : "none" }}>
             <ErrorBoundary label="Input"><Input
               inputDir={inputDir}
               setInputDir={setInputDir}
@@ -240,7 +286,7 @@ export function Root() {
         )}
 
         {mountedScreens.has("pipeline") && (
-          <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "pipeline" ? "flex" : "none", flexDirection: "column" }}>
+          <div className="app-screen" style={{ display: screen === "pipeline" ? "flex" : "none" }}>
             <ErrorBoundary label="Process"><Pipeline
               inputDir={inputDir}
               setInputDir={setInputDir}
@@ -266,13 +312,13 @@ export function Root() {
         )}
 
         {mountedScreens.has("templates") && (
-          <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "templates" ? "flex" : "none", flexDirection: "column" }}>
-            <ErrorBoundary label="Templates"><Templates onBack={() => openScreen("pipeline")} /></ErrorBoundary>
+          <div className="app-screen" style={{ display: screen === "templates" ? "flex" : "none" }}>
+            <ErrorBoundary label="Templates"><Templates /></ErrorBoundary>
           </div>
         )}
 
         {mountedScreens.has("editor") && (
-          <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "editor" ? "flex" : "none", flexDirection: "column" }}>
+          <div className="app-screen" style={{ display: screen === "editor" ? "flex" : "none" }}>
             <ErrorBoundary label="Editor"><Editor
               key={editorKey}
               outputDir={committedOutputDir}
@@ -283,7 +329,7 @@ export function Root() {
         )}
 
         {mountedScreens.has("settings") && (
-          <div className="app-screen" style={{ flex: 1, minHeight: 0, display: screen === "settings" ? "flex" : "none", flexDirection: "column" }}>
+          <div className="app-screen" style={{ display: screen === "settings" ? "flex" : "none" }}>
             <ErrorBoundary label="Settings"><Settings onThemeChange={handleSettingsThemeChange} /></ErrorBoundary>
           </div>
         )}
