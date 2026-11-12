@@ -1,17 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { ArrowDownUp, ImagePlus, Plus, Trash2, Upload, X } from "lucide-react";
 import ConfirmModal from "./ConfirmModal.jsx";
+import PageHeader from "./components/PageHeader.jsx";
+import TemplateThumb from "./components/TemplateThumb.jsx";
+import {
+  Button, IconButton, MenuList, Popover, ResizablePanel, SearchField, SegmentedControl, TextField,
+} from "./components/ui/index.jsx";
 import { browseFile, imageUrl, templateRefUrl, getTemplates, saveTemplates } from "./api.js";
-
-const C = {
-  bg:      "var(--bg)",      panel:   "var(--panel)",   panel2:  "var(--panel2)",
-  border:  "var(--border)",  text:    "var(--text)",    dim:     "var(--dim)",
-  dim2:    "var(--dim2)",    accent:  "var(--accent)",
-  green:   "var(--green)",   blue:    "var(--accent)",
-  yellow:  "var(--yellow)",  red:     "var(--red)",     magenta: "var(--magenta)",
-};
-
-const ZONES = ["none", "green", "blue", "magenta", "red"];
-const ZONE_COLOR = { none: C.dim, green: C.green, blue: C.blue, magenta: C.magenta, red: C.red };
+import { TEMPLATE_SORTS, useTemplateList } from "./hooks/useTemplateList.js";
+import { useUiPref } from "./hooks/useUiPref.js";
+import { ZONES, zoneColor } from "./utils/zones.js";
 
 const EMPTY_TEMPLATE = { name: "", zone: "green", hint: "", ref_image: "", match: "" };
 
@@ -45,7 +43,13 @@ function fileToBase64(file) {
   });
 }
 
+function shortDate(iso) {
+  const t = Date.parse(iso || "");
+  if (!Number.isFinite(t)) return "";
+  return new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
 
+const ZONE_OPTIONS = ZONES.map(z => ({ value: z, label: z === "none" ? "None" : z[0].toUpperCase() + z.slice(1), dot: zoneColor(z) }));
 
 // ── Template editor form ──────────────────────────────────────────────────────
 
@@ -78,7 +82,6 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
     }
   }, []);
 
-  // Drag & drop handlers
   const onDragOver = e => { e.preventDefault(); setDragging(true); };
   const onDragLeave = () => setDragging(false);
   const onDrop = async e => {
@@ -88,7 +91,6 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
     const b64 = await fileToBase64(file);
     if (b64) set("ref_image", b64);
   };
-  // Click-to-upload via hidden input
   const fileInputRef = useRef(null);
   const onFileInput = async e => {
     const file = e.target.files[0];
@@ -104,119 +106,238 @@ function TemplateForm({ tpl, onSave, onCancel, onDelete, isNew }) {
 
   return (
     <div className="template-form-panel">
-      <div className="template-form-title">
-        {isNew ? "New template" : `Edit - ${tpl.name}`}
+      <div className="template-form-scroll">
+        <div className="template-form">
+          <h2 className="template-form-title">{isNew ? "New template" : tpl.name}</h2>
+
+          <Field label="Name" htmlFor="tpl-name">
+            <TextField id="tpl-name" value={form.name} onChange={e => set("name", e.target.value)}
+              placeholder="e.g. Bottle 0.5L" />
+          </Field>
+
+          <Field label="Zone">
+            <SegmentedControl label="Zone" options={ZONE_OPTIONS} value={form.zone || "none"} onChange={z => set("zone", z)} />
+          </Field>
+
+          <Field label="Hint" htmlFor="tpl-hint">
+            <TextField id="tpl-hint" value={form.hint} onChange={e => set("hint", e.target.value)}
+              placeholder="e.g. Top + bottom touch green lines" />
+          </Field>
+
+          <Field
+            label="File name match"
+            htmlFor="tpl-match"
+            help="Comma-separated words. When auto-match is on (Settings), the Editor picks this template for any photo whose file name contains one of them. Spaces, dashes, underscores and letter case are ignored."
+          >
+            <TextField id="tpl-match" value={form.match || ""} onChange={e => set("match", e.target.value)}
+              placeholder="e.g. 26 cm, 26cm plate" />
+          </Field>
+
+          <Field label="Reference image">
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={onFileInput} hidden />
+            <div
+              onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+              className={dragging ? "template-dropzone is-dragging" : "template-dropzone"}
+            >
+              {hasImage ? (
+                <div className="template-reference-preview">
+                  <img src={imgSrc} alt="Reference" className="template-reference-image"
+                    onError={e => { e.target.style.display = "none"; }} />
+                  <IconButton
+                    icon={X} label="Remove reference image" size="s" variant="secondary"
+                    className="template-reference-remove"
+                    onClick={() => set("ref_image", "")}
+                  />
+                </div>
+              ) : (
+                <div className="template-empty-upload">
+                  <ImagePlus size={20} aria-hidden="true" />
+                  <span>Drop an image here</span>
+                </div>
+              )}
+            </div>
+            <div className="template-inline-actions">
+              <Button size="s" icon={Upload} onClick={() => fileInputRef.current?.click()}>
+                {hasImage ? "Replace" : "Upload file"}
+              </Button>
+              <Button size="s" onClick={browseRef}>Browse…</Button>
+            </div>
+          </Field>
+
+          {error && <div className="template-error" role="alert">{error}</div>}
+        </div>
       </div>
 
-      <Field label="Name">
-        <input value={form.name} onChange={e => set("name", e.target.value)}
-          placeholder="e.g. Bottle 0.5L" style={inputStyle} />
-      </Field>
-
-      <Field label="Zone">
-        <div className="template-zone-row">
-          {ZONES.map(z => (
-            <button
-              key={z}
-              className={form.zone === z ? "template-zone-button template-zone-active" : "template-zone-button"}
-              onClick={() => set("zone", z)}
-              style={{ "--zone-color": ZONE_COLOR[z] }}
-            >
-              {z}
-            </button>
-          ))}
-        </div>
-      </Field>
-
-      <Field label="Hint">
-        <input value={form.hint} onChange={e => set("hint", e.target.value)}
-          placeholder="e.g. Top + bottom touch green lines" style={inputStyle} />
-      </Field>
-
-      <Field label="File name match">
-        <input value={form.match || ""} onChange={e => set("match", e.target.value)}
-          placeholder="e.g. 26 cm, 26cm plate" style={inputStyle} />
-        <div className="template-field-help">
-          Comma-separated words. When auto-match is on (Settings), the Editor picks this
-          template for any photo whose file name contains one of them. Spaces, dashes,
-          underscores and letter case are ignored.
-        </div>
-      </Field>
-
-      <Field label="Reference image">
-        <input ref={fileInputRef} type="file" accept="image/*"
-          onChange={onFileInput} style={{ display: "none" }} />
-
-        {/* Drop zone */}
-        <div
-          onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-          className={dragging ? "template-dropzone template-dropzone-active" : "template-dropzone"}
-          style={{ marginBottom: hasImage ? 8 : 0 }}
-        >
-          {hasImage ? (
-            <div className="template-reference-preview">
-              <img src={imgSrc} alt="reference"
-                className="template-reference-image"
-                onError={e => { e.target.style.display = "none"; }} />
-              <button
-                onClick={() => set("ref_image", "")}
-                className="template-reference-remove"
-              >
-                ×
-              </button>
-            </div>
-          ) : (
-            <div className="template-empty-upload">
-              <div>Drop image here</div>
-              <div className="template-upload-actions">
-                <button className="template-btn template-btn-secondary" onClick={() => fileInputRef.current?.click()}>
-                  Upload file
-                </button>
-                <button className="template-btn template-btn-secondary" onClick={browseRef}>
-                  Browse...
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-        {hasImage && (
-          <div className="template-inline-actions">
-            <button className="template-btn template-btn-secondary" onClick={() => fileInputRef.current?.click()}>
-              Replace
-            </button>
-            <button className="template-btn template-btn-secondary" onClick={browseRef}>Browse...</button>
-          </div>
-        )}
-      </Field>
-
-      {error && <div className="template-error">{error}</div>}
-
       <div className="template-form-actions">
-        <button className="template-btn template-btn-primary" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save template"}
-        </button>
-        <button
-          className="template-btn template-btn-secondary"
-          onClick={onCancel}
-        >
-          Cancel
-        </button>
         {!isNew && onDelete && (
-          <button
-            className="template-btn template-btn-danger"
-            onClick={onDelete}
-          >
-            Delete
-          </button>
+          <Button variant="danger" icon={Trash2} onClick={onDelete}>Delete</Button>
         )}
+        <span className="template-form-spacer" />
+        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving…" : "Save template"}
+        </Button>
       </div>
     </div>
   );
 }
 
+// ── Template list ─────────────────────────────────────────────────────────────
+
+function ZoneFilter({ zones, onChange, counts }) {
+  const toggle = (z) => onChange(zones.includes(z) ? zones.filter(x => x !== z) : [...zones, z]);
+  return (
+    <div className="template-zone-filter" role="group" aria-label="Filter by zone">
+      {ZONES.filter(z => z !== "none").map(z => (
+        <button
+          key={z}
+          type="button"
+          className={zones.includes(z) ? "template-zone-chip is-on" : "template-zone-chip"}
+          aria-pressed={zones.includes(z)}
+          title={`${z} zone`}
+          onClick={() => toggle(z)}
+        >
+          <span className="ui-dot" style={{ background: zoneColor(z) }} aria-hidden="true" />
+          <span className="template-zone-count">{counts[z] || 0}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TemplateList({
+  templates, loading, editing, onSelect, onNew, onDelete,
+}) {
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useUiPref("templates.sort", "name-asc");
+  const [zones, setZones] = useState([]);
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef(null);
+  const listRef = useRef(null);
+
+  const total = Object.keys(templates).length;
+  const rows = useTemplateList(templates, { query, sort, zones });
+  const counts = useMemo(() => {
+    const c = {};
+    Object.values(templates).forEach(t => { const z = t?.zone || "none"; c[z] = (c[z] || 0) + 1; });
+    return c;
+  }, [templates]);
+  const sortLabel = TEMPLATE_SORTS.find(s => s.value === sort)?.label || "Sort";
+  const filtered = query.trim() !== "" || zones.length > 0;
+  const showDate = sort === "modified";
+
+  // Keep the selected row in view (e.g. after saving, or when sorting reorders).
+  useEffect(() => {
+    if (!editing || editing === "new") return;
+    listRef.current?.querySelector(".template-row.is-active")?.scrollIntoView({ block: "nearest" });
+  }, [editing, sort]);
+
+  const onListKeyDown = (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    const buttons = [...listRef.current.querySelectorAll(".template-row-main")];
+    if (!buttons.length) return;
+    const at = buttons.indexOf(document.activeElement);
+    let next = at;
+    if (e.key === "ArrowDown") next = Math.min(buttons.length - 1, at + 1);
+    else if (e.key === "ArrowUp") next = Math.max(0, at - 1);
+    else if (e.key === "Home") next = 0;
+    else next = buttons.length - 1;
+    e.preventDefault();
+    buttons[next]?.focus();
+  };
+
+  return (
+    <>
+      <div className="template-list-top">
+        <div className="template-list-title">
+          <span>Templates</span>
+          <span className="ui-badge">{total}</span>
+          <span className="template-list-spacer" />
+          <IconButton icon={Plus} label="New template" size="s" onClick={onNew} />
+        </div>
+        <div className="template-list-tools">
+          <SearchField value={query} onChange={setQuery} placeholder="Search templates" />
+          <IconButton
+            ref={sortRef}
+            icon={ArrowDownUp}
+            variant="secondary"
+            label={`Sort: ${sortLabel}`}
+            aria-haspopup="listbox"
+            aria-expanded={sortOpen}
+            onClick={() => setSortOpen(o => !o)}
+          />
+          <Popover open={sortOpen} onClose={() => setSortOpen(false)} anchorRef={sortRef} width={200} align="end" label="Sort templates">
+            <MenuList
+              items={TEMPLATE_SORTS}
+              value={sort}
+              onSelect={(v) => { setSort(v); setSortOpen(false); }}
+            />
+          </Popover>
+        </div>
+        <div className="template-list-meta">
+          <ZoneFilter zones={zones} onChange={setZones} counts={counts} />
+          <span className="template-list-count" aria-live="polite">
+            {filtered ? `${rows.length} of ${total}` : sortLabel}
+          </span>
+        </div>
+      </div>
+
+      <div className="template-list-scroll" ref={listRef} onKeyDown={onListKeyDown}>
+        {loading ? (
+          <div className="template-list-message">Loading…</div>
+        ) : total === 0 ? (
+          <div className="template-empty-state">
+            <strong>No templates yet</strong>
+            <span>Create a placement preset for products you place the same way every time.</span>
+            <Button variant="primary" icon={Plus} onClick={onNew}>New template</Button>
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="template-empty-state">
+            <strong>No templates match</strong>
+            <span>Try a different word, or clear the filters.</span>
+            <Button onClick={() => { setQuery(""); setZones([]); }}>Clear filters</Button>
+          </div>
+        ) : (
+          <ul className="template-rows">
+            {rows.map(({ name, tpl }) => (
+              <li key={name} className={editing === name ? "template-row is-active" : "template-row"}>
+                <button
+                  type="button"
+                  className="template-row-main"
+                  aria-current={editing === name ? "true" : undefined}
+                  onClick={() => onSelect(name)}
+                >
+                  <span className="ui-dot" style={{ background: zoneColor(tpl.zone) }} aria-hidden="true" />
+                  <span className="template-row-text">
+                    <span className="template-row-name">{name}</span>
+                    <span className="template-row-sub">
+                      {tpl.match || tpl.hint || `${tpl.zone || "no"} zone`}
+                    </span>
+                  </span>
+                  {showDate && shortDate(tpl.updated_at || tpl.created_at) ? (
+                    <span className="template-row-date">{shortDate(tpl.updated_at || tpl.created_at)}</span>
+                  ) : null}
+                  {tpl.ref_image ? <TemplateThumb refImage={tpl.ref_image} size={32} /> : <span className="template-thumb is-empty" aria-hidden="true" />}
+                </button>
+                <IconButton
+                  icon={Trash2}
+                  label={`Delete ${name}`}
+                  size="s"
+                  className="template-row-delete"
+                  onClick={() => onDelete(name)}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function Templates({ onBack }) {
+export default function Templates() {
   const [templates, setTemplates] = useState({});
   const [editing, setEditing] = useState(null);   // null | "new" | templateName
   const [loading, setLoading] = useState(true);
@@ -243,6 +364,11 @@ export default function Templates({ onBack }) {
     return () => clearTimeout(timeout);
   }, [load]);
 
+  const flash = (message) => {
+    setStatus(message);
+    setTimeout(() => setStatus(""), 2500);
+  };
+
   const askOverwrite = (name) => new Promise((resolve) => {
     overwriteResolverRef.current = resolve;
     setConfirmOverwrite(name);
@@ -262,19 +388,24 @@ export default function Templates({ onBack }) {
       if (!await askOverwrite(key)) return false;
     }
     const updated = { ...templates };
+    const previous = previousKey ? templates[previousKey] : null;
     if (previousKey && previousKey !== key) delete updated[previousKey];
-    updated[key] = { zone: form.zone, hint: form.hint, ref_image: form.ref_image, match: (form.match || "").trim() };
+    const now = new Date().toISOString();
+    updated[key] = {
+      zone: form.zone,
+      hint: form.hint,
+      ref_image: form.ref_image,
+      match: (form.match || "").trim(),
+      // Templates saved before timestamps existed keep an empty created_at.
+      created_at: previous ? (previous.created_at || "") : now,
+      updated_at: now,
+    };
     await saveTemplates(updated);
     window.dispatchEvent(new CustomEvent("cutout-templates-saved"));
     setTemplates(updated);
     setEditing(null);
-    setStatus(previousKey && previousKey !== key ? `Saved "${key}" (renamed from "${previousKey}")` : `Saved "${key}"`);
-    setTimeout(() => setStatus(""), 2000);
+    flash(previousKey && previousKey !== key ? `Saved "${key}" (renamed from "${previousKey}")` : `Saved "${key}"`);
     return true;
-  };
-
-  const handleDelete = async (name) => {
-    setConfirmDelete(name);
   };
 
   const confirmDeleteTemplate = async () => {
@@ -291,9 +422,8 @@ export default function Templates({ onBack }) {
     window.dispatchEvent(new CustomEvent("cutout-templates-saved"));
     setTemplates(updated);
     setEditing(null);
-    setStatus(`Deleted "${confirmDelete}"`);
+    flash(`Deleted "${confirmDelete}"`);
     setConfirmDelete(null);
-    setTimeout(() => setStatus(""), 2000);
   };
 
   const editingTemplate = editing === "new"
@@ -301,117 +431,40 @@ export default function Templates({ onBack }) {
     : editing
       ? { name: editing, ...(templates[editing] || {}) }
       : null;
-  const templateEntries = Object.entries(templates);
-  const templateCount = templateEntries.length;
 
   return (
     <div className="templates-screen">
-      <style>{`
-        ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
-        ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
-        ::placeholder{color:var(--dim2);opacity:0.7}
-        [data-theme="dark"] select option{background:hsl(222,20%,16%);color:hsl(210,40%,95%)}
-        [data-theme="light"] select option{background:hsl(220,14%,94%);color:hsl(224,20%,15%)}
-      `}</style>
-
-      <div className="templates-header">
-        <div className="templates-heading">
-          {onBack && (
-            <button className="template-back-button" onClick={onBack}>
-              ← Pipeline
-            </button>
-          )}
-          <div>
-            <h1>Templates · Layouts</h1>
-            <p>Manage placement presets and reusable output layouts.</p>
-          </div>
-        </div>
-        <div className="templates-header-actions">
-          {status && (
-            <div className="template-status-pill">{status}</div>
-          )}
-          <button className="template-btn template-btn-primary" onClick={() => setEditing("new")}>
-            New Template
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Templates"
+        subtitle="Placement presets and file-name matching"
+        actions={(
+          <>
+            {status && <span className="template-status" role="status">{status}</span>}
+            <Button variant="primary" icon={Plus} onClick={() => setEditing("new")}>New template</Button>
+          </>
+        )}
+      />
 
       <div className="templates-body">
+        <ResizablePanel
+          prefKey="templates.list"
+          side="left"
+          defaultWidth={340}
+          min={260}
+          max={520}
+          className="templates-list-pane"
+          aria-label="Template list"
+        >
+          <TemplateList
+            templates={templates}
+            loading={loading}
+            editing={editing}
+            onSelect={setEditing}
+            onNew={() => setEditing("new")}
+            onDelete={setConfirmDelete}
+          />
+        </ResizablePanel>
 
-        {/* Template list */}
-        <div className="templates-list-pane">
-          <div className="templates-list-header">
-            <div>
-              <span>Templates</span>
-              <strong>{templateCount}</strong>
-            </div>
-            <button className="template-btn template-btn-secondary template-btn-compact" onClick={() => setEditing("new")}>
-              + New
-            </button>
-          </div>
-
-          {loading ? (
-            <div className="template-list-message">Loading...</div>
-          ) : templateCount === 0 ? (
-            <div className="template-empty-state">
-              <strong>No templates yet</strong>
-              <span>Create a placement preset when you need repeatable layouts.</span>
-              <button className="template-btn template-btn-primary" onClick={() => setEditing("new")}>
-                Create Template
-              </button>
-            </div>
-          ) : (
-            <div className="template-card-list">
-              {templateEntries.map(([name, tpl]) => (
-                <div
-                  key={name}
-                  className={editing === name ? "template-card template-card-active" : "template-card"}
-                  onClick={() => setEditing(name)}
-                >
-                  <div className="template-card-main">
-                    <div className="template-card-title-row">
-                      <div
-                        className="template-zone-dot"
-                        style={{ background: ZONE_COLOR[tpl.zone] || C.dim }}
-                      />
-                      <span>{name}</span>
-                    </div>
-                    <div className="template-card-meta">
-                      <span>{tpl.zone || "none"} zone</span>
-                      <span>{tpl.ref_image ? "reference image" : "no reference"}</span>
-                    </div>
-                    {tpl.match && (
-                      <div className="template-card-hint">Matches: {tpl.match}</div>
-                    )}
-                    {tpl.hint && (
-                      <div className="template-card-hint">{tpl.hint}</div>
-                    )}
-                  </div>
-                  <div className="template-card-side">
-                    {tpl.ref_image && (
-                      <div className="template-card-thumb">
-                        <img
-                          src={templateRefUrl(tpl.ref_image)}
-                          alt=""
-                          onError={e => { e.target.style.display = "none"; }}
-                        />
-                      </div>
-                    )}
-                    <button
-                      className="template-delete-icon"
-                      onClick={e => { e.stopPropagation(); handleDelete(name); }}
-                      aria-label={`Delete ${name}`}
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Edit pane */}
         <div className="templates-edit-pane">
           {editingTemplate ? (
             <TemplateForm
@@ -420,16 +473,17 @@ export default function Templates({ onBack }) {
               isNew={editing === "new"}
               onSave={handleSave}
               onCancel={() => setEditing(null)}
-              onDelete={editing && editing !== "new" ? () => handleDelete(editing) : null}
+              onDelete={editing && editing !== "new" ? () => setConfirmDelete(editing) : null}
             />
           ) : (
             <div className="template-editor-empty">
               <strong>Select a template</strong>
-              <span>Pick a saved layout from the list, or create a new reusable placement preset.</span>
+              <span>Pick one from the list to edit it, or create a new placement preset.</span>
             </div>
           )}
         </div>
       </div>
+
       <ConfirmModal
         open={Boolean(confirmDelete)}
         title="Delete template?"
@@ -453,20 +507,12 @@ export default function Templates({ onBack }) {
   );
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function Field({ label, children }) {
+function Field({ label, htmlFor, help, children }) {
   return (
     <div className="template-field">
-      <div className="template-field-label">{label}</div>
+      <label className="template-field-label" htmlFor={htmlFor}>{label}</label>
       {children}
+      {help ? <p className="ui-hint">{help}</p> : null}
     </div>
   );
 }
-
-const inputStyle = {
-  width: "100%", background: "var(--field-bg)", color: C.text,
-  border: `1px solid ${C.border}`, borderRadius: 8,
-  padding: "7px 9px", fontSize: 11, fontFamily: "inherit",
-  outline: "none", boxSizing: "border-box",
-};

@@ -269,11 +269,11 @@ export function Popover({
 
   useLayoutEffect(() => {
     if (!open) return undefined;
-    const frame = requestAnimationFrame(place);
+    const timer = setTimeout(place, 0);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => {
-      cancelAnimationFrame(frame);
+      clearTimeout(timer);
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };

@@ -741,6 +741,10 @@ class TemplateEntry(BaseModel):
     ref_image: str = ""
     # Comma-separated file-name keywords for the Editor's template auto-match.
     match:     str = ""
+    # ISO-8601 timestamps set by the Templates screen. Empty for templates saved
+    # before these fields existed; the UI sorts those after dated ones.
+    created_at: str = ""
+    updated_at: str = ""
 
 class TemplatesPayload(BaseModel):
     templates: dict[str, TemplateEntry]

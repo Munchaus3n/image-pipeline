@@ -313,7 +313,7 @@ export function Root() {
 
         {mountedScreens.has("templates") && (
           <div className="app-screen" style={{ display: screen === "templates" ? "flex" : "none" }}>
-            <ErrorBoundary label="Templates"><Templates onBack={() => openScreen("pipeline")} /></ErrorBoundary>
+            <ErrorBoundary label="Templates"><Templates /></ErrorBoundary>
           </div>
         )}
 
