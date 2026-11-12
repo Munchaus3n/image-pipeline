@@ -180,11 +180,13 @@ export function NumberField({
   );
 }
 
-/* Range slider with an editable value next to it. */
+/* Range slider with an editable value next to it. `onTypedChange` (optional) handles
+   values typed into the number box, e.g. to take an undo snapshot first. */
 export function Slider({
-  value, onChange, min, max, step = 0.01, decimals = 2, display, parse,
-  label, suffix, onPointerDown, className,
+  value, onChange, onTypedChange, min, max, step = 0.01, decimals = 2, display, parse,
+  label, suffix, onPointerDown, disabled, className,
 }) {
+  const typed = onTypedChange || onChange;
   return (
     <div className={cx("ui-slider", className)}>
       <input
@@ -193,15 +195,19 @@ export function Slider({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         aria-label={label}
         onPointerDown={onPointerDown}
         onChange={(e) => onChange(parseFloat(e.target.value))}
       />
       <NumberField
         value={display ? display(value) : value}
-        onChange={(v) => onChange(parse ? parse(v) : v)}
+        onChange={(v) => typed(parse ? parse(v) : v)}
+        min={display ? display(min) : min}
+        max={display ? display(max) : max}
         decimals={decimals}
         suffix={suffix}
+        disabled={disabled}
         aria-label={label ? `${label} value` : undefined}
       />
     </div>

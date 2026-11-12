@@ -5,7 +5,18 @@ KNOWN LIMITATIONS (web build):
 - /api/browse uses tkinter; desktop Electron should replace this with native dialog APIs.
 */
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import {
+  AlignHorizontalJustifyCenter, AlignVerticalJustifyCenter, Check, FolderOpen, History, ImageOff,
+  ImagePlus, Keyboard, Maximize, PanelRightClose, PanelRightOpen, RotateCcw, Scan, Trash2, TriangleAlert,
+} from "lucide-react";
 import ConfirmModal from "./ConfirmModal.jsx";
+import TemplatePicker from "./components/TemplatePicker.jsx";
+import {
+  Button, Checkbox, IconButton, Popover, ResizablePanel, SegmentedControl, Section, Slider,
+  StatusBar, Switch, TextField,
+} from "./components/ui/index.jsx";
+import { useUiPref } from "./hooks/useUiPref.js";
+import { zoneColor } from "./utils/zones.js";
 import { compactForMatch, naturalParts, templateKeywords } from "./utils/text.js";
 import {
   getConfig, getSource, getImages,
@@ -21,14 +32,18 @@ import PageHeader from "./components/PageHeader.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // CANVAS_SIZE: logical composition size (matches pipeline output, e.g. 1440)
-// DS: internal canvas pixel buffer — fixed at 720, never changes
-// zoom: CSS scale applied to the canvas element for view zoom
+// DS: logical preview size. Drawing and hit-testing always use DS units; the pixel
+//     buffer is DS * canvasPixelScale so the canvas stays sharp at the size it is shown.
+// zoom: multiplier on the "Fit" size (1 = fills the viewport)
 let CANVAS_SIZE = 1440;  // mutable module var — kept for non-React drawing functions
 const DS = 720;
-const DISPLAY_ZOOM_MULTIPLIER = 0.74;
+// View sizing: zoom 1 ("Fit") fills the canvas viewport minus VIEWPORT_PAD on each side.
+const VIEWPORT_PAD = 24;
+const FIT_MIN_PX = 240;
+const FIT_FALLBACK_PX = 533; // until the viewport has been measured
+const MAX_PIXEL_SCALE = 3;   // preview buffer is at most 3x DS (2160px)
 const scaleFactor = () => DS / CANVAS_SIZE;
-// View zoom range. The preview buffer stays at DS (720px) for speed, so high
-// zoom is softer on screen — it never changes the saved image.
+// View zoom range. It only changes the preview, never the saved image.
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 4.0;
 const ZOOM_WHEEL_STEP = 1.1;
@@ -50,17 +65,24 @@ function isTextEntryTarget(target) {
   return tagName === "input" || tagName === "select" || tagName === "textarea" || Boolean(target?.isContentEditable);
 }
 
+const SHORTCUTS = [
+  ["Move product", "Drag"],
+  ["Resize product", "Scroll on canvas"],
+  ["Rotate product", "Ctrl + Scroll"],
+  ["Zoom view", "Alt + Scroll"],
+  ["Pan view", "Space + drag"],
+  ["Nudge 1 px / 10 px", "Arrows / Shift + Arrows"],
+  ["Undo", "Ctrl + Z"],
+  ["Save and next", "Enter"],
+  ["Skip", "S"],
+  ["Previous", "P"],
+  ["Remove item", "Delete"],
+];
+
 const SINGLE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/tiff,image/avif,.png,.jpg,.jpeg,.webp,.tif,.tiff,.avif";
 const SUPPORTED_SINGLE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/tiff", "image/avif"]);
 const SUPPORTED_SINGLE_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "tif", "tiff", "avif"]);
 const DEFAULT_THUMBNAIL_SIZE = 400;
-
-const C = {
-  bg:"var(--bg)", panel:"var(--panel)", panel2:"var(--panel2)",
-  border:"var(--border)", text:"var(--text)", dim:"var(--dim)", dim2:"var(--dim2)",
-  green:"var(--green)", blue:"var(--accent)", yellow:"var(--yellow)",
-  red:"var(--red)", magenta:"var(--magenta)",
-};
 
 function normalizePathKey(path = "") {
   return String(path || "")
@@ -435,72 +457,17 @@ function RefImage({ src }) {
 
   if (!src) return null;
   return (
-    <div style={{
-      borderRadius:4, overflow:"hidden", marginBottom:2,
-      border:`1px solid ${C.border}`,
-      background:"color-mix(in srgb,var(--accent) 4%,transparent)",
-    }}>
+    <figure className="editor-ref">
       {err ? (
-        <div style={{
-          height:60, display:"flex", flexDirection:"column",
-          alignItems:"center", justifyContent:"center", gap:4,
-          color:C.dim, fontSize:9, fontFamily:"JetBrains Mono",
-          background:"color-mix(in srgb,var(--border) 30%,transparent)",
-        }}>
-          <span style={{ fontSize:16, opacity:0.4 }}>🖼</span>
-          <span>reference image not found</span>
+        <div className="editor-ref-missing">
+          <ImageOff size={18} aria-hidden="true" />
+          <span>Reference image not found</span>
         </div>
       ) : (
-        <img
-          src={src}
-          alt="reference"
-          style={{ width:"100%", display:"block", objectFit:"contain", maxHeight:110 }}
-          onError={() => setErr(true)}
-        />
+        <img src={src} alt="Reference" onError={() => setErr(true)} />
       )}
-      <div style={{ fontSize:9, color:C.dim, padding:"2px 6px", fontFamily:"JetBrains Mono" }}>reference</div>
-    </div>
-  );
-}
-
-function CollSection({ label, defaultOpen = true, children }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className="editor-tool-section">
-      <button
-        type="button"
-        className="ed-btn editor-tool-toggle"
-        onClick={() => setOpen(v => !v)}
-        >
-        <div className="editor-tool-title">
-          <span>{label}</span>
-        </div>
-        <svg
-          width="10" height="10" viewBox="0 0 10 10" fill="none"
-          className="editor-tool-chevron"
-          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
-        >
-          <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-        </svg>
-      </button>
-      {open && (
-        <div className="editor-tool-content">
-          {children}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function Btn({ children, onClick, style={}, className = "" }) {
-  return (
-    <button type="button" className={`ed-btn editor-mini-button ${className}`.trim()} onClick={onClick} style={{
-      background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-      borderRadius:8, padding:"7px 8px", fontSize:11, cursor:"pointer",
-      width:"100%", textAlign:"left", fontFamily:"inherit",
-      transition:"background 0.12s, color 0.12s",
-      ...style,
-    }}>{children}</button>
+      <figcaption>Reference</figcaption>
+    </figure>
   );
 }
 
@@ -581,6 +548,34 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
 
   // Phase 4: canvas view zoom (CSS scale, does not affect composition output)
   const [zoom, setZoom] = useState(1.0);
+  const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
+  const [toolsCollapsed, setToolsCollapsed] = useUiPref("editor.toolsCollapsed", false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const activityButtonRef = useRef(null);
+  const shortcutsRef = useRef(null);
+
+  // Zoom 1 ("Fit") fills the viewport and follows window resizing; other zooms scale that.
+  const fitPx = viewportSize.w > 0 && viewportSize.h > 0
+    ? Math.max(FIT_MIN_PX, Math.floor(Math.min(viewportSize.w, viewportSize.h) - VIEWPORT_PAD * 2))
+    : FIT_FALLBACK_PX;
+  const canvasCssPx = Math.round(fitPx * zoom);
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  const canvasPixelScale = Math.min(MAX_PIXEL_SCALE, Math.max(1, Math.ceil((canvasCssPx * devicePixelRatio / DS) * 2) / 2));
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      // offsetWidth/Height include padding and scrollbars, so the fit size does not
+      // jump when zooming in makes the viewport scroll. Hidden screens report 0: ignore.
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      if (w > 0 && h > 0) setViewportSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const sel = items.find(it => it.id === selId) ?? null;
   itemsRef.current = items;
@@ -1241,6 +1236,9 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     if (!canvas || Object.keys(guides).length === 0) return;
     const ctx = canvas.getContext("2d");
     const S   = scaleFactor();
+    // Draw in DS units whatever the pixel buffer size is.
+    const bufferScale = canvas.width / DS;
+    ctx.setTransform(bufferScale, 0, 0, bufferScale, 0, 0);
     ctx.clearRect(0, 0, DS, DS);
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, DS, DS);
@@ -1342,7 +1340,7 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     }
 
     ctx.setLineDash([]);
-  }, [items, selId, sel, guides, guideOpacity, canvasBgColor, activeSnapZone, showRefOnCanvas, refOpacity, refCanvasImage]);
+  }, [items, selId, sel, guides, guideOpacity, canvasBgColor, activeSnapZone, showRefOnCanvas, refOpacity, refCanvasImage, canvasPixelScale]);
 
   // ── View zoom ─────────────────────────────────────────────────────────────
   // Zoom so the canvas point under (clientX, clientY) stays under it; without a
@@ -1482,8 +1480,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   // ── Mouse helpers ─────────────────────────────────────────────────────────
   const toCanvasCoords = (clientX, clientY) => {
     const rect = canvasRef.current.getBoundingClientRect();
-    const rx = canvasRef.current.width  / rect.width;
-    const ry = canvasRef.current.height / rect.height;
+    const rx = DS / rect.width;
+    const ry = DS / rect.height;
     return {
       mx: (clientX - rect.left) * rx,
       my: (clientY - rect.top)  * ry,
@@ -1846,6 +1844,8 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     const isEditingText = isTextEntryTarget(e.target);
     if (e.key === "Enter") {
       if (isEditingText || saveInFlightRef.current) return;
+      // Enter on a focused button, switch or option activates that control instead.
+      if (e.target?.closest?.("button, a, [role='switch'], [role='radio'], [role='option'], [role='separator']")) return;
       e.preventDefault();
       if (e.repeat) return; // holding Enter must not save the following images unseen
       doSave();
@@ -1952,18 +1952,18 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   }
 
   const snapBtns = [
-    { lbl:"G", zone:"green",   col:C.green   },
-    { lbl:"B", zone:"blue",    col:C.blue    },
-    { lbl:"M", zone:"magenta", col:C.magenta },
-    { lbl:"R", zone:"red",     col:C.red     },
+    { lbl:"Green",   zone:"green"   },
+    { lbl:"Blue",    zone:"blue"    },
+    { lbl:"Magenta", zone:"magenta" },
+    { lbl:"Red",     zone:"red"     },
   ];
 
   const zoomPresets = [
+    { label:"50%",  value:0.5  },
     { label:"75%",  value:0.75 },
-    { label:"100%", value:1.0  },
+    { label:"Fit",  value:1.0  },
     { label:"150%", value:1.5  },
     { label:"200%", value:2.0  },
-    { label:"300%", value:3.0  },
     { label:"400%", value:4.0  },
   ];
   const zoomIsPreset = zoomPresets.some(p => p.value === zoom);
@@ -1977,11 +1977,6 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
   const selIsEnlarged = selEnlargement > ENLARGE_WARN_THRESHOLD;
   const otherEnlargedCount = enlargedItems.filter(it => it.id !== selId).length;
   const canvasCursor = panMode === "panning" ? "grabbing" : panMode === "ready" ? "grab" : "crosshair";
-  const displayZoom = zoom * DISPLAY_ZOOM_MULTIPLIER;
-  const canvasDisplayPixels = Math.round(DS * displayZoom);
-  const canvasDisplaySize = zoom === 1.0
-    ? `min(${canvasDisplayPixels}px, calc(100vh - 156px), calc(100% - 12px))`
-    : `${canvasDisplayPixels}px`;
   const canGoPrevious = !isSingleImageMode && (queue.length ? queueIdx > 0 : finishedQueue.length > 0);
   const queueChip = isSingleImageMode
     ? "single"
@@ -1991,8 +1986,11 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
     : queue[queueIdx] ? imageQueueLabel(queue[queueIdx], srcFolder) : (srcLabel || "No image loaded");
   const singleSavesWithDialog = canSaveWithDialog();
   const saveButtonLabel = saved
-    ? isSingleImageMode && !singleSavesWithDialog ? "Downloaded!" : "Saved!"
-    : isSingleImageMode ? (singleSavesWithDialog ? "Save…" : "Download") : "Save & Next";
+    ? isSingleImageMode && !singleSavesWithDialog ? "Downloaded" : "Saved"
+    : isSingleImageMode ? (singleSavesWithDialog ? "Save…" : "Download") : "Save & next";
+
+  const statusLine = String(statusHistory[0]?.message || status || "").split("\n")[0];
+  const zoomOptions = zoomPresets.map(({ label, value }) => ({ value, label: value === 1.0 ? "Fit" : label }));
 
   return (
     <>
@@ -2002,15 +2000,6 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
         onKeyDown={onKeyDown}
         className="editor-root"
       >
-      <style>{`
-        ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent}
-        ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
-        .ed-btn:active{transform:scale(0.98)}
-        .editor-root select,.editor-root input{outline:none} input[type=range]{accent-color:var(--green)}
-        input[type=checkbox]{accent-color:var(--accent)}
-        [data-theme="dark"] select option{background:hsl(222,20%,16%);color:hsl(210,40%,95%)}
-        [data-theme="light"] select option{background:hsl(220,14%,94%);color:hsl(224,20%,15%)}
-      `}</style>
       <input
         ref={imageFileInputRef}
         className="editor-single-file-input"
@@ -2021,29 +2010,30 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
       />
 
       <PageHeader
-        title={"EDITOR \u00b7 PLACE & SAVE"}
-        subtitle="Review, place, and export processed images."
+        title="Editor"
+        subtitle="Place products on the canvas and export"
         className="editor-app-header"
-        actionsClassName="editor-topbar-actions"
         actions={(
         <>
           {!isSingleImageMode && (
-            <button type="button" className="ed-btn editor-action-secondary" onClick={goPrevious} disabled={!canGoPrevious} title="Back to the previous image to fix and save it again">
-              <span>Previous</span>
-              <kbd>P</kbd>
-            </button>
+            <Button onClick={goPrevious} disabled={!canGoPrevious} title="Back to the previous image to fix and save it again">
+              Previous <kbd className="ui-kbd">P</kbd>
+            </Button>
           )}
           {!isSingleImageMode && (
-            <button type="button" className="ed-btn editor-action-secondary" onClick={doSkip}>
-              <span>Skip</span>
-              <kbd>S</kbd>
-            </button>
+            <Button onClick={doSkip}>
+              Skip <kbd className="ui-kbd">S</kbd>
+            </Button>
           )}
-          <span className="editor-queue-chip">{queueChip}</span>
-          <button type="button" className={saved ? "ed-btn editor-action-primary editor-action-saved" : "ed-btn editor-action-primary"} onClick={doSave}>
-            <span>{saveButtonLabel}</span>
-            <kbd>↵</kbd>
-          </button>
+          <span className="ui-badge editor-queue-chip" title="Position in the queue">{queueChip}</span>
+          <Button variant="primary" icon={saved ? Check : undefined} onClick={doSave}>
+            {saveButtonLabel} <kbd className="ui-kbd">↵</kbd>
+          </Button>
+          <IconButton
+            icon={toolsCollapsed ? PanelRightOpen : PanelRightClose}
+            label={toolsCollapsed ? "Show tools panel" : "Hide tools panel"}
+            onClick={() => setToolsCollapsed(!toolsCollapsed)}
+          />
         </>
         )}
       />
@@ -2061,66 +2051,315 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
           onDrop={onDrop}
         >
           {items.length ? (
-            <div className="editor-canvas-frame" style={{ width: canvasDisplaySize, height: canvasDisplaySize }}>
+            <div className="editor-canvas-frame" style={{ width: canvasCssPx, height: canvasCssPx }}>
               <div className="editor-artboard" style={{ background: canvasBgColor }}>
                 <canvas
-                  ref={canvasRef} width={DS} height={DS}
+                  ref={canvasRef} width={DS * canvasPixelScale} height={DS * canvasPixelScale}
                   onMouseDown={onMouseDown}
-                  style={{ cursor: canvasCursor, display:"block" }}
+                  style={{ cursor: canvasCursor, display:"block", width:"100%", height:"100%" }}
                 />
               </div>
             </div>
           ) : (
             <button
               type="button"
-              className={dropActive ? "ed-btn editor-empty-dropzone is-dragging" : "ed-btn editor-empty-dropzone"}
+              className={dropActive ? "editor-empty-dropzone is-dragging" : "editor-empty-dropzone"}
               onClick={browseImages}
             >
-              <span className="editor-empty-dropzone-icon">＋</span>
+              <ImagePlus size={28} aria-hidden="true" />
               <strong>Drop images or folders here to edit</strong>
               <span>Several at once go straight into the queue. PNG, JPG, WebP, TIFF, or AVIF.</span>
             </button>
           )}
         </div>
 
-        <div className="editor-file-status" title={currentFileLabel}>
-          <span>Current file</span>
-          <strong>{currentFileLabel}</strong>
-        </div>
+        <StatusBar
+          left={(
+            <>
+              <span className="editor-status-file" title={currentFileLabel}>{currentFileLabel}</span>
+              {statusLine ? <span className="editor-status-message" title={statusLine}>{statusLine}</span> : null}
+            </>
+          )}
+          right={(
+            <>
+              <IconButton
+                ref={activityButtonRef}
+                icon={History}
+                label="Activity history"
+                size="s"
+                aria-expanded={historyOpen}
+                onClick={() => { setShortcutsOpen(false); setHistoryOpen(o => !o); }}
+              />
+              <IconButton
+                ref={shortcutsRef}
+                icon={Keyboard}
+                label="Keyboard and mouse shortcuts"
+                size="s"
+                aria-expanded={shortcutsOpen}
+                onClick={() => { setHistoryOpen(false); setShortcutsOpen(o => !o); }}
+              />
+              {!zoomIsPreset && (
+                <span className="ui-badge" title="Current zoom (Alt+Scroll)">{Math.round(zoom * 100)}%</span>
+              )}
+              <SegmentedControl
+                size="s"
+                label="Zoom"
+                options={zoomOptions}
+                value={zoomIsPreset ? zoom : null}
+                onChange={(value) => zoomTo(value)}
+              />
+            </>
+          )}
+        />
 
-        {/* ── Footer bar ── */}
-        <div className="editor-footer">
-          <div className="editor-footer-hints">
-            {["Drag=Move","Scroll=Resize","Ctrl+Scroll=Rotate","Alt+Scroll=Zoom","Space+Drag=Pan","Arrows=Nudge","Ctrl+Z=Undo","P=Previous"].map(h => (
-              <span key={h}>{h}</span>
-            ))}
-          </div>
-
-          <div className="editor-zoom-controls">
-            {!zoomIsPreset && (
-              <span className="editor-zoom-readout" title="Current zoom (Alt+Scroll)">{Math.round(zoom * 100)}%</span>
+        <Popover open={historyOpen} onClose={() => setHistoryOpen(false)} anchorRef={activityButtonRef} width={340} align="end" label="Activity history">
+          <div className="editor-history-list">
+            {statusHistory.length ? statusHistory.map((entry, index) => (
+              <div key={entry.id} className={index === 0 ? "editor-history-entry is-current" : "editor-history-entry"}>
+                <div className="editor-history-meta">{index === 0 ? "Latest" : entry.time}</div>
+                <div className="editor-history-message">{entry.message}</div>
+              </div>
+            )) : (
+              <div className="editor-history-empty">No editor activity yet.</div>
             )}
-            {zoomPresets.map(({ label, value }) => (
-              <button key={label} className="ed-btn" onClick={() => zoomTo(value)} style={{
-                padding:"2px 6px", fontSize:9, cursor:"pointer", fontFamily:"inherit", borderRadius:3,
-                border:`1px solid ${zoom===value ? "var(--accent)" : "transparent"}`,
-                background: zoom===value ? "color-mix(in srgb,var(--accent) 12%,transparent)" : "transparent",
-                color: zoom===value ? "var(--accent)" : C.dim,
-                fontWeight: zoom===value ? 700 : 400,
-              }}>{label}</button>
-            ))}
           </div>
-        </div>
+        </Popover>
+
+        <Popover open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} anchorRef={shortcutsRef} width={300} align="end" label="Shortcuts">
+          <dl className="editor-shortcuts">
+            {SHORTCUTS.map(([action, keys]) => (
+              <div key={action} className="editor-shortcut">
+                <dt>{action}</dt>
+                <dd>{keys}</dd>
+              </div>
+            ))}
+          </dl>
+        </Popover>
       </div>
 
-      {/* ── Sidebar ───────────────────────────────────────────────── */}
-      <aside className="editor-sidebar">
-        {/* Scrollable content */}
+      {/* ── Tools panel ───────────────────────────────────────────── */}
+      <ResizablePanel
+        prefKey="editor.tools"
+        side="right"
+        defaultWidth={320}
+        min={260}
+        max={460}
+        collapsed={toolsCollapsed}
+        className="editor-sidebar"
+        aria-label="Tools"
+      >
         <div key={sidebarResetKey} className="editor-sidebar-scroll">
 
-          <CollSection label="Source" defaultOpen={false}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:4, marginBottom:4 }}>
-              <Btn className="ed-btn" onClick={async () => {
+          {/* ── Template ── */}
+          <Section title="Template" prefKey="editor.template">
+            <TemplatePicker
+              templates={templates}
+              value={template}
+              onChange={onTemplateChange}
+              onClosed={() => containerRef.current?.focus({ preventScroll: true })}
+            />
+            <Checkbox
+              checked={autoTemplateMatch}
+              onChange={e => toggleAutoTemplateMatch(e.target.checked)}
+              label="Auto-match from file name"
+              title="Pick the template whose file-name words (Templates screen) appear in the photo's name"
+            />
+            {templateMatchInfo && templateMatchInfo.name === template && (
+              <p className="editor-note">Matched “{templateMatchInfo.keyword}” in the file name</p>
+            )}
+            {templates[template]?.hint && <p className="ui-hint">{templates[template].hint}</p>}
+            {templates[template]?.ref_image && <RefImage key={template} src={templateRefSrc} />}
+            {!!templates[template]?.ref_image && (
+              <div className="editor-ref-controls">
+                <Checkbox checked={showRefOnCanvas} onChange={e => setShowRefOnCanvas(e.target.checked)} label="Show reference on canvas" />
+                <span className="ui-row-label">Reference opacity</span>
+                <Slider
+                  label="Reference opacity"
+                  min={0.15}
+                  max={0.35}
+                  step={0.01}
+                  decimals={0}
+                  suffix="%"
+                  value={refOpacity}
+                  display={v => Math.round(v * 100)}
+                  parse={v => v / 100}
+                  onChange={setRefOpacity}
+                  disabled={!showRefOnCanvas}
+                />
+              </div>
+            )}
+          </Section>
+
+          {/* ── Placement ── */}
+          <Section title="Placement" prefKey="editor.placement">
+            <div className="editor-grid editor-grid-2">
+              {snapBtns.map(({ lbl, zone }) => (
+                <button
+                  key={zone}
+                  type="button"
+                  className={activeSnapZone === zone ? "editor-zone-button is-active" : "editor-zone-button"}
+                  aria-pressed={activeSnapZone === zone}
+                  title={`Snap to the ${zone} guide`}
+                  onClick={() => snapTo(zone)}
+                >
+                  <span className="ui-dot" style={{ background: zoneColor(zone) }} aria-hidden="true" />
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            <div className="editor-grid editor-grid-4">
+              <Button size="m" icon={Scan} title="Whole photo visible, touching two canvas edges" onClick={() => snapToFull("fit")}>Fit</Button>
+              <Button size="m" icon={Maximize} title="Cover the whole canvas; edges that stick out are cut off" onClick={() => snapToFull("fill")}>Fill</Button>
+              <Button size="m" icon={AlignHorizontalJustifyCenter} title="Center horizontally" onClick={() => doAlign("h")}>H</Button>
+              <Button size="m" icon={AlignVerticalJustifyCenter} title="Center vertically" onClick={() => doAlign("v")}>V</Button>
+            </div>
+          </Section>
+
+          {/* ── Transform ── */}
+          <Section title="Scale" prefKey="editor.scale">
+            <Checkbox checked={scaleLocked} onChange={e => setScaleLocked(e.target.checked)} label="Lock scale" />
+            <Slider
+              label="Scale"
+              min={0.05}
+              max={3}
+              step={0.005}
+              decimals={3}
+              value={sel?.scale ?? 1.0}
+              disabled={scaleLocked || !sel}
+              onChange={v => { if (scaleLocked || !selId) return; setItems(prev => prev.map(it => it.id === selId ? { ...it, scale: v } : it)); }}
+              onTypedChange={v => {
+                if (scaleLocked || !sel) return;
+                undoRef.current = undoSnapshot(sel);
+                setItems(prev => prev.map(it => it.id === selId ? { ...it, scale: v } : it));
+              }}
+            />
+            <div className="editor-grid editor-grid-4">
+              {[["−5%", -0.05], ["−1%", -0.01], ["+1%", 0.01], ["+5%", 0.05]].map(([l, d]) => (
+                <Button key={l} size="m" onClick={() => nudgeScale(d)} disabled={scaleLocked || !sel}>{l}</Button>
+              ))}
+            </div>
+            {sel && selIsEnlarged && (
+              <div className="editor-callout" role="status">
+                <TriangleAlert size={14} aria-hidden="true" />
+                <div>
+                  <strong>Enlarged to {Math.round(selEnlargement * 100)}% of the original</strong>
+                  <span>
+                    The source is only {sel.origW}×{sel.origH}px, so the saved image will look soft.
+                    It stays sharp up to scale {(CANVAS_SIZE / exportSizeNow).toFixed(3)}. Reduce the
+                    scale or use a larger source image.
+                  </span>
+                </div>
+              </div>
+            )}
+            {otherEnlargedCount > 0 && (
+              <div className="editor-callout" role="status">
+                <TriangleAlert size={14} aria-hidden="true" />
+                <div>
+                  <span>
+                    {otherEnlargedCount} other item{otherEnlargedCount > 1 ? "s are" : " is"} enlarged past
+                    {otherEnlargedCount > 1 ? " their" : " its"} original size.
+                  </span>
+                </div>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Rotate" prefKey="editor.rotate">
+            <Slider
+              label="Rotation"
+              min={-180}
+              max={180}
+              step={0.1}
+              decimals={1}
+              suffix="°"
+              value={sel?.rotation ?? 0}
+              disabled={!sel}
+              onPointerDown={() => { if (sel) undoRef.current = undoSnapshot(sel); }}
+              onChange={v => { if (!selId) return; const r = normalizeRotation(v); setItems(prev => prev.map(it => it.id === selId ? { ...it, rotation: r } : it)); }}
+              onTypedChange={v => {
+                if (!sel) return;
+                undoRef.current = undoSnapshot(sel);
+                const r = normalizeRotation(v);
+                setItems(prev => prev.map(it => it.id === selId ? { ...it, rotation: r } : it));
+              }}
+            />
+            <div className="editor-grid editor-grid-5">
+              {[["−90°", -90, true], ["−1°", -1, true], ["0°", 0, false], ["+1°", 1, true], ["+90°", 90, true]].map(([l, d, relative]) => (
+                <Button key={l} size="m" onClick={() => setRotation(d, { relative })} disabled={!sel}>{l}</Button>
+              ))}
+            </div>
+            <p className="ui-hint">Ctrl+Scroll on the canvas rotates; hold Shift for 0.1° steps.</p>
+          </Section>
+
+          {/* ── Canvas ── */}
+          <Section title="Canvas" prefKey="editor.canvas" defaultOpen={false}>
+            <div className="ui-row">
+              <label className="ui-row-label" htmlFor="editor-bg-hex">Background</label>
+              <div className="editor-color">
+                <input
+                  type="color"
+                  aria-label="Background color"
+                  value={canvasBgColor}
+                  onChange={e => setCanvasBgColor(e.target.value)}
+                />
+                <TextField
+                  id="editor-bg-hex"
+                  mono
+                  value={canvasBgColor}
+                  maxLength={7}
+                  onChange={e => { const v = e.target.value; if (/^#[0-9a-fA-F]{0,6}$/.test(v)) setCanvasBgColor(v); }}
+                />
+              </div>
+            </div>
+            <p className="ui-hint">Preview only. Saved images always keep a transparent background.</p>
+          </Section>
+
+          {/* ── Items ── */}
+          {items.length > 0 && (
+            <Section title="Items" prefKey="editor.items" defaultOpen={false} badge={items.length}>
+              <div className="editor-items">
+                {items.map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={item.id === selId ? "editor-item is-active" : "editor-item"}
+                    aria-pressed={item.id === selId}
+                    onClick={() => setSelId(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <Button variant="danger" icon={Trash2} onClick={removeSelected} disabled={!sel}>
+                Remove item <kbd className="ui-kbd">Del</kbd>
+              </Button>
+            </Section>
+          )}
+
+          {/* ── Output ── */}
+          <Section title="Output" prefKey="editor.output" defaultOpen={false}>
+            <Switch
+              checked={generateThumbnail}
+              onChange={toggleGenerateThumbnail}
+              label="Generate thumbnail"
+            />
+            <p className="ui-hint">Save a {thumbnailSize}px preview copy in a thumbnail folder next to the final image.</p>
+            {isSingleImageMode ? (
+              <p className="ui-hint">
+                Single image export downloads {generateThumbnail ? "the final PNG and thumbnail PNG" : "the final PNG only"} without writing to a batch output folder.
+              </p>
+            ) : (
+              /* Passes the session folder so Explorer opens the folder the images came from/go to. */
+              <Button icon={FolderOpen} onClick={() => openFolder(activeOutputDir || srcFolder).catch(() => {})}>
+                Open output folder
+              </Button>
+            )}
+          </Section>
+
+          {/* ── Source ── */}
+          <Section title="Source" prefKey="editor.source" defaultOpen={false}>
+            <div className="editor-source-row">
+              <Button icon={FolderOpen} onClick={async () => {
                 let path = "";
                 try {
                   ({ path } = await browseFolder(srcFolder));
@@ -2133,302 +2372,25 @@ export default function Editor({ outputDir = "", canvasSize: canvasSizeProp = nu
                 await initFromFolder(path, 0).catch((e) => {
                   setStatus(`folder load failed: ${e.message}`);
                 });
-              }} style={{ fontSize:10, color:C.dim, textAlign:"center", marginBottom:0 }}>
-                📂 Change Source Folder
-              </Btn>
-              <button className="ed-btn" onClick={() => {
-                initFromFolder(srcFolder, 0).catch((e) => {
-                  setStatus(`reload failed: ${e.message}`);
-                });
-              }} disabled={!srcFolder || isSingleImageMode} style={{
-                border:`1px solid ${C.border}`, background:C.panel2, color:C.dim, borderRadius:5,
-                padding:"0 8px", fontSize:10, cursor:"pointer", fontFamily:"inherit"
-              }}>↺ Reload</button>
-            </div>
-            <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer", marginBottom:2 }}>
-              <input type="checkbox" checked={comboMode} onChange={e=>setComboMode(e.target.checked)} />
-              Combo mode
-            </label>
-          </CollSection>
-
-          {/* ── Template ── */}
-          <CollSection label="Template" defaultOpen>
-          <select value={template} onChange={e => onTemplateChange(e.target.value)} style={{
-            background:C.panel2, color:C.text, border:`1px solid ${C.border}`, borderRadius:5,
-            padding:"5px 7px", fontSize:11, width:"100%", marginBottom:3,
-            fontFamily:"inherit", colorScheme:"dark light",
-          }}>
-            <option value="— none —" style={{ background:"var(--panel2)", color:"var(--text)" }}>— none —</option>
-            {Object.keys(templates).filter(k => k !== "— none —").map(k => (
-              <option key={k} value={k} style={{ background:"var(--panel2)", color:"var(--text)" }}>{k}</option>
-            ))}
-          </select>
-          <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer", margin:"2px 0 4px" }}
-            title="Pick the template whose file-name words (Templates screen) appear in the photo's name">
-            <input type="checkbox" checked={autoTemplateMatch} onChange={e => toggleAutoTemplateMatch(e.target.checked)} />
-            Auto-match from file name
-          </label>
-          {templateMatchInfo && templateMatchInfo.name === template && (
-            <div style={{ fontSize:10, color:"var(--accent)", marginBottom:3, paddingLeft:2, lineHeight:1.4 }}>
-              Matched “{templateMatchInfo.keyword}” in the file name
-            </div>
-          )}
-          {templates[template]?.hint && (
-            <div style={{ fontSize:10, color:C.dim, marginBottom:3, paddingLeft:2, lineHeight:1.4 }}>
-              {templates[template].hint}
-            </div>
-          )}
-          {templates[template]?.ref_image && (
-            <RefImage
-              key={template}
-              src={templateRefSrc}
-            />
-          )}
-          {!!templates[template]?.ref_image && (
-            <div style={{ marginBottom:5, padding:"4px 6px", border:`1px solid ${C.border}`, borderRadius:5, background:C.panel2 }}>
-              <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer", marginBottom:4 }}>
-                <input type="checkbox" checked={showRefOnCanvas} onChange={e => setShowRefOnCanvas(e.target.checked)} />
-                Show ref on canvas
-              </label>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:2 }}>
-                <span style={{ fontSize:9, color:C.dim }}>Ref opacity</span>
-                <span style={{ fontSize:9, color:C.dim, fontFamily:"JetBrains Mono" }}>{Math.round(refOpacity * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min={0.15}
-                max={0.35}
-                step={0.01}
-                value={refOpacity}
-                onChange={e => setRefOpacity(parseFloat(e.target.value))}
-                disabled={!showRefOnCanvas}
-                style={{ width:"100%" }}
+              }}>
+                Change source folder
+              </Button>
+              <IconButton
+                icon={RotateCcw}
+                label="Reload source folder"
+                variant="secondary"
+                disabled={!srcFolder || isSingleImageMode}
+                onClick={() => {
+                  initFromFolder(srcFolder, 0).catch((e) => {
+                    setStatus(`reload failed: ${e.message}`);
+                  });
+                }}
               />
             </div>
-          )}
-          </CollSection>
-
-          {/* ── Snap & Align ── */}
-          <CollSection label="Snap & Align" defaultOpen>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, marginBottom:5 }}>
-              {snapBtns.map(({ lbl, zone, col }) => (
-                <button key={zone} className="ed-btn" onClick={() => { snapTo(zone); }} style={{
-                  background: activeSnapZone===zone ? `color-mix(in srgb, ${col} 25%, transparent)` : `color-mix(in srgb, ${col} 10%, transparent)`,
-                  color:col, border:`1px solid color-mix(in srgb, ${col} ${activeSnapZone===zone ? 60 : 30}%, transparent)`,
-                  borderRadius:5, padding:"6px 0", fontSize:12, fontWeight:800,
-                  cursor:"pointer", fontFamily:"inherit", textAlign:"center",
-                  boxShadow: activeSnapZone===zone ? `0 0 8px color-mix(in srgb, ${col} 30%, transparent)` : "none",
-                  transition:"all 0.15s",
-                }}>{lbl}</button>
-              ))}
-            </div>
-            <div style={{ display:"flex", gap:3, marginBottom:6 }}>
-              <button className="ed-btn" onClick={() => snapToFull("fit")} title="Whole photo visible, touching two canvas edges" style={{
-                flex:1.4, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-                borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
-                display:"flex", alignItems:"center", justifyContent:"center", gap:4,
-              }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
-                  <path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
-                </svg>
-                Fit
-              </button>
-              <button className="ed-btn" onClick={() => snapToFull("fill")} title="Cover the whole canvas; edges that stick out are cut off" style={{
-                flex:1.4, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-                borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
-                display:"flex", alignItems:"center", justifyContent:"center", gap:4,
-              }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>
-                </svg>
-                Fill
-              </button>
-              <button className="ed-btn" onClick={()=>doAlign("h")} style={{
-                flex:1, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-                borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
-                display:"flex", alignItems:"center", justifyContent:"center", gap:3,
-              }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2 12h20"/><path d="M10 16v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4"/>
-                  <path d="M10 8V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v4"/>
-                  <path d="M20 16v1a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-1"/><path d="M14 8V7c0-1.1.9-2 2-2h2a2 2 0 0 1 2 2v1"/>
-                </svg>
-                H
-              </button>
-              <button className="ed-btn" onClick={()=>doAlign("v")} style={{
-                flex:1, background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-                borderRadius:5, padding:"5px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit",
-                display:"flex", alignItems:"center", justifyContent:"center", gap:3,
-              }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2v20"/><path d="M8 10H4a2 2 0 0 1-2-2V6c0-1.1.9-2 2-2h4"/>
-                  <path d="M16 10h4a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-4"/>
-                  <path d="M8 20H7a2 2 0 0 1-2-2v-2c0-1.1.9-2 2-2h1"/><path d="M16 14h1a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-1"/>
-                </svg>
-                V
-              </button>
-            </div>
-          </CollSection>
-
-          {/* ── Scale ── */}
-          <CollSection label="Scale" defaultOpen>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
-              <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.dim, cursor:"pointer" }}>
-                <input type="checkbox" checked={scaleLocked} onChange={e=>setScaleLocked(e.target.checked)} style={{ accentColor:"var(--red)" }} />
-                Lock
-              </label>
-              {sel && (
-                <span style={{
-                  fontSize:10, fontFamily:"JetBrains Mono", color:C.text,
-                  background:C.panel2, border:`1px solid ${C.border}`, borderRadius:4, padding:"1px 6px",
-                }}>{sel.scale.toFixed(3)}</span>
-              )}
-            </div>
-            <input type="range" min={0.05} max={3.0} step={0.005}
-              value={sel?.scale ?? 1.0}
-              onChange={e => { if (scaleLocked||!selId) return; setItems(prev => prev.map(it => it.id===selId ? {...it,scale:parseFloat(e.target.value)} : it)); }}
-              disabled={scaleLocked||!sel}
-              style={{ width:"100%", marginBottom:4 }}
-            />
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, marginBottom:2 }}>
-              {[["−5%",-0.05],["−1%",-0.01],["+1%",0.01],["+5%",0.05]].map(([l,d]) => (
-                <button key={l} className="ed-btn" onClick={()=>nudgeScale(d)} style={{
-                  background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-                  borderRadius:4, padding:"4px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit", textAlign:"center",
-                }}>{l}</button>
-              ))}
-            </div>
-            {sel && selIsEnlarged && (
-              <div className="editor-enlarge-warning" role="status">
-                <strong>⚠ Enlarged to {Math.round(selEnlargement * 100)}% of the original</strong>
-                <span>
-                  The source is only {sel.origW}×{sel.origH}px, so the saved image will look soft.
-                  It stays sharp up to scale {(CANVAS_SIZE / exportSizeNow).toFixed(3)}. Reduce the
-                  scale or use a larger source image.
-                </span>
-              </div>
-            )}
-            {otherEnlargedCount > 0 && (
-              <div className="editor-enlarge-warning" role="status">
-                <span>
-                  ⚠ {otherEnlargedCount} other item{otherEnlargedCount > 1 ? "s are" : " is"} enlarged past
-                  {otherEnlargedCount > 1 ? " their" : " its"} original size.
-                </span>
-              </div>
-            )}
-          </CollSection>
-
-          {/* ── Rotate ── */}
-          <CollSection label="Rotate" defaultOpen>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
-              <span style={{ fontSize:10, color:C.dim }}>Ctrl+Scroll · Shift for 0.1°</span>
-              {sel && (
-                <span style={{
-                  fontSize:10, fontFamily:"JetBrains Mono", color:C.text,
-                  background:C.panel2, border:`1px solid ${C.border}`, borderRadius:4, padding:"1px 6px",
-                }}>{(sel.rotation || 0).toFixed(1)}°</span>
-              )}
-            </div>
-            <input type="range" min={-180} max={180} step={0.1}
-              value={sel?.rotation ?? 0}
-              onPointerDown={() => { if (sel) undoRef.current = undoSnapshot(sel); }}
-              onChange={e => { if (!selId) return; const v = normalizeRotation(parseFloat(e.target.value)); setItems(prev => prev.map(it => it.id===selId ? {...it,rotation:v} : it)); }}
-              disabled={!sel}
-              style={{ width:"100%", marginBottom:4 }}
-            />
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:3, marginBottom:2 }}>
-              {[["−90°",-90,true],["−1°",-1,true],["0°",0,false],["+1°",1,true],["+90°",90,true]].map(([l,d,relative]) => (
-                <button key={l} className="ed-btn" onClick={()=>setRotation(d, { relative })} disabled={!sel} style={{
-                  background:C.panel2, color:C.dim, border:`1px solid ${C.border}`,
-                  borderRadius:4, padding:"4px 0", fontSize:10, cursor:"pointer", fontFamily:"inherit", textAlign:"center",
-                }}>{l}</button>
-              ))}
-            </div>
-          </CollSection>
-
-          {/* ── Canvas Settings ── */}
-          <CollSection label="Canvas" defaultOpen={false}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-              <span style={{ fontSize:10, color:C.dim }}>Background</span>
-              <div style={{ display:"flex", alignItems:"center", gap:5 }}>
-                <input type="color" value={canvasBgColor} onChange={e=>setCanvasBgColor(e.target.value)}
-                  style={{ width:24, height:24, border:`1px solid ${C.border}`, borderRadius:4, cursor:"pointer", padding:1 }} />
-                <input type="text" value={canvasBgColor}
-                  onChange={e => { const v=e.target.value; if(/^#[0-9a-fA-F]{0,6}$/.test(v)) setCanvasBgColor(v); }}
-                  maxLength={7}
-                  style={{ width:64, background:C.panel2, color:C.text, border:`1px solid ${C.border}`, borderRadius:4, padding:"3px 5px", fontSize:10, fontFamily:"JetBrains Mono", textAlign:"center" }}
-                />
-              </div>
-            </div>
-          </CollSection>
-
-          {/* ── Canvas Items ── */}
-          {items.length > 0 && (
-             <CollSection label="Items" defaultOpen={false}>
-              <div style={{ display:"flex", flexDirection:"column", gap:2, marginBottom:2 }}>
-                {items.map(item => (
-                  <button key={item.id} className="ed-btn" onClick={() => setSelId(item.id)} style={{
-                    background: item.id===selId ? "color-mix(in srgb,var(--accent) 12%,var(--panel2))" : C.panel2,
-                    color: item.id===selId ? C.text : C.dim,
-                    border:`1px solid ${item.id===selId ? "var(--accent)" : C.border}`,
-                    borderLeft: `3px solid ${item.id===selId ? "var(--accent)" : "transparent"}`,
-                    borderRadius:5, padding:"4px 8px", fontSize:10,
-                    cursor:"pointer", textAlign:"left", fontFamily:"JetBrains Mono",
-                    minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                  }}>
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-              <button type="button" className="ed-btn editor-remove-item" onClick={removeSelected}>
-                Remove item <kbd>Del</kbd>
-              </button>
-            </CollSection>
-          )}
-
-          {/* ── Output ── */}
-          <CollSection label="Output" defaultOpen={false}>
-          <label className="editor-output-toggle">
-            <span className="editor-output-toggle-copy">
-              <strong>Generate thumbnail</strong>
-              <span>Save a {thumbnailSize}px preview copy in a thumbnail folder next to the final image.</span>
-            </span>
-            <input
-              type="checkbox"
-              checked={generateThumbnail}
-              onChange={event => toggleGenerateThumbnail(event.target.checked)}
-            />
-          </label>
-          {isSingleImageMode ? (
-            <div className="editor-single-output-note">
-              Single image export downloads {generateThumbnail ? "the final PNG and thumbnail PNG" : "the final PNG only"} without writing to a batch output folder.
-            </div>
-          ) : (
-            <>
-              {/* BUG-03 FIX: was openFolder() with no arg — opened OUTPUT_ROOT on server.
-                  Now passes srcFolder so Explorer opens the actual session source folder. */}
-              <Btn className="ed-btn" onClick={() => openFolder(activeOutputDir || srcFolder).catch(() => {})} style={{ color:"var(--green)", borderColor:"var(--green-bdr)", textAlign:"center", fontSize:10 }}>
-                📁 Open Output Folder
-              </Btn>
-            </>
-          )}
-          </CollSection>
-
-          <CollSection label="History" defaultOpen={false}>
-            <div className="editor-history-list">
-              {statusHistory.length ? statusHistory.map((entry, index) => (
-                <div key={entry.id} className={index === 0 ? "editor-history-entry is-current" : "editor-history-entry"}>
-                  <div className="editor-history-meta">{index === 0 ? "Current" : entry.time}</div>
-                  <div className="editor-history-message">{entry.message}</div>
-                </div>
-              )) : (
-                <div className="editor-history-empty">No editor activity yet.</div>
-              )}
-            </div>
-          </CollSection>
+            <Checkbox checked={comboMode} onChange={e => setComboMode(e.target.checked)} label="Combo mode" />
+          </Section>
         </div>
-      </aside>
+      </ResizablePanel>
       </div>
       </div>
       <ConfirmModal

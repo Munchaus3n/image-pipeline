@@ -267,3 +267,34 @@ textarea.ui-field { height: auto; padding: 6px 8px; line-height: 1.5; resize: ve
   background: var(--surface-field); color: var(--text-secondary);
   font-family: var(--font-mono); font-size: 11px;
 }
+
+/* ---- Template picker (Editor tools panel) ---- */
+.tpl-picker-trigger {
+  display: flex; align-items: center; gap: var(--space-2);
+  width: 100%; height: var(--control-l); padding: 0 var(--space-2);
+  border: 1px solid var(--border-default); border-radius: var(--radius-m);
+  background: var(--surface-field); color: var(--text-primary);
+  font-size: 13px; font-weight: 600; text-align: left;
+}
+.tpl-picker-trigger:hover { border-color: var(--border-strong); }
+.tpl-picker-trigger[aria-expanded="true"] { border-color: var(--text-primary); }
+.tpl-picker-trigger svg { flex-shrink: 0; color: var(--text-muted); }
+.tpl-picker-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tpl-picker-tools { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border-bottom: 1px solid var(--border-subtle); }
+.tpl-picker-sort { flex: 0 0 auto; }
+.tpl-picker-sort select { width: 124px; }
+
+/* About 8 rows visible, then scrolls. */
+.tpl-picker-list { margin: 0; padding: 4px; list-style: none; max-height: 352px; overflow-y: auto; }
+.tpl-picker-option {
+  display: flex; align-items: center; gap: var(--space-2);
+  min-height: 44px; padding: 0 var(--space-2) 0 4px;
+  border-radius: var(--radius-s); cursor: pointer;
+}
+.tpl-picker-option.is-cursor { background: var(--surface-muted); }
+.tpl-picker-check { display: grid; place-items: center; width: 16px; flex-shrink: 0; }
+.tpl-picker-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tpl-picker-option-name { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-picker-option-sub { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-picker-empty { padding: var(--space-3); color: var(--text-muted); font-size: 12px; text-align: center; }
