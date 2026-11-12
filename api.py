@@ -1530,6 +1530,9 @@ async def run_pipeline(cfg: PipelineConfig):
         # _pipeline_running is already set True by the route handler.
         progress_index = 0
         session_total = 0
+        # The last stage that runs decides what "done" means for a resume.
+        final_stage = "rembg" if cfg.do_rembg else "upscale"
+        current_stage = ""
         done_prefixes = (
             ("__ok_rembg__:", "__skip_rembg__:", "__err_rembg__:")
             if cfg.do_rembg
@@ -1555,13 +1558,31 @@ async def run_pipeline(cfg: PipelineConfig):
             with _session_file_lock:
                 _write_json_atomic(SESSION_FILE, payload)
 
-        def _update_session_progress(line: str):
-            nonlocal progress_index
-            if not any(prefix in line for prefix in done_prefixes):
+        def _session_progress_changed(line: str) -> bool:
+            """Updates the resume counters from one pipeline line; True when the file needs rewriting."""
+            nonlocal progress_index, session_total, current_stage
+            if line.startswith("__stage_start__:"):
+                current_stage = line[len("__stage_start__:"):].strip()
+                return False
+            if line.startswith("__total__:") and current_stage == final_stage:
+                # Unique images the final stage will handle (duplicates excluded), the same
+                # unit the done-tokens below count in, so "remaining" is not overstated.
+                try:
+                    session_total = int(line[len("__total__:"):].strip())
+                except ValueError:
+                    return False
+                return True
+            if any(prefix in line for prefix in done_prefixes):
+                progress_index += 1
+                return True
+            return False
+
+        async def _update_session_progress(line: str):
+            if not _session_progress_changed(line):
                 return
-            progress_index += 1
             try:
-                _write_pipeline_session(progress_index)
+                # Off the event loop: the atomic write can retry with sleeps on Windows.
+                await asyncio.to_thread(_write_pipeline_session, progress_index)
             except Exception:
                 pass
 
@@ -1598,12 +1619,12 @@ async def run_pipeline(cfg: PipelineConfig):
                 pending = lines.pop() if lines else b""
                 for raw_line in lines:
                     for line in _clean(raw_line):
-                        _update_session_progress(line)
+                        await _update_session_progress(line)
                         yield {"data": line}
 
             if pending:
                 for line in _clean(pending):
-                    _update_session_progress(line)
+                    await _update_session_progress(line)
                     yield {"data": line}
 
             await proc.wait()

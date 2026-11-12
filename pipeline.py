@@ -1140,6 +1140,23 @@ def remove_bg(
 
 # ── Batch stages ───────────────────────────────────────────────────────────────
 
+def _progress_id(dst: Path, dst_root: Path) -> str:
+    """Stable per-image id for progress tokens: the output's path relative to its stage root.
+
+    Two images with the same file name in different sub-folders get different ids, and the
+    id is identical in both stages (the stages mirror the same relative paths).
+    """
+    try:
+        return dst.relative_to(dst_root).as_posix()
+    except ValueError:
+        return dst.name
+
+
+def _processing_token(stage: str, pid: str, src: Path) -> str:
+    # "<id>|<absolute path>": '|' cannot appear in a Windows file name, so the split is safe.
+    return f"__processing_image__:{stage}:{pid}|{src}"
+
+
 def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                   model: str, scale: str,
                   upscale_max_px: int = 0,
@@ -1153,6 +1170,7 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
     for src in images:
         dst = mirror_path(src, src_root, dst_root)
         outputs.append(dst)
+        pid = _progress_id(dst, dst_root)
 
         # 1. Valid file already exists → skip
         already_done = False
@@ -1165,8 +1183,8 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
 
         if already_done:
             skip(f"{src.name} (already upscaled)")
-            print(f"__processing_image__:upscale:{src}", flush=True)
-            print(f"__skip_upscale__:{src.name}", flush=True)
+            print(_processing_token("upscale", pid, src), flush=True)
+            print(f"__skip_upscale__:{pid}", flush=True)
             continue
 
         # 2. Image already large enough → skip upscale, use original
@@ -1174,14 +1192,14 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
             w, h = _image_size_checked(src)
             if upscale_max_px > 0 and max(w, h) >= upscale_max_px:
                 skip(f"{src.name} ({w}×{h} — already ≥ {upscale_max_px}px)")
-                print(f"__processing_image__:upscale:{src}", flush=True)
-                print(f"__skip_upscale__:{src.name}", flush=True)
+                print(_processing_token("upscale", pid, src), flush=True)
+                print(f"__skip_upscale__:{pid}", flush=True)
                 outputs[-1] = src
                 continue
         except RuntimeError as e:
             warn(f"{src.name}: {e}")
-            print(f"__processing_image__:upscale:{src}", flush=True)
-            print(f"__err_upscale__:{src.name}", flush=True)
+            print(_processing_token("upscale", pid, src), flush=True)
+            print(f"__err_upscale__:{pid}", flush=True)
             outputs[-1] = src
             if corrupted_dir:
                 _copy_corrupted(src, src_root, corrupted_dir)
@@ -1202,8 +1220,8 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
         task = progress.add_task("Upscaling...", total=len(to_run))
         for out_idx, src, dst in to_run:
             progress.update(task, description=src.name)
-            print(f"__processing_image__:upscale:{src}", flush=True)
-            print(f"__processing__:{src}", flush=True)
+            pid = _progress_id(dst, dst_root)
+            print(_processing_token("upscale", pid, src), flush=True)
             try:
                 upscaled_ok = upscale_ncnn(src, dst, model, scale, out_scale)
             except Exception as e:
@@ -1211,10 +1229,10 @@ def batch_upscale(images: list[Path], src_root: Path, dst_root: Path,
                 upscaled_ok = False
             if upscaled_ok:
                 ok(f"{src.name} → upscaled/{dst.relative_to(dst_root)}")
-                print(f"__ok_upscale__:{src.name}", flush=True)
+                print(f"__ok_upscale__:{pid}", flush=True)
             else:
                 warn(f"{src.name} failed — using original for next stage.")
-                print(f"__err_upscale__:{src.name}", flush=True)
+                print(f"__err_upscale__:{pid}", flush=True)
                 outputs[out_idx] = src
                 if corrupted_dir:
                     _copy_corrupted(src, src_root, corrupted_dir)
@@ -1337,11 +1355,12 @@ def batch_remove_bg(
         )
         dst = dst_root / output_rel(src, rel)
         outputs.append(dst)
+        pid = _progress_id(dst, dst_root)
 
         if dst.exists() and _is_valid_existing_output(dst):
             skip(f"{src.name} (already processed)")
-            print(f"__processing_image__:rembg:{src}", flush=True)
-            print(f"__skip_rembg__:{src.name}", flush=True)
+            print(_processing_token("rembg", pid, src), flush=True)
+            print(f"__skip_rembg__:{pid}", flush=True)
         elif src in no_rembg_paths or src in excluded_paths:
             if dst.exists():
                 warn(f"{src.name} has invalid existing processed output — regenerating.")
@@ -1350,12 +1369,12 @@ def batch_remove_bg(
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tight_crop(_open_image_checked(src).convert("RGBA"), options.crop_padding).save(dst, format="PNG")
                 ok(f"{src.name} → processed/{dst.relative_to(dst_root)}  [dim](crop only)[/dim]")
-                print(f"__processing_image__:rembg:{src}", flush=True)
-                print(f"__skip_rembg__:{src.name}", flush=True)
+                print(_processing_token("rembg", pid, src), flush=True)
+                print(f"__skip_rembg__:{pid}", flush=True)
             except Exception as e:
                 err(f"Crop failed on {src.name}: {e}")
-                print(f"__processing_image__:rembg:{src}", flush=True)
-                print(f"__err_rembg__:{src.name}", flush=True)
+                print(_processing_token("rembg", pid, src), flush=True)
+                print(f"__err_rembg__:{pid}", flush=True)
         else:
             if dst.exists():
                 warn(f"{src.name} has invalid existing processed output — regenerating.")
@@ -1379,12 +1398,12 @@ def batch_remove_bg(
                     prefetch_pool.submit(_prefetch_image, next_src)
 
                 progress.update(task, description=src.name)
-                print(f"__processing_image__:rembg:{src}", flush=True)
-                print(f"__processing__:{src}", flush=True)
+                pid = _progress_id(dst, dst_root)
+                print(_processing_token("rembg", pid, src), flush=True)
 
                 if not src.exists():
                     warn(f"{src.name} source missing — skipping.")
-                    print(f"__err_rembg__:{src.name}", flush=True)
+                    print(f"__err_rembg__:{pid}", flush=True)
                     progress.advance(task)
                     continue
 
@@ -1395,7 +1414,7 @@ def batch_remove_bg(
                     and fallback_enabled
                     and (_is_oom_error(error_msg or "") or _is_gpu_runtime_error(error_msg or ""))
                 ):
-                    print(f"__err_oom_gpu__:{src.name}", flush=True)
+                    print(f"__err_oom_gpu__:{pid}", flush=True)
                     print("__bg_device__:GPU failed -> switched to CPU for remainder", flush=True)
                     warn(f"GPU failed on {src.name} - switching to CPU for remainder of batch.")
                     if cpu_session is None:
@@ -1406,7 +1425,7 @@ def batch_remove_bg(
                             )
                         except Exception as cpu_e:
                             err(f"CPU fallback failed after GPU error on {src.name}: {cpu_e}")
-                            print(f"__err_rembg__:{src.name}", flush=True)
+                            print(f"__err_rembg__:{pid}", flush=True)
                             if corrupted_dir:
                                 _copy_corrupted(src, upscale_root, corrupted_dir)
                                 warn(f"  → copied to corrupted/{src.name}")
@@ -1420,14 +1439,14 @@ def batch_remove_bg(
                     and bg_device_mode == "gpu"
                     and (_is_oom_error(error_msg or "") or _is_gpu_runtime_error(error_msg or ""))
                 ):
-                    print(f"__err_rembg__:{src.name}", flush=True)
+                    print(f"__err_rembg__:{pid}", flush=True)
                     raise RuntimeError(_clean_gpu_error_message(error_msg or "", requested_gpu_provider))
 
                 if success:
                     ok(f"{src.name} → processed/{dst.relative_to(dst_root)}")
-                    print(f"__ok_rembg__:{src.name}", flush=True)
+                    print(f"__ok_rembg__:{pid}", flush=True)
                 else:
-                    print(f"__err_rembg__:{src.name}", flush=True)
+                    print(f"__err_rembg__:{pid}", flush=True)
                     if corrupted_dir:
                         _copy_corrupted(src, upscale_root, corrupted_dir)
                         warn(f"  → copied to corrupted/{src.name}")
@@ -1723,6 +1742,8 @@ def main():
         skip("background removal")
         final_outputs = current
 
+    # Tells the UI the image stages are over, so the bar can show "Finishing…" instead of stalling.
+    print("__stage_start__:finalize", flush=True)
     representative_outputs = dict(zip(processing_images, final_outputs))
     duplicate_outputs = copy_duplicate_outputs(
         duplicate_plan,
