@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
 const TONES = {
-  restarting: { bg: "var(--yellow-bg)", border: "var(--yellow-bdr)", role: "status" },
-  running: { bg: "var(--green-bg)", border: "var(--green-bdr)", role: "status" },
-  failed: { bg: "var(--red-bg)", border: "var(--red-bdr)", role: "alert" },
+  restarting: { className: "is-restarting", role: "status" },
+  running: { className: "is-running", role: "status" },
+  failed: { className: "is-failed", role: "alert" },
 };
 
 function messageFor(status) {
@@ -35,26 +35,7 @@ export default function BackendBanner() {
   if (!tone) return null;
 
   return (
-    <div
-      role={tone.role}
-      style={{
-        position: "fixed",
-        top: 12,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 1000,
-        maxWidth: "min(720px, calc(100vw - 32px))",
-        padding: "10px 16px",
-        border: `1px solid ${tone.border}`,
-        borderRadius: 10,
-        background: tone.bg,
-        color: "var(--text)",
-        fontFamily: "var(--font-sans)",
-        fontSize: 13,
-        lineHeight: 1.45,
-        boxShadow: "0 6px 24px rgba(0, 0, 0, 0.18)",
-      }}
-    >
+    <div role={tone.role} className={`ui-banner ${tone.className}`}>
       {messageFor(status)}
     </div>
   );

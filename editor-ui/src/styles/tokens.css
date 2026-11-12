@@ -8,8 +8,6 @@
 
 /*
  * Design tokens. Light is the base; dark overrides it.
- * Legacy names (--bg, --panel, --text, --accent ...) are kept as aliases at the
- * bottom of each block so screens that have not been migrated keep rendering.
  */
 :root,
 [data-theme="light"] {
@@ -93,44 +91,6 @@
   --z-modal: 200;
   --z-toast: 300;
   --transition: 200ms ease;
-
-  /* Legacy aliases */
-  --bg: var(--surface-app);
-  --panel: var(--surface-panel);
-  --panel2: var(--surface-muted);
-  --border: var(--border-subtle);
-  --text: var(--text-primary);
-  --dim: var(--text-secondary);
-  --dim2: var(--text-muted);
-  --accent: var(--brand);
-  --accent-strong: var(--brand-active);
-  --accent-soft: var(--surface-selected);
-  --accent-fg: var(--text-on-brand);
-  --green: var(--status-positive);
-  --green-bg: var(--status-positive-surface);
-  --green-bdr: var(--status-positive);
-  --red: var(--status-negative);
-  --red-bg: var(--status-negative-surface);
-  --red-bdr: var(--status-negative);
-  --yellow: var(--status-warning);
-  --yellow-bg: var(--status-warning-surface);
-  --yellow-bdr: var(--status-warning);
-  --magenta: var(--zone-magenta);
-  --img-bg: var(--surface-canvas);
-  --surface-elevated: var(--surface-raised);
-  --field-bg: var(--surface-field);
-  --log-bg: var(--surface-app);
-  --log-bg-alt: var(--surface-panel);
-  --preview-bg: var(--surface-panel);
-  --disabled-bg: var(--surface-app);
-  --disabled-text: var(--text-disabled);
-  --scrollbar: var(--border-default);
-  --radius-xs: var(--radius-m);
-  --radius-sm: var(--radius-m);
-  --radius-md: var(--radius-l);
-  --radius-lg: var(--radius-l);
-  --shadow: none;
-  --shadow-lg: var(--shadow-floating);
 }
 
 [data-theme="dark"] {
