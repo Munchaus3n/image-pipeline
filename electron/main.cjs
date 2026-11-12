@@ -69,6 +69,23 @@ function appRoot() {
   return path.resolve(__dirname, "..");
 }
 
+// Where the native backend finds its data (Real-ESRGAN, templates). With
+// asar:false these sit under resources/app; with asar:true the app code is in
+// app.asar and the data is shipped as extraResources under resources/. A native
+// process cannot read inside an asar, so probe for the real on-disk location.
+function backendResourceDir() {
+  if (isDev) return appRoot();
+  const fsMod = require("node:fs");
+  for (const dir of [appRoot(), process.resourcesPath]) {
+    try {
+      if (fsMod.existsSync(path.join(dir, "realesrgan-ncnn-vulkan"))) return dir;
+    } catch {
+      // ignore and try the next candidate
+    }
+  }
+  return appRoot();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     title: APP_NAME,
@@ -220,7 +237,8 @@ async function loadStartupError(error) {
 }
 
 async function openMainWindow() {
-  writeMainLog(`openMainWindow start resourceDir=${appRoot()}`);
+  const resourceDir = backendResourceDir();
+  writeMainLog(`openMainWindow start resourceDir=${resourceDir}`);
   if (!apiPort) apiPort = reuseApi ? LEGACY_PORT : await findFreePort();
 
   // Window first, backend second: the user sees the app respond immediately.
@@ -230,7 +248,7 @@ async function openMainWindow() {
   await startPythonApi({
     packaged: app.isPackaged,
     userDataPath: app.getPath("userData"),
-    resourceDir: appRoot(),
+    resourceDir,
     token: apiToken,
     port: apiPort,
   });

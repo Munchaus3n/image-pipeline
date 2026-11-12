@@ -6,7 +6,8 @@ input/
 output/
 history/
 corrupted/
-templates/
+# templates/ holds the built-in reference images, which are committed on purpose.
+# (It used to be ignored here, which would have hidden any new image added to it.)
 
 # Virtual environments
 venv*/
@@ -33,7 +34,13 @@ settings.json
 editor-ui/dist/
 backend-dist/
 backend-build/
+build-seed/
+*.spec
 dist/
+# Per-version beta installers live on the beta branch's build output
+beta/
+# Local Claude Code workspace settings
+.claude/
 node_modules/
 .vite/
 

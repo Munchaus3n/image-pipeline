@@ -11,8 +11,9 @@
     "electron:build-ui": "npm --prefix editor-ui run build",
     "backend:build": "node scripts/build-backend.cjs",
     "test:electron": "node --test scripts/electron-security.test.cjs",
-    "electron:dist": "npm run electron:build-ui && npm run backend:build && set ELECTRON_RUN_AS_NODE=&& electron-builder",
-    "electron:dist:win": "npm run electron:build-ui && npm run backend:build && set ELECTRON_RUN_AS_NODE=&& electron-builder --win"
+    "electron:dist": "npm run electron:dist:win",
+    "electron:dist:win": "npm run electron:build-ui && npm run backend:build && npm run prepare:seed && set ELECTRON_RUN_AS_NODE=&& electron-builder --win",
+    "prepare:seed": "node scripts/prepare-seed.cjs"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
@@ -23,38 +24,50 @@
   "build": {
     "appId": "com.cutoutstudio.app",
     "productName": "Cutout Studio",
-    "asar": false,
+    "asar": true,
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
+    ],
+    "directories": {
+      "output": "dist/v${version}"
+    },
     "files": [
       "electron/**",
-      "editor-ui/dist/**",
-      "api.py",
-      "pipeline.py",
-      "config.ini",
-      "templates/**",
-      "templates_custom.json",
-      "realesrgan-ncnn-vulkan/**",
-      "!output/**",
-      "!.cache/**",
-      "!session.json",
-      "!settings.json",
-      "!input/**",
-      "!downloaded/**",
-      "!test-images/**",
-      "!backend-dist/**",
-      "!backend-build/**",
-      "!venv311/**",
-      "!__pycache__/**",
-      "!editor-ui/node_modules/**",
-      "!dist/**",
-      "!tatus/**",
-      "!release/**"
+      "editor-ui/dist/**"
     ],
     "extraResources": [
       {
         "from": "backend-dist/image-pipeline-api",
         "to": "backend/image-pipeline-api"
+      },
+      {
+        "from": "realesrgan-ncnn-vulkan",
+        "to": "realesrgan-ncnn-vulkan",
+        "filter": [
+          "**/*",
+          "!models/realesr-animevideov3-x3.*",
+          "!models/realesr-animevideov3-x4.*",
+          "!models/realesrgan-x4plus-anime.*",
+          "!vcomp140d.dll"
+        ]
+      },
+      {
+        "from": "templates",
+        "to": "templates"
+      },
+      {
+        "from": "build-seed/templates_custom.json",
+        "to": "templates_custom.json"
       }
     ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
     "win": {
       "target": [
         "portable",

@@ -78,6 +78,12 @@ const pyinstallerArgs = [
   "pytest",
   "Cython",
   "matplotlib",
+  // Tcl/Tk (about 9 MB): only the /browse fallback dialogs use it, and the desktop app
+  // picks folders with the native Electron dialog instead.
+  "tkinter",
+  "_tkinter",
+  "setuptools",
+  "pkg_resources",
 ].forEach((moduleName) => {
   pyinstallerArgs.push("--exclude-module", moduleName);
 });
