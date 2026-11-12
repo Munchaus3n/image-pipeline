@@ -25,7 +25,7 @@
   background: var(--surface-panel);
 }
 .input-folder-group { flex: 2 1 380px; min-width: 0; display: flex; align-items: center; gap: 4px; }
-.input-folder-group .input-path-field { flex: 1 1 auto; }
+.input-folder-group .input-path-field { flex: 1 1 0; min-width: 120px; }
 .input-filter-group { flex: 1 1 320px; min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
 .input-size { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
 .input-size input { width: 84px; }
